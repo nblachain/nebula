@@ -354,6 +354,7 @@ use crate::{
     monero_l2_pq_bridge_exit_canonical_user_escape_safety_answer_runtime::State as MoneroL2PqBridgeExitCanonicalUserEscapeSafetyAnswerRuntimeState,
     monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_evidence_dossier_runtime::State as MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceEvidenceDossierRuntimeState,
     monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime::State as MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceReplayPlanRuntimeState,
+    monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime::State as MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceReplayPlanExecutionReceiptRuntimeState,
     monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime::State as MoneroL2PqBridgeExitCanonicalUserEscapeSecurityReviewReleaseHoldUnholdDrillRuntimeState,
     monero_l2_pq_bridge_exit_canonical_user_escape_security_review_signoff_reviewer_receipt_gate_runtime::State as MoneroL2PqBridgeExitCanonicalUserEscapeSecurityReviewSignoffReviewerReceiptGateRuntimeState,
     monero_l2_pq_bridge_exit_monero_lock_reorg_fixture_casebook_runtime::State as MoneroL2PqBridgeExitMoneroLockReorgFixtureCasebookRuntimeState,
@@ -3883,6 +3884,8 @@ pub struct DevnetRunner {
         MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceEvidenceDossierRuntimeState,
     pub monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime:
         MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceReplayPlanRuntimeState,
+    pub monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime:
+        MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceReplayPlanExecutionReceiptRuntimeState,
     pub monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime:
         MoneroL2PqBridgeExitCanonicalUserEscapeSecurityReviewReleaseHoldUnholdDrillRuntimeState,
     pub monero_l2_pq_bridge_exit_canonical_user_escape_security_review_signoff_reviewer_receipt_gate_runtime:
@@ -6373,6 +6376,8 @@ impl DevnetRunner {
             crate::monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_evidence_dossier_runtime::devnet();
         let monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime =
             crate::monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime::devnet();
+        let monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime =
+            crate::monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime::devnet();
         let monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime =
             crate::monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime::devnet();
         let monero_l2_pq_bridge_exit_canonical_user_escape_security_review_signoff_reviewer_receipt_gate_runtime =
@@ -7841,6 +7846,7 @@ impl DevnetRunner {
             monero_l2_pq_bridge_exit_canonical_user_escape_safety_answer_runtime,
             monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_evidence_dossier_runtime,
             monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime,
+            monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime,
             monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime,
             monero_l2_pq_bridge_exit_canonical_user_escape_security_review_signoff_reviewer_receipt_gate_runtime,
             monero_l2_pq_bridge_exit_monero_lock_reorg_fixture_casebook_runtime,
@@ -20810,6 +20816,7 @@ impl DevnetRunner {
                 "monero_l2_pq_bridge_exit_canonical_user_escape_safety_answer_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_safety_answer_runtime.state_root(),
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_evidence_dossier_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_evidence_dossier_runtime.state_root(),
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime.state_root(),
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime.state_root(),
                 "monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime.state_root(),
                 "monero_l2_pq_bridge_exit_canonical_user_escape_security_review_signoff_reviewer_receipt_gate_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_security_review_signoff_reviewer_receipt_gate_runtime.state_root(),
                 "monero_l2_pq_bridge_exit_monero_lock_reorg_fixture_casebook_runtime_state_root": self.monero_l2_pq_bridge_exit_monero_lock_reorg_fixture_casebook_runtime.state_root(),
@@ -22708,6 +22715,7 @@ impl DevnetRunner {
             "monero_l2_pq_bridge_exit_canonical_user_escape_safety_answer_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_safety_answer_runtime.state_root(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_evidence_dossier_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_evidence_dossier_runtime.state_root(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime.state_root(),
+            "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime.state_root(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime.state_root(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_security_review_signoff_reviewer_receipt_gate_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_security_review_signoff_reviewer_receipt_gate_runtime.state_root(),
             "monero_l2_pq_bridge_exit_monero_lock_reorg_fixture_casebook_runtime_state_root": self.monero_l2_pq_bridge_exit_monero_lock_reorg_fixture_casebook_runtime.state_root(),
@@ -24998,6 +25006,8 @@ impl DevnetRunner {
             "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_evidence_dossier_runtime_state": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_evidence_dossier_runtime.public_record(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime.state_root(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime_state": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime.public_record(),
+            "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime.state_root(),
+            "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime_state": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_execution_receipt_runtime.public_record(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime.state_root(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime_state": self.monero_l2_pq_bridge_exit_canonical_user_escape_security_review_release_hold_unhold_drill_runtime.public_record(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_security_review_signoff_reviewer_receipt_gate_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_security_review_signoff_reviewer_receipt_gate_runtime.state_root(),
