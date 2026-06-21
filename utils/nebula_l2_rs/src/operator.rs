@@ -2064,6 +2064,27 @@ impl OperatorState {
             ),            OperatorComponentKind::Custom(
                 "monero_l2_pq_bridge_exit_force_exit_wave87_operator_command_checklist_transcript_runtime"
                     .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_compile_runtime_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_runtime_replay_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_audit_security_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_bridge_custody_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_watchtower_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_pq_reserve_privacy_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave88_release_captain_go_no_go_replay_drill_transcript_runtime"
+                    .to_string(),
             ),
             OperatorComponentKind::Custom(
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_challenge_window_monitor_runtime"
@@ -6245,6 +6266,27 @@ impl OperatorState {
                     .to_string(),
             ),            OperatorComponentKind::Custom(
                 "monero_l2_pq_bridge_exit_force_exit_wave87_operator_command_checklist_transcript_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_compile_runtime_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_runtime_replay_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_audit_security_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_bridge_custody_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_watchtower_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_pq_reserve_privacy_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_release_captain_go_no_go_replay_drill_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave88_release_captain_go_no_go_replay_drill_transcript_runtime"
                     .to_string(),
             ),
             OperatorComponentKind::Custom(
