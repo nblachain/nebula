@@ -2351,6 +2351,27 @@ impl OperatorState {
             ),            OperatorComponentKind::Custom(
                 "monero_l2_pq_bridge_exit_force_exit_wave98_live_heavy_gate_release_claim_challenge_window_holdoff_ledger_final_transcript_runtime"
                     .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_compile_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_runtime_replay_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_audit_security_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_bridge_custody_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_wallet_watchtower_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_pq_reserve_privacy_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_final_transcript_runtime"
+                    .to_string(),
             ),
             OperatorComponentKind::Custom(
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_challenge_window_monitor_runtime"
@@ -6819,6 +6840,27 @@ impl OperatorState {
                     .to_string(),
             ),            OperatorComponentKind::Custom(
                 "monero_l2_pq_bridge_exit_force_exit_wave98_live_heavy_gate_release_claim_challenge_window_holdoff_ledger_final_transcript_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_compile_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_runtime_replay_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_audit_security_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_bridge_custody_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_wallet_watchtower_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_pq_reserve_privacy_lane_runtime"
+                    .to_string(),
+            ),            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave99_live_heavy_gate_release_claim_finality_certificate_unlock_guard_final_transcript_runtime"
                     .to_string(),
             ),
             OperatorComponentKind::Custom(
