@@ -2143,6 +2143,34 @@ impl OperatorState {
                     .to_string(),
             ),
             OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_compile_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_runtime_replay_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_audit_security_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_bridge_custody_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_wallet_watchtower_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_pq_reserve_privacy_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_final_transcript_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_challenge_window_monitor_runtime"
                     .to_string(),
             ),
@@ -6399,6 +6427,34 @@ impl OperatorState {
             ),
             OperatorComponentKind::Custom(
                 "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_compile_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_runtime_replay_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_audit_security_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_bridge_custody_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_wallet_watchtower_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_pq_reserve_privacy_receipt_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave91_live_heavy_gate_execution_plan_final_transcript_runtime"
                     .to_string(),
             ),
             OperatorComponentKind::Custom(
