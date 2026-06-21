@@ -2283,6 +2283,34 @@ impl OperatorState {
                     .to_string(),
             ),
             OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_compile_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_runtime_replay_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_audit_security_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_bridge_custody_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_wallet_watchtower_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_pq_reserve_privacy_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_final_transcript_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_challenge_window_monitor_runtime"
                     .to_string(),
             ),
@@ -6679,6 +6707,34 @@ impl OperatorState {
             ),
             OperatorComponentKind::Custom(
                 "monero_l2_pq_bridge_exit_force_exit_wave95_live_heavy_gate_receipt_slot_promotion_final_transcript_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_compile_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_runtime_replay_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_audit_security_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_bridge_custody_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_wallet_watchtower_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_pq_reserve_privacy_lane_runtime"
+                    .to_string(),
+            ),
+            OperatorComponentKind::Custom(
+                "monero_l2_pq_bridge_exit_force_exit_wave96_live_heavy_gate_receipt_release_readiness_quorum_final_transcript_runtime"
                     .to_string(),
             ),
             OperatorComponentKind::Custom(
