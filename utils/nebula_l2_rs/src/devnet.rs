@@ -476,6 +476,13 @@ use crate::{
     monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_wallet_watchtower_gate_runtime::State as MoneroL2PqBridgeExitForceExitWave89ReleaseCaptainNoGoEvidenceArchiveWalletWatchtowerGateRuntimeState,
     monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime::State as MoneroL2PqBridgeExitForceExitWave89ReleaseCaptainNoGoEvidenceArchivePqReservePrivacyGateRuntimeState,
     monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime::State as MoneroL2PqBridgeExitForceExitWave89ReleaseCaptainNoGoEvidenceArchiveFinalTranscriptRuntimeState,
+    monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime::State as MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestCompileBlockerRuntimeState,
+    monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime::State as MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestRuntimeReplayBlockerRuntimeState,
+    monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime::State as MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestAuditSecurityBlockerRuntimeState,
+    monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime::State as MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestBridgeCustodyBlockerRuntimeState,
+    monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime::State as MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestWalletWatchtowerBlockerRuntimeState,
+    monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime::State as MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestPqReservePrivacyBlockerRuntimeState,
+    monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime::State as MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestFinalTranscriptRuntimeState,
     monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime::State as MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceForceExitPackageWalletScanReceiptObserverRuntimeState,
     monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_wallet_escape_transcript_runtime::State as MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceWalletEscapeTranscriptRuntimeState,
     monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime::State as MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceReplayPlanRuntimeState,
@@ -4253,6 +4260,20 @@ pub struct DevnetRunner {
         MoneroL2PqBridgeExitForceExitWave89ReleaseCaptainNoGoEvidenceArchivePqReservePrivacyGateRuntimeState,
     pub monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime:
         MoneroL2PqBridgeExitForceExitWave89ReleaseCaptainNoGoEvidenceArchiveFinalTranscriptRuntimeState,
+    pub monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime:
+        MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestCompileBlockerRuntimeState,
+    pub monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime:
+        MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestRuntimeReplayBlockerRuntimeState,
+    pub monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime:
+        MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestAuditSecurityBlockerRuntimeState,
+    pub monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime:
+        MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestBridgeCustodyBlockerRuntimeState,
+    pub monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime:
+        MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestWalletWatchtowerBlockerRuntimeState,
+    pub monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime:
+        MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestPqReservePrivacyBlockerRuntimeState,
+    pub monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime:
+        MoneroL2PqBridgeExitForceExitWave90ProductionReadinessDenialManifestFinalTranscriptRuntimeState,
     pub monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime:
         MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceForceExitPackageWalletScanReceiptObserverRuntimeState,
     pub monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_wallet_escape_transcript_runtime:
@@ -6995,6 +7016,20 @@ impl DevnetRunner {
             crate::monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime::devnet();
         let monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime =
             crate::monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime::devnet();
+        let monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime =
+            crate::monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime::devnet();
+        let monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime =
+            crate::monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime::devnet();
+        let monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime =
+            crate::monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime::devnet();
+        let monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime =
+            crate::monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime::devnet();
+        let monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime =
+            crate::monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime::devnet();
+        let monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime =
+            crate::monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime::devnet();
+        let monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime =
+            crate::monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime::devnet();
         let monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime =
             crate::monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime::devnet();
         let monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_wallet_escape_transcript_runtime =
@@ -8593,6 +8628,13 @@ impl DevnetRunner {
             monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_wallet_watchtower_gate_runtime,
             monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime,
             monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime,
+            monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime,
+            monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime,
+            monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime,
+            monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime,
+            monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime,
+            monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime,
+            monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime,
             monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime,
             monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_wallet_escape_transcript_runtime,
             monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime,
@@ -21688,6 +21730,13 @@ impl DevnetRunner {
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_wallet_watchtower_gate_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_wallet_watchtower_gate_runtime.state_root()),
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime.state_root()),
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime.state_root()),
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_compile_runtime_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_incident_handoff_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_compile_runtime_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_incident_handoff_runtime.state_root(),
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_runtime_replay_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_incident_handoff_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_runtime_replay_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_incident_handoff_runtime.state_root(),
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_audit_security_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_incident_handoff_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_audit_security_accepted_live_evidence_operator_dashboard_release_policy_deployment_guard_rollback_drill_incident_handoff_runtime.state_root(),
@@ -21716,6 +21765,13 @@ impl DevnetRunner {
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_wallet_watchtower_gate_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_wallet_watchtower_gate_runtime.state_root()),
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime.state_root()),
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime.state_root()),
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime.state_root(),
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_wallet_escape_transcript_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_wallet_escape_transcript_runtime.state_root(),
                 "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_replay_plan_runtime.state_root(),
@@ -26242,6 +26298,13 @@ impl DevnetRunner {
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_wallet_watchtower_gate_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_wallet_watchtower_gate_runtime.state_root()),
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime.state_root()),
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime.state_root()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime_state_root": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime.state_root()),
             "monero_l2_pq_bridge_exit_force_exit_wave88_release_captain_go_no_go_replay_drill_transcript_runtime_state": self.monero_l2_pq_bridge_exit_force_exit_wave88_release_captain_go_no_go_replay_drill_transcript_runtime.public_record(),
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_compile_gate_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_compile_gate_runtime.public_record()),
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_runtime_replay_gate_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_runtime_replay_gate_runtime.public_record()),
@@ -26250,6 +26313,13 @@ impl DevnetRunner {
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_wallet_watchtower_gate_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_wallet_watchtower_gate_runtime.public_record()),
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_pq_reserve_privacy_gate_runtime.public_record()),
             "monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave89_release_captain_no_go_evidence_archive_final_transcript_runtime.public_record()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_compile_blocker_runtime.public_record()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_runtime_replay_blocker_runtime.public_record()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_audit_security_blocker_runtime.public_record()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_bridge_custody_blocker_runtime.public_record()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_wallet_watchtower_blocker_runtime.public_record()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_pq_reserve_privacy_blocker_runtime.public_record()),
+            "monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime_state": format!("{:?}", self.monero_l2_pq_bridge_exit_force_exit_wave90_production_readiness_denial_manifest_final_transcript_runtime.public_record()),
             "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime.state_root(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime_state": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_force_exit_package_wallet_scan_receipt_observer_runtime.public_record(),
             "monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_wallet_escape_transcript_runtime_state_root": self.monero_l2_pq_bridge_exit_canonical_user_escape_answer_vertical_slice_wallet_escape_transcript_runtime.state_root(),
