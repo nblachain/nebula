@@ -7748,6 +7748,13 @@ fn public_deployment_capture_audit(
         duplicate_bootstrap_node_probe_slots,
         bootstrap_node_count_valid,
         bootstrap_node_probe_coverage_valid,
+        bootstrap_operator_count,
+        bootstrap_operator_registry_count,
+        missing_bootstrap_operator_registry_commitments,
+        extra_bootstrap_operator_registry_commitments,
+        duplicate_bootstrap_operator_registry_commitments,
+        bootstrap_operator_count_valid,
+        bootstrap_operator_registry_coverage_valid,
         probe_observer_count,
         probe_observer_region_count,
         invalid_probe_observer_region_indexes,
@@ -7835,6 +7842,8 @@ fn public_deployment_capture_audit(
                     .unwrap_or(true);
                 let bootstrap_coverage =
                     public_bootstrap_node_probe_coverage_audit(&value);
+                let operator_registry_coverage =
+                    public_bootstrap_operator_registry_coverage_audit(&value);
                 let observer_count = value
                     .get("probe_observers")
                     .and_then(Value::as_array)
@@ -7936,6 +7945,13 @@ fn public_deployment_capture_audit(
                     bootstrap_coverage.duplicate_probe_slots,
                     bootstrap_coverage.node_count_valid,
                     bootstrap_coverage.probe_coverage_valid,
+                    operator_registry_coverage.bootstrap_operator_count,
+                    operator_registry_coverage.bootstrap_operator_registry_count,
+                    operator_registry_coverage.missing_registry_commitments,
+                    operator_registry_coverage.extra_registry_commitments,
+                    operator_registry_coverage.duplicate_registry_commitments,
+                    operator_registry_coverage.operator_count_valid,
+                    operator_registry_coverage.registry_coverage_valid,
                     observer_count,
                     observer_region_count,
                     invalid_observer_region_indexes,
@@ -7998,6 +8014,13 @@ fn public_deployment_capture_audit(
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
+                true,
+                true,
+                0,
+                0,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
@@ -8037,6 +8060,8 @@ fn public_deployment_capture_audit(
         && deployment_run_id_valid
         && bootstrap_node_count_valid
         && bootstrap_node_probe_coverage_valid
+        && bootstrap_operator_count_valid
+        && bootstrap_operator_registry_coverage_valid
         && probe_observer_signatures_present
         && probe_observer_signatures_verified
         && probe_observer_signature_verifications_valid
@@ -8092,6 +8117,12 @@ fn public_deployment_capture_audit(
     }
     if !bootstrap_node_probe_coverage_valid {
         structural_failed_checks.push("bootstrap_node_probe_coverage_valid".to_string());
+    }
+    if !bootstrap_operator_count_valid {
+        structural_failed_checks.push("bootstrap_operator_count_valid".to_string());
+    }
+    if !bootstrap_operator_registry_coverage_valid {
+        structural_failed_checks.push("bootstrap_operator_registry_coverage_valid".to_string());
     }
     if !probe_observer_signatures_present {
         structural_failed_checks.push("probe_observer_signatures_present".to_string());
@@ -8221,6 +8252,18 @@ fn public_deployment_capture_audit(
     audit["duplicate_bootstrap_node_probe_slots"] = json!(duplicate_bootstrap_node_probe_slots);
     audit["bootstrap_node_count_valid"] = json!(bootstrap_node_count_valid);
     audit["bootstrap_node_probe_coverage_valid"] = json!(bootstrap_node_probe_coverage_valid);
+    audit["minimum_bootstrap_operator_count"] = json!(MIN_PUBLIC_DEPLOYMENT_OPERATOR_COUNT);
+    audit["bootstrap_operator_count"] = json!(bootstrap_operator_count);
+    audit["bootstrap_operator_registry_count"] = json!(bootstrap_operator_registry_count);
+    audit["missing_bootstrap_operator_registry_commitments"] =
+        json!(missing_bootstrap_operator_registry_commitments);
+    audit["extra_bootstrap_operator_registry_commitments"] =
+        json!(extra_bootstrap_operator_registry_commitments);
+    audit["duplicate_bootstrap_operator_registry_commitments"] =
+        json!(duplicate_bootstrap_operator_registry_commitments);
+    audit["bootstrap_operator_count_valid"] = json!(bootstrap_operator_count_valid);
+    audit["bootstrap_operator_registry_coverage_valid"] =
+        json!(bootstrap_operator_registry_coverage_valid);
     audit["minimum_probe_observer_count"] = json!(MIN_PUBLIC_DEPLOYMENT_OBSERVER_COUNT);
     audit["minimum_observer_region_count"] = json!(MIN_PUBLIC_DEPLOYMENT_REGION_COUNT);
     audit["probe_observer_count"] = json!(probe_observer_count);
@@ -8327,6 +8370,84 @@ fn public_bootstrap_node_probe_coverage_audit(value: &Value) -> PublicBootstrapP
         duplicate_probe_slots: duplicate_probe_slots.into_iter().collect(),
         node_count_valid,
         probe_coverage_valid,
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PublicBootstrapOperatorRegistryCoverageAudit {
+    bootstrap_operator_count: u64,
+    bootstrap_operator_registry_count: u64,
+    missing_registry_commitments: Vec<String>,
+    extra_registry_commitments: Vec<String>,
+    duplicate_registry_commitments: Vec<String>,
+    operator_count_valid: bool,
+    registry_coverage_valid: bool,
+}
+
+fn public_bootstrap_operator_registry_coverage_audit(
+    value: &Value,
+) -> PublicBootstrapOperatorRegistryCoverageAudit {
+    let bootstrap_nodes = value.get("bootstrap_nodes");
+    let operator_registry = value.get("bootstrap_operator_registry");
+    let operator_commitments = bootstrap_nodes
+        .and_then(Value::as_array)
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(|node| node.get("operator_commitment").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    let mut registry_commitments = BTreeSet::new();
+    let mut duplicate_registry_commitments = BTreeSet::new();
+    if let Some(records) = operator_registry.and_then(Value::as_array) {
+        for commitment in records
+            .iter()
+            .filter_map(|record| record.get("operator_commitment").and_then(Value::as_str))
+        {
+            if !registry_commitments.insert(commitment.to_string()) {
+                duplicate_registry_commitments.insert(commitment.to_string());
+            }
+        }
+    }
+    let missing_registry_commitments = operator_commitments
+        .difference(&registry_commitments)
+        .cloned()
+        .collect::<Vec<_>>();
+    let extra_registry_commitments = registry_commitments
+        .difference(&operator_commitments)
+        .cloned()
+        .collect::<Vec<_>>();
+    let operator_count = operator_commitments.len() as u64;
+    let registry_count = operator_registry
+        .and_then(Value::as_array)
+        .map(|records| records.len() as u64)
+        .unwrap_or_default();
+    let operator_count_valid = match bootstrap_nodes {
+        Some(Value::Array(_)) => operator_count >= MIN_PUBLIC_DEPLOYMENT_OPERATOR_COUNT,
+        Some(_) => false,
+        None => true,
+    };
+    let registry_coverage_valid = match (bootstrap_nodes, operator_registry) {
+        (Some(Value::Array(_)), Some(Value::Array(_))) => {
+            registry_count == operator_count
+                && registry_count >= MIN_PUBLIC_DEPLOYMENT_OPERATOR_COUNT
+                && missing_registry_commitments.is_empty()
+                && extra_registry_commitments.is_empty()
+                && duplicate_registry_commitments.is_empty()
+        }
+        (Some(Value::Array(_)), None) | (None, None) | (None, Some(Value::Array(_))) => true,
+        _ => false,
+    };
+    PublicBootstrapOperatorRegistryCoverageAudit {
+        bootstrap_operator_count: operator_count,
+        bootstrap_operator_registry_count: registry_count,
+        missing_registry_commitments,
+        extra_registry_commitments,
+        duplicate_registry_commitments: duplicate_registry_commitments.into_iter().collect(),
+        operator_count_valid,
+        registry_coverage_valid,
     }
 }
 
@@ -25934,6 +26055,51 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("bootstrap_node_probe_coverage_valid")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_missing_bootstrap_operator_registry() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        let missing_operator = capture["bootstrap_operator_registry"]
+            .as_array_mut()
+            .expect("bootstrap operator registry")
+            .pop()
+            .expect("removed operator registry record")["operator_commitment"]
+            .as_str()
+            .expect("removed operator commitment")
+            .to_string();
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit missing operator registry capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(
+            audit["bootstrap_operator_count"],
+            base_summary.public_bootstrap_profile.bootstrap_operator_count
+        );
+        assert_eq!(
+            audit["bootstrap_operator_registry_count"],
+            base_summary.public_bootstrap_profile.bootstrap_operator_count - 1
+        );
+        assert_eq!(audit["bootstrap_operator_count_valid"], true);
+        assert_eq!(audit["bootstrap_operator_registry_coverage_valid"], false);
+        assert_eq!(
+            audit["missing_bootstrap_operator_registry_commitments"],
+            json!([missing_operator])
+        );
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("bootstrap_operator_registry_coverage_valid")));
         let _ = fs::remove_file(capture_path);
     }
 
