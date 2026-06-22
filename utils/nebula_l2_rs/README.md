@@ -489,8 +489,9 @@ required capture fields, missing and invalid public endpoint fields, invalid
 timestamp types, freshness-window bounds, current capture-time validity,
 deployment-run-id validity, TLS endpoint pin counts and missing/extra/duplicate
 TLS endpoint pin roles, public-surface probe counts and missing/extra/duplicate
-probe roles, bootstrap node/probe counts, missing/extra/duplicate
-bootstrap-node probe slots, bootstrap operator/registry counts,
+probe roles, indexed malformed public-surface probe records, bootstrap
+node/probe counts, missing/extra/duplicate bootstrap-node probe slots,
+bootstrap operator/registry counts,
 missing/extra/duplicate operator-registry commitments, observer count and
 quorum reachability, placeholder presence, observer region coverage, malformed
 observer region indexes, duplicate observer ids or keys, unsigned/unverified

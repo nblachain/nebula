@@ -7760,6 +7760,14 @@ fn public_deployment_capture_audit(
         extra_public_surface_probe_roles,
         duplicate_public_surface_probe_roles,
         public_surface_probe_coverage_valid,
+        invalid_public_surface_probe_record_indexes,
+        invalid_public_surface_probe_status_indexes,
+        invalid_public_surface_probe_binding_indexes,
+        invalid_public_surface_probe_endpoint_indexes,
+        invalid_public_surface_probe_transcript_indexes,
+        invalid_public_surface_probe_root_indexes,
+        invalid_public_surface_probe_observation_time_indexes,
+        public_surface_probe_fields_valid,
         bootstrap_node_count,
         bootstrap_node_probe_count,
         missing_bootstrap_node_probe_slots,
@@ -7861,6 +7869,7 @@ fn public_deployment_capture_audit(
                     .unwrap_or(true);
                 let tls_pin_coverage = public_tls_endpoint_pin_coverage_audit(&value);
                 let surface_probe_coverage = public_surface_probe_coverage_audit(&value);
+                let surface_probe_fields = public_surface_probe_field_audit(&value);
                 let bootstrap_coverage =
                     public_bootstrap_node_probe_coverage_audit(&value);
                 let operator_registry_coverage =
@@ -7969,6 +7978,14 @@ fn public_deployment_capture_audit(
                     surface_probe_coverage.extra_probe_roles,
                     surface_probe_coverage.duplicate_probe_roles,
                     surface_probe_coverage.probe_coverage_valid,
+                    surface_probe_fields.invalid_record_indexes,
+                    surface_probe_fields.invalid_status_indexes,
+                    surface_probe_fields.invalid_binding_indexes,
+                    surface_probe_fields.invalid_endpoint_indexes,
+                    surface_probe_fields.invalid_transcript_indexes,
+                    surface_probe_fields.invalid_root_indexes,
+                    surface_probe_fields.invalid_observation_time_indexes,
+                    surface_probe_fields.fields_valid,
                     bootstrap_coverage.bootstrap_node_count,
                     bootstrap_coverage.bootstrap_node_probe_count,
                     bootstrap_coverage.missing_probe_slots,
@@ -8043,6 +8060,14 @@ fn public_deployment_capture_audit(
                 Vec::new(),
                 Vec::new(),
                 true,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                true,
                 0,
                 0,
                 Vec::new(),
@@ -8101,6 +8126,7 @@ fn public_deployment_capture_audit(
         && deployment_run_id_valid
         && tls_endpoint_pin_coverage_valid
         && public_surface_probe_coverage_valid
+        && public_surface_probe_fields_valid
         && bootstrap_node_count_valid
         && bootstrap_node_probe_coverage_valid
         && bootstrap_operator_count_valid
@@ -8160,6 +8186,9 @@ fn public_deployment_capture_audit(
     }
     if !public_surface_probe_coverage_valid {
         structural_failed_checks.push("public_surface_probe_coverage_valid".to_string());
+    }
+    if !public_surface_probe_fields_valid {
+        structural_failed_checks.push("public_surface_probe_fields_valid".to_string());
     }
     if !bootstrap_node_count_valid {
         structural_failed_checks.push("bootstrap_node_count_valid".to_string());
@@ -8305,6 +8334,21 @@ fn public_deployment_capture_audit(
     audit["extra_public_surface_probe_roles"] = json!(extra_public_surface_probe_roles);
     audit["duplicate_public_surface_probe_roles"] = json!(duplicate_public_surface_probe_roles);
     audit["public_surface_probe_coverage_valid"] = json!(public_surface_probe_coverage_valid);
+    audit["invalid_public_surface_probe_record_indexes"] =
+        json!(invalid_public_surface_probe_record_indexes);
+    audit["invalid_public_surface_probe_status_indexes"] =
+        json!(invalid_public_surface_probe_status_indexes);
+    audit["invalid_public_surface_probe_binding_indexes"] =
+        json!(invalid_public_surface_probe_binding_indexes);
+    audit["invalid_public_surface_probe_endpoint_indexes"] =
+        json!(invalid_public_surface_probe_endpoint_indexes);
+    audit["invalid_public_surface_probe_transcript_indexes"] =
+        json!(invalid_public_surface_probe_transcript_indexes);
+    audit["invalid_public_surface_probe_root_indexes"] =
+        json!(invalid_public_surface_probe_root_indexes);
+    audit["invalid_public_surface_probe_observation_time_indexes"] =
+        json!(invalid_public_surface_probe_observation_time_indexes);
+    audit["public_surface_probe_fields_valid"] = json!(public_surface_probe_fields_valid);
     audit["minimum_bootstrap_node_count"] = json!(DEFAULT_PUBLIC_BOOTSTRAP_NODE_COUNT);
     audit["bootstrap_node_count"] = json!(bootstrap_node_count);
     audit["bootstrap_node_probe_count"] = json!(bootstrap_node_probe_count);
@@ -8468,6 +8512,191 @@ fn public_surface_probe_coverage_audit(value: &Value) -> PublicSurfaceProbeCover
         extra_probe_roles,
         duplicate_probe_roles: duplicate_roles.into_iter().collect(),
         probe_coverage_valid,
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PublicSurfaceProbeFieldAudit {
+    invalid_record_indexes: Vec<usize>,
+    invalid_status_indexes: Vec<usize>,
+    invalid_binding_indexes: Vec<usize>,
+    invalid_endpoint_indexes: Vec<usize>,
+    invalid_transcript_indexes: Vec<usize>,
+    invalid_root_indexes: Vec<usize>,
+    invalid_observation_time_indexes: Vec<usize>,
+    fields_valid: bool,
+}
+
+fn public_surface_probe_field_audit(value: &Value) -> PublicSurfaceProbeFieldAudit {
+    let public_surface_probes = value.get("public_surface_probes");
+    let mut invalid_record_indexes = Vec::new();
+    let mut invalid_status_indexes = Vec::new();
+    let mut invalid_binding_indexes = Vec::new();
+    let mut invalid_endpoint_indexes = Vec::new();
+    let mut invalid_transcript_indexes = Vec::new();
+    let mut invalid_root_indexes = Vec::new();
+    let mut invalid_observation_time_indexes = Vec::new();
+    if let Some(probes) = public_surface_probes.and_then(Value::as_array) {
+        let deployment_run_id = value.get("deployment_run_id").and_then(Value::as_str);
+        let observed_at_unix_ms = value.get("observed_at_unix_ms").and_then(Value::as_u64);
+        let expires_at_unix_ms = value.get("expires_at_unix_ms").and_then(Value::as_u64);
+        let public_launch_bundle_root = value
+            .get("public_launch_bundle_root")
+            .and_then(Value::as_str);
+        let public_status_manifest_root = value
+            .get("public_status_manifest_root")
+            .and_then(Value::as_str);
+        for (index, probe) in probes.iter().enumerate() {
+            if !probe.is_object() {
+                invalid_record_indexes.push(index);
+                continue;
+            }
+            let probe_role = probe.get("probe_role").and_then(Value::as_str);
+            let status = probe.get("status").and_then(Value::as_str);
+            let expected_status = probe_role.and_then(expected_public_surface_probe_status);
+            let status_valid = status
+                .map(|status| status == "ok" || status == "blocked")
+                .unwrap_or(false)
+                && status
+                    .zip(expected_status)
+                    .map(|(status, expected)| status == expected)
+                    .unwrap_or(true);
+            if !status_valid {
+                invalid_status_indexes.push(index);
+            }
+            if probe.get("chain_id").and_then(Value::as_str) != Some(CHAIN_ID)
+                || deployment_run_id
+                    .map(|run_id| {
+                        probe.get("deployment_run_id").and_then(Value::as_str) == Some(run_id)
+                    })
+                    .unwrap_or(false)
+                    == false
+                || probe
+                    .get("public_launch_bundle_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                    == false
+                || probe
+                    .get("public_status_manifest_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                    == false
+                || public_launch_bundle_root
+                    .map(|root| {
+                        probe
+                            .get("public_launch_bundle_root")
+                            .and_then(Value::as_str)
+                            == Some(root)
+                    })
+                    .unwrap_or(true)
+                    == false
+                || public_status_manifest_root
+                    .map(|root| {
+                        probe
+                            .get("public_status_manifest_root")
+                            .and_then(Value::as_str)
+                            == Some(root)
+                    })
+                    .unwrap_or(true)
+                    == false
+            {
+                invalid_binding_indexes.push(index);
+            }
+            if probe.get("endpoint_publicly_routable").and_then(Value::as_bool) != Some(true)
+                || probe
+                    .get("endpoint")
+                    .and_then(Value::as_str)
+                    .map(public_endpoint)
+                    != Some(true)
+            {
+                invalid_endpoint_indexes.push(index);
+            }
+            let transcript_fields_valid = probe
+                .get("transport")
+                .and_then(Value::as_str)
+                .is_some_and(|transport| transport == "https" || transport == "p2p")
+                && probe
+                    .get("transcript_kind")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| !kind.trim().is_empty())
+                && probe.get("http_status").and_then(Value::as_u64).is_some()
+                && probe
+                    .get("transcript_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                && probe
+                    .get("probe_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root);
+            if !transcript_fields_valid {
+                invalid_transcript_indexes.push(index);
+            }
+            let observed_at = probe.get("observed_at_unix_ms").and_then(Value::as_u64);
+            if observed_at
+                .map(|observed_at| {
+                    observed_at_unix_ms
+                        .zip(expires_at_unix_ms)
+                        .map(|(window_start, window_end)| {
+                            observed_at >= window_start && observed_at <= window_end
+                        })
+                        .unwrap_or(true)
+                })
+                != Some(true)
+            {
+                invalid_observation_time_indexes.push(index);
+            }
+            let surface_probe_root_valid = probe
+                .get("surface_probe_root")
+                .and_then(Value::as_str)
+                .is_some_and(is_hex_root)
+                && public_surface_probe_root(probe)
+                    .map(|root| {
+                        probe.get("surface_probe_root").and_then(Value::as_str) == Some(root.as_str())
+                    })
+                    .unwrap_or(false);
+            if !surface_probe_root_valid {
+                invalid_root_indexes.push(index);
+            }
+        }
+    }
+    let fields_valid = match public_surface_probes {
+        Some(Value::Array(_)) => {
+            invalid_record_indexes.is_empty()
+                && invalid_status_indexes.is_empty()
+                && invalid_binding_indexes.is_empty()
+                && invalid_endpoint_indexes.is_empty()
+                && invalid_transcript_indexes.is_empty()
+                && invalid_root_indexes.is_empty()
+                && invalid_observation_time_indexes.is_empty()
+        }
+        Some(_) => false,
+        None => true,
+    };
+    PublicSurfaceProbeFieldAudit {
+        invalid_record_indexes,
+        invalid_status_indexes,
+        invalid_binding_indexes,
+        invalid_endpoint_indexes,
+        invalid_transcript_indexes,
+        invalid_root_indexes,
+        invalid_observation_time_indexes,
+        fields_valid,
+    }
+}
+
+fn expected_public_surface_probe_status(probe_role: &str) -> Option<&'static str> {
+    match probe_role {
+        "status_manifest"
+        | "p2p_handshake"
+        | "health"
+        | "status_page"
+        | "metrics"
+        | "deployed_finality"
+        | "incident_contact"
+        | "faucet"
+        | "reset_runbook" => Some("ok"),
+        "private_summary_denial" => Some("blocked"),
+        _ => None,
     }
 }
 
@@ -26267,6 +26496,45 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("public_surface_probe_coverage_valid")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_invalid_public_surface_probe_fields() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        capture["public_surface_probes"][0]["status"] = json!("degraded");
+        capture["public_surface_probes"][0]["chain_id"] = json!("wrong-chain");
+        capture["public_surface_probes"][0]["endpoint_publicly_routable"] = json!(false);
+        capture["public_surface_probes"][0]["observed_at_unix_ms"] = json!(0);
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit invalid public surface probe capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["public_surface_probe_fields_valid"], false);
+        assert_eq!(audit["invalid_public_surface_probe_status_indexes"], json!([0]));
+        assert_eq!(audit["invalid_public_surface_probe_binding_indexes"], json!([0]));
+        assert_eq!(audit["invalid_public_surface_probe_endpoint_indexes"], json!([0]));
+        assert_eq!(
+            audit["invalid_public_surface_probe_observation_time_indexes"],
+            json!([0])
+        );
+        assert!(audit["invalid_public_surface_probe_root_indexes"]
+            .as_array()
+            .expect("invalid root indexes")
+            .contains(&json!(0)));
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("public_surface_probe_fields_valid")));
         let _ = fs::remove_file(capture_path);
     }
 
