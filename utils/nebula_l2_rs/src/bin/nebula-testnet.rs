@@ -7271,24 +7271,27 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
             .filter(|candidate| is_hex_root(candidate))
             .map(str::to_string)
             .unwrap_or_else(|| value_root(&format!("public-launch-package-{artifact_id}"), &value));
-        let record_root = root(&[
-            "public-launch-package-artifact",
-            CHAIN_ID,
+        let required_before_public_capture =
+            public_launch_package_required_before_capture(artifact_id);
+        let operator_fill_required = public_launch_package_operator_fill_required(artifact_id);
+        let record_root = public_launch_package_artifact_record_root(
             &summary.manifest_id,
             artifact_id,
             file_name,
             root_field,
             &artifact_root,
-            &(index + 1).to_string(),
-        ]);
+            index + 1,
+            required_before_public_capture,
+            operator_fill_required,
+        );
         package_records.push(json!({
             "order": index + 1,
             "artifact_id": artifact_id,
             "file_name": file_name,
             "root_field": root_field,
             "root": artifact_root,
-            "required_before_public_capture": public_launch_package_required_before_capture(artifact_id),
-            "operator_fill_required": public_launch_package_operator_fill_required(artifact_id),
+            "required_before_public_capture": required_before_public_capture,
+            "operator_fill_required": operator_fill_required,
             "usable_as_public_deployment_evidence": false,
             "usable_as_mainnet_custody_approval": false,
             "artifact_record_root": record_root,
@@ -7473,16 +7476,16 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
             record["root"].as_str() == Some(expected_root.as_str()),
             "public launch package artifact root mismatch",
         )?;
-        let expected_record_root = root(&[
-            "public-launch-package-artifact",
-            CHAIN_ID,
+        let expected_record_root = public_launch_package_artifact_record_root(
             &summary.manifest_id,
             artifact_id,
             file_name,
             root_field,
             &expected_root,
-            &(index + 1).to_string(),
-        ]);
+            index + 1,
+            public_launch_package_required_before_capture(artifact_id),
+            public_launch_package_operator_fill_required(artifact_id),
+        );
         ensure(
             record["artifact_record_root"].as_str() == Some(expected_record_root.as_str()),
             "public launch package artifact record root mismatch",
@@ -7559,6 +7562,32 @@ fn public_launch_package_expected_file_names() -> Vec<&'static str> {
             .map(|(_, file_name, _)| *file_name),
     );
     expected_files
+}
+
+fn public_launch_package_artifact_record_root(
+    manifest_id: &str,
+    artifact_id: &str,
+    file_name: &str,
+    root_field: &str,
+    artifact_root: &str,
+    order: usize,
+    required_before_public_capture: bool,
+    operator_fill_required: bool,
+) -> String {
+    root(&[
+        "public-launch-package-artifact",
+        CHAIN_ID,
+        manifest_id,
+        artifact_id,
+        file_name,
+        root_field,
+        artifact_root,
+        &order.to_string(),
+        bool_str(required_before_public_capture),
+        bool_str(operator_fill_required),
+        bool_str(false),
+        bool_str(false),
+    ])
 }
 
 fn public_launch_package_file_set_root(manifest_id: &str, testnet_id: &str) -> String {
@@ -23762,6 +23791,7 @@ mod tests {
         let artifacts = manifest["artifacts"].as_array().expect("package artifacts");
         assert_eq!(artifacts.len(), expected.len());
         assert_eq!(manifest["artifact_count"], expected.len());
+        let mut expected_record_roots = Vec::new();
         for (index, (artifact_id, file_name)) in expected.iter().enumerate() {
             let record = &artifacts[index];
             assert_eq!(record["order"], index + 1);
@@ -23783,12 +23813,40 @@ mod tests {
             );
             assert_eq!(record["usable_as_public_deployment_evidence"], false);
             assert_eq!(record["usable_as_mainnet_custody_approval"], false);
+            let artifact_root = record["root"].as_str().expect("artifact root");
+            let expected_record_root = public_launch_package_artifact_record_root(
+                &summary.manifest_id,
+                artifact_id,
+                file_name,
+                record["root_field"].as_str().expect("root field"),
+                artifact_root,
+                index + 1,
+                true,
+                public_launch_package_operator_fill_required(artifact_id),
+            );
+            assert_eq!(record["artifact_record_root"], expected_record_root);
+            let metadata_tampered_record_root = public_launch_package_artifact_record_root(
+                &summary.manifest_id,
+                artifact_id,
+                file_name,
+                record["root_field"].as_str().expect("root field"),
+                artifact_root,
+                index + 1,
+                false,
+                public_launch_package_operator_fill_required(artifact_id),
+            );
+            assert_ne!(expected_record_root, metadata_tampered_record_root);
+            expected_record_roots.push(expected_record_root);
         }
         assert!(is_hex_root(
             manifest["artifact_set_root"]
                 .as_str()
                 .expect("artifact set root")
         ));
+        assert_eq!(
+            manifest["artifact_set_root"],
+            collection_root("public-launch-package-artifacts", expected_record_roots)
+        );
         assert!(is_hex_root(
             manifest["package_file_set_root"]
                 .as_str()
