@@ -1117,6 +1117,8 @@ struct PublicDeploymentReport {
     public_launch_package_file_set_root_bound: bool,
     bootstrap_profile_bound: bool,
     status_manifest_root_bound: bool,
+    public_status_manifest_root_bound: bool,
+    public_status_manifest_payload_bound: bool,
     endpoint_set_public: bool,
     tls_pins_bound: bool,
     proxy_policy_verified: bool,
@@ -1127,6 +1129,7 @@ struct PublicDeploymentReport {
     public_launch_bundle_root: Option<String>,
     public_launch_package_file_set_root: Option<String>,
     public_status_manifest_root: Option<String>,
+    expected_public_status_manifest_root: Option<String>,
     capture_plan_root: Option<String>,
     capture_contract_root: Option<String>,
     deployment_preflight_checklist_root: Option<String>,
@@ -5550,9 +5553,12 @@ impl Testnet {
             && evidence.public_bootstrap_profile_report_root
                 == summary.public_bootstrap_profile.report_root
             && evidence.rate_limit_policy_root == summary.public_bootstrap_profile.rate_limit_policy_root;
+        let public_status_manifest_root_bound =
+            evidence.public_status_manifest_root == expected_public_status_manifest_root;
+        let public_status_manifest_payload_bound =
+            evidence.public_status_manifest == expected_public_status;
         let status_manifest_root_bound =
-            evidence.public_status_manifest_root == expected_public_status_manifest_root
-                && evidence.public_status_manifest == expected_public_status;
+            public_status_manifest_root_bound && public_status_manifest_payload_bound;
         let endpoint_set_public = public_https_endpoint(&evidence.public_rpc_url)
             && public_endpoint(&evidence.public_p2p_endpoint)
             && public_https_endpoint(&evidence.status_page_url)
@@ -5664,6 +5670,8 @@ impl Testnet {
             public_launch_package_file_set_root_bound,
             bootstrap_profile_bound,
             status_manifest_root_bound,
+            public_status_manifest_root_bound,
+            public_status_manifest_payload_bound,
             endpoint_set_public,
             tls_pins_bound,
             proxy_policy_verified,
@@ -5676,6 +5684,7 @@ impl Testnet {
                 evidence.public_launch_package_file_set_root.clone(),
             ),
             public_status_manifest_root: Some(evidence.public_status_manifest_root.clone()),
+            expected_public_status_manifest_root: Some(expected_public_status_manifest_root),
             capture_plan_root: Some(evidence.capture_plan_root.clone()),
             capture_contract_root: Some(evidence.capture_contract_root.clone()),
             deployment_preflight_checklist_root: Some(
@@ -6597,6 +6606,8 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         public_launch_package_file_set_root_bound: false,
         bootstrap_profile_bound: false,
         status_manifest_root_bound: false,
+        public_status_manifest_root_bound: false,
+        public_status_manifest_payload_bound: false,
         endpoint_set_public: false,
         tls_pins_bound: false,
         proxy_policy_verified: false,
@@ -6607,6 +6618,7 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         public_launch_bundle_root: None,
         public_launch_package_file_set_root: None,
         public_status_manifest_root: None,
+        expected_public_status_manifest_root: None,
         capture_plan_root: None,
         capture_contract_root: None,
         deployment_preflight_checklist_root: None,
@@ -6862,6 +6874,14 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
         ),
         ("bootstrap_profile_bound", report.bootstrap_profile_bound),
         ("status_manifest_root_bound", report.status_manifest_root_bound),
+        (
+            "public_status_manifest_root_bound",
+            report.public_status_manifest_root_bound,
+        ),
+        (
+            "public_status_manifest_payload_bound",
+            report.public_status_manifest_payload_bound,
+        ),
         ("endpoint_set_public", report.endpoint_set_public),
         ("tls_pins_bound", report.tls_pins_bound),
         ("proxy_policy_verified", report.proxy_policy_verified),
@@ -27483,10 +27503,21 @@ mod tests {
         assert!(summary.public_deployment.public_launch_bundle_root_bound);
         assert!(summary.public_deployment.bootstrap_profile_bound);
         assert!(summary.public_deployment.status_manifest_root_bound);
+        assert!(summary.public_deployment.public_status_manifest_root_bound);
+        assert!(summary
+            .public_deployment
+            .public_status_manifest_payload_bound);
         assert!(summary.public_deployment.endpoint_set_public);
         assert!(summary.public_deployment.proxy_policy_verified);
         assert!(summary.public_deployment.preflight_receipt_bound);
         assert!(summary.public_deployment.runbook_receipt_bound);
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_public_status_manifest_root
+                .as_deref()
+                .expect("expected public status manifest root")
+        ));
         assert!(is_hex_root(
             summary
                 .public_deployment
@@ -30518,7 +30549,33 @@ mod tests {
         assert!(summary.public_deployment.matches_current_manifest);
         assert!(summary.public_deployment.public_launch_bundle_root_bound);
         assert!(!summary.public_deployment.status_manifest_root_bound);
+        assert!(!summary.public_deployment.public_status_manifest_root_bound);
+        assert!(!summary
+            .public_deployment
+            .public_status_manifest_payload_bound);
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_public_status_manifest_root
+                .as_deref()
+                .expect("expected public status manifest root")
+        ));
         assert!(!summary.acceptance.public_deployment_attestation_available);
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"status_manifest_root_bound".to_string()));
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"public_status_manifest_root_bound".to_string()));
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"public_status_manifest_payload_bound".to_string()));
         let _ = fs::remove_file(stale_path);
     }
 

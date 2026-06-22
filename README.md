@@ -3439,8 +3439,8 @@ real XMR.
   `/operator-summary`, prove 403/404 denial, bind a response-body root and
   small content-length cap, and assert no redirect or private-summary content.
   The local verifier rejects stale self-consistent captures by requiring the
-  status manifest and launch bundle roots to match the current run's generated
-  public artifacts and by enforcing an observed/expires freshness window,
+  status manifest root, embedded status payload, and launch bundle root to match
+  the current run's generated public artifacts and by enforcing an observed/expires freshness window,
   multi-observer/multi-region probe roots, unique observer ids/keys, unique
   bootstrap endpoint roots, an attestor registry root, and a PQ signature root.
   Live reachability checks and raw PQ signature verification remain
