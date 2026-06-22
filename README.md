@@ -3455,7 +3455,8 @@ real XMR.
   machine-actionable remediation entries, and a remediation root. Each
   remediation names the expected artifact, relevant command, expected evidence
   root, granular failed subchecks for capture roots, bootstrap profile/report/
-  rate-limit roots, endpoint publicness, TLS pin roots/counts,
+  rate-limit roots, bootstrap topology/count/registry/probe bindings,
+  endpoint publicness, TLS pin roots/counts,
   proxy/firewall/rate-limit policy roots, status-manifest root/payload, and
   probe bindings, privacy
   classification, and whether external deployment capture is required. That private operator report is intentionally absent from the public status

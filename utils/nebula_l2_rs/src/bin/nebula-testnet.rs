@@ -1145,6 +1145,19 @@ struct PublicDeploymentReport {
     rate_limit_policy_claims_root_bound: bool,
     private_summary_probe_root_bound: bool,
     bootstrap_nodes_bound: bool,
+    bootstrap_node_set_root_bound: bool,
+    bootstrap_node_count_sufficient: bool,
+    bootstrap_operator_set_root_bound: bool,
+    bootstrap_operator_count_bound: bool,
+    bootstrap_operator_registry_count_bound: bool,
+    bootstrap_operator_registry_root_bound: bool,
+    bootstrap_operator_signature_root_bound: bool,
+    bootstrap_region_set_root_bound: bool,
+    bootstrap_public_endpoint_count_bound: bool,
+    bootstrap_node_probe_count_bound: bool,
+    bootstrap_node_probe_set_root_bound: bool,
+    bootstrap_p2p_endpoint_set_root_bound: bool,
+    bootstrap_status_page_set_root_bound: bool,
     live_probe_roots_bound: bool,
     no_private_summary_exposed: bool,
     mainnet_custody_disabled: bool,
@@ -1189,7 +1202,19 @@ struct PublicDeploymentReport {
     public_deployment_runbook_receipt_root: Option<String>,
     public_deployment_runbook_step_receipt_set_root: Option<String>,
     public_deployment_runbook_step_receipt_count: u64,
+    bootstrap_node_set_root: Option<String>,
     bootstrap_node_count: u64,
+    bootstrap_operator_set_root: Option<String>,
+    bootstrap_operator_count: u64,
+    bootstrap_operator_registry_root: Option<String>,
+    bootstrap_operator_registry_count: u64,
+    bootstrap_operator_signature_root: Option<String>,
+    bootstrap_region_set_root: Option<String>,
+    bootstrap_public_endpoint_count: u64,
+    bootstrap_node_probe_set_root: Option<String>,
+    bootstrap_node_probe_count: u64,
+    bootstrap_p2p_endpoint_set_root: Option<String>,
+    bootstrap_status_page_set_root: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -5652,23 +5677,46 @@ impl Testnet {
             && firewall_policy_claims_root_bound
             && rate_limit_policy_claims_root_bound
             && private_summary_probe_root_bound;
-        let bootstrap_nodes_bound = evidence.bootstrap_node_set_root
-            == summary.public_bootstrap_profile.bootstrap_node_set_root
-            && evidence.bootstrap_node_count >= summary.public_bootstrap_profile.bootstrap_node_count
-            && evidence.bootstrap_operator_set_root
-                == summary.public_bootstrap_profile.bootstrap_operator_set_root
-            && evidence.bootstrap_operator_count
-                == summary.public_bootstrap_profile.bootstrap_operator_count
-            && evidence.bootstrap_operator_registry_count == evidence.bootstrap_operator_count
-            && is_hex_root(&evidence.bootstrap_operator_registry_root)
-            && is_hex_root(&evidence.bootstrap_operator_signature_root)
-            && evidence.bootstrap_region_set_root
-                == summary.public_bootstrap_profile.bootstrap_region_set_root
-            && evidence.bootstrap_public_endpoint_count == evidence.bootstrap_node_count
-            && evidence.bootstrap_node_probe_count == evidence.bootstrap_node_count
-            && is_hex_root(&evidence.bootstrap_node_probe_set_root)
-            && is_hex_root(&evidence.bootstrap_p2p_endpoint_set_root)
-            && is_hex_root(&evidence.bootstrap_status_page_set_root);
+        let bootstrap_node_set_root_bound = evidence.bootstrap_node_set_root
+            == summary.public_bootstrap_profile.bootstrap_node_set_root;
+        let bootstrap_node_count_sufficient =
+            evidence.bootstrap_node_count >= summary.public_bootstrap_profile.bootstrap_node_count;
+        let bootstrap_operator_set_root_bound = evidence.bootstrap_operator_set_root
+            == summary.public_bootstrap_profile.bootstrap_operator_set_root;
+        let bootstrap_operator_count_bound =
+            evidence.bootstrap_operator_count
+                == summary.public_bootstrap_profile.bootstrap_operator_count;
+        let bootstrap_operator_registry_count_bound =
+            evidence.bootstrap_operator_registry_count == evidence.bootstrap_operator_count;
+        let bootstrap_operator_registry_root_bound =
+            is_hex_root(&evidence.bootstrap_operator_registry_root);
+        let bootstrap_operator_signature_root_bound =
+            is_hex_root(&evidence.bootstrap_operator_signature_root);
+        let bootstrap_region_set_root_bound = evidence.bootstrap_region_set_root
+            == summary.public_bootstrap_profile.bootstrap_region_set_root;
+        let bootstrap_public_endpoint_count_bound =
+            evidence.bootstrap_public_endpoint_count == evidence.bootstrap_node_count;
+        let bootstrap_node_probe_count_bound =
+            evidence.bootstrap_node_probe_count == evidence.bootstrap_node_count;
+        let bootstrap_node_probe_set_root_bound =
+            is_hex_root(&evidence.bootstrap_node_probe_set_root);
+        let bootstrap_p2p_endpoint_set_root_bound =
+            is_hex_root(&evidence.bootstrap_p2p_endpoint_set_root);
+        let bootstrap_status_page_set_root_bound =
+            is_hex_root(&evidence.bootstrap_status_page_set_root);
+        let bootstrap_nodes_bound = bootstrap_node_set_root_bound
+            && bootstrap_node_count_sufficient
+            && bootstrap_operator_set_root_bound
+            && bootstrap_operator_count_bound
+            && bootstrap_operator_registry_count_bound
+            && bootstrap_operator_registry_root_bound
+            && bootstrap_operator_signature_root_bound
+            && bootstrap_region_set_root_bound
+            && bootstrap_public_endpoint_count_bound
+            && bootstrap_node_probe_count_bound
+            && bootstrap_node_probe_set_root_bound
+            && bootstrap_p2p_endpoint_set_root_bound
+            && bootstrap_status_page_set_root_bound;
         let live_probe_roots_bound = is_hex_root(&evidence.status_probe_root)
             && is_hex_root(&evidence.p2p_handshake_root)
             && is_hex_root(&evidence.health_probe_root)
@@ -5771,6 +5819,19 @@ impl Testnet {
             rate_limit_policy_claims_root_bound,
             private_summary_probe_root_bound,
             bootstrap_nodes_bound,
+            bootstrap_node_set_root_bound,
+            bootstrap_node_count_sufficient,
+            bootstrap_operator_set_root_bound,
+            bootstrap_operator_count_bound,
+            bootstrap_operator_registry_count_bound,
+            bootstrap_operator_registry_root_bound,
+            bootstrap_operator_signature_root_bound,
+            bootstrap_region_set_root_bound,
+            bootstrap_public_endpoint_count_bound,
+            bootstrap_node_probe_count_bound,
+            bootstrap_node_probe_set_root_bound,
+            bootstrap_p2p_endpoint_set_root_bound,
+            bootstrap_status_page_set_root_bound,
             live_probe_roots_bound,
             no_private_summary_exposed,
             mainnet_custody_disabled,
@@ -5844,7 +5905,27 @@ impl Testnet {
             ),
             public_deployment_runbook_step_receipt_count: evidence
                 .public_deployment_runbook_step_receipt_count,
+            bootstrap_node_set_root: Some(evidence.bootstrap_node_set_root.clone()),
             bootstrap_node_count: evidence.bootstrap_node_count,
+            bootstrap_operator_set_root: Some(evidence.bootstrap_operator_set_root.clone()),
+            bootstrap_operator_count: evidence.bootstrap_operator_count,
+            bootstrap_operator_registry_root: Some(
+                evidence.bootstrap_operator_registry_root.clone(),
+            ),
+            bootstrap_operator_registry_count: evidence.bootstrap_operator_registry_count,
+            bootstrap_operator_signature_root: Some(
+                evidence.bootstrap_operator_signature_root.clone(),
+            ),
+            bootstrap_region_set_root: Some(evidence.bootstrap_region_set_root.clone()),
+            bootstrap_public_endpoint_count: evidence.bootstrap_public_endpoint_count,
+            bootstrap_node_probe_set_root: Some(evidence.bootstrap_node_probe_set_root.clone()),
+            bootstrap_node_probe_count: evidence.bootstrap_node_probe_count,
+            bootstrap_p2p_endpoint_set_root: Some(
+                evidence.bootstrap_p2p_endpoint_set_root.clone(),
+            ),
+            bootstrap_status_page_set_root: Some(
+                evidence.bootstrap_status_page_set_root.clone(),
+            ),
         }
     }
 
@@ -6760,6 +6841,19 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         rate_limit_policy_claims_root_bound: false,
         private_summary_probe_root_bound: false,
         bootstrap_nodes_bound: false,
+        bootstrap_node_set_root_bound: false,
+        bootstrap_node_count_sufficient: false,
+        bootstrap_operator_set_root_bound: false,
+        bootstrap_operator_count_bound: false,
+        bootstrap_operator_registry_count_bound: false,
+        bootstrap_operator_registry_root_bound: false,
+        bootstrap_operator_signature_root_bound: false,
+        bootstrap_region_set_root_bound: false,
+        bootstrap_public_endpoint_count_bound: false,
+        bootstrap_node_probe_count_bound: false,
+        bootstrap_node_probe_set_root_bound: false,
+        bootstrap_p2p_endpoint_set_root_bound: false,
+        bootstrap_status_page_set_root_bound: false,
         live_probe_roots_bound: false,
         no_private_summary_exposed: false,
         mainnet_custody_disabled: false,
@@ -6804,7 +6898,19 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         public_deployment_runbook_receipt_root: None,
         public_deployment_runbook_step_receipt_set_root: None,
         public_deployment_runbook_step_receipt_count: 0,
+        bootstrap_node_set_root: None,
         bootstrap_node_count: 0,
+        bootstrap_operator_set_root: None,
+        bootstrap_operator_count: 0,
+        bootstrap_operator_registry_root: None,
+        bootstrap_operator_registry_count: 0,
+        bootstrap_operator_signature_root: None,
+        bootstrap_region_set_root: None,
+        bootstrap_public_endpoint_count: 0,
+        bootstrap_node_probe_set_root: None,
+        bootstrap_node_probe_count: 0,
+        bootstrap_p2p_endpoint_set_root: None,
+        bootstrap_status_page_set_root: None,
     }
 }
 
@@ -7122,6 +7228,58 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
             report.private_summary_probe_root_bound,
         ),
         ("bootstrap_nodes_bound", report.bootstrap_nodes_bound),
+        (
+            "bootstrap_node_set_root_bound",
+            report.bootstrap_node_set_root_bound,
+        ),
+        (
+            "bootstrap_node_count_sufficient",
+            report.bootstrap_node_count_sufficient,
+        ),
+        (
+            "bootstrap_operator_set_root_bound",
+            report.bootstrap_operator_set_root_bound,
+        ),
+        (
+            "bootstrap_operator_count_bound",
+            report.bootstrap_operator_count_bound,
+        ),
+        (
+            "bootstrap_operator_registry_count_bound",
+            report.bootstrap_operator_registry_count_bound,
+        ),
+        (
+            "bootstrap_operator_registry_root_bound",
+            report.bootstrap_operator_registry_root_bound,
+        ),
+        (
+            "bootstrap_operator_signature_root_bound",
+            report.bootstrap_operator_signature_root_bound,
+        ),
+        (
+            "bootstrap_region_set_root_bound",
+            report.bootstrap_region_set_root_bound,
+        ),
+        (
+            "bootstrap_public_endpoint_count_bound",
+            report.bootstrap_public_endpoint_count_bound,
+        ),
+        (
+            "bootstrap_node_probe_count_bound",
+            report.bootstrap_node_probe_count_bound,
+        ),
+        (
+            "bootstrap_node_probe_set_root_bound",
+            report.bootstrap_node_probe_set_root_bound,
+        ),
+        (
+            "bootstrap_p2p_endpoint_set_root_bound",
+            report.bootstrap_p2p_endpoint_set_root_bound,
+        ),
+        (
+            "bootstrap_status_page_set_root_bound",
+            report.bootstrap_status_page_set_root_bound,
+        ),
         ("live_probe_roots_bound", report.live_probe_roots_bound),
         (
             "no_private_summary_exposed",
@@ -27836,6 +27994,98 @@ mod tests {
                 .as_deref()
                 .expect("private summary probe root")
         ));
+        assert!(summary.public_deployment.bootstrap_nodes_bound);
+        assert!(summary.public_deployment.bootstrap_node_set_root_bound);
+        assert!(summary.public_deployment.bootstrap_node_count_sufficient);
+        assert!(summary
+            .public_deployment
+            .bootstrap_operator_set_root_bound);
+        assert!(summary.public_deployment.bootstrap_operator_count_bound);
+        assert!(summary
+            .public_deployment
+            .bootstrap_operator_registry_count_bound);
+        assert!(summary
+            .public_deployment
+            .bootstrap_operator_registry_root_bound);
+        assert!(summary
+            .public_deployment
+            .bootstrap_operator_signature_root_bound);
+        assert!(summary.public_deployment.bootstrap_region_set_root_bound);
+        assert!(summary
+            .public_deployment
+            .bootstrap_public_endpoint_count_bound);
+        assert!(summary.public_deployment.bootstrap_node_probe_count_bound);
+        assert!(summary
+            .public_deployment
+            .bootstrap_node_probe_set_root_bound);
+        assert!(summary
+            .public_deployment
+            .bootstrap_p2p_endpoint_set_root_bound);
+        assert!(summary
+            .public_deployment
+            .bootstrap_status_page_set_root_bound);
+        assert_eq!(
+            summary
+                .public_deployment
+                .bootstrap_node_set_root
+                .as_deref()
+                .expect("bootstrap node set root"),
+            summary
+                .public_bootstrap_profile
+                .bootstrap_node_set_root
+                .as_str()
+        );
+        assert_eq!(
+            summary.public_deployment.bootstrap_node_count,
+            summary.public_bootstrap_profile.bootstrap_node_count
+        );
+        assert_eq!(
+            summary.public_deployment.bootstrap_operator_count,
+            summary.public_bootstrap_profile.bootstrap_operator_count
+        );
+        assert_eq!(
+            summary.public_deployment.bootstrap_public_endpoint_count,
+            summary.public_deployment.bootstrap_node_count
+        );
+        assert_eq!(
+            summary.public_deployment.bootstrap_node_probe_count,
+            summary.public_deployment.bootstrap_node_count
+        );
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .bootstrap_operator_registry_root
+                .as_deref()
+                .expect("bootstrap operator registry root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .bootstrap_operator_signature_root
+                .as_deref()
+                .expect("bootstrap operator signature root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .bootstrap_node_probe_set_root
+                .as_deref()
+                .expect("bootstrap node probe set root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .bootstrap_p2p_endpoint_set_root
+                .as_deref()
+                .expect("bootstrap p2p endpoint set root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .bootstrap_status_page_set_root
+                .as_deref()
+                .expect("bootstrap status page set root")
+        ));
         assert!(summary.public_deployment.preflight_receipt_bound);
         assert!(summary.public_deployment.runbook_receipt_bound);
         assert!(is_hex_root(
@@ -30602,6 +30852,117 @@ mod tests {
             "rate_limit_policy_claims_root_bound",
             "private_summary_probe_root_bound",
             "no_private_summary_exposed",
+        ] {
+            assert!(
+                remediation
+                    .failed_subchecks
+                    .contains(&failed_subcheck.to_string()),
+                "missing failed subcheck {failed_subcheck}"
+            );
+        }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_mismatched_bootstrap_topology() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path = write_public_deployment_evidence(&valid_public_deployment_evidence(
+            &base_summary,
+        ));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        evidence.bootstrap_node_set_root =
+            root(&["test-public-deployment", "wrong-bootstrap-node-set"]);
+        evidence.bootstrap_node_count = base_summary
+            .public_bootstrap_profile
+            .bootstrap_node_count
+            .saturating_sub(1);
+        evidence.bootstrap_operator_set_root =
+            root(&["test-public-deployment", "wrong-bootstrap-operator-set"]);
+        evidence.bootstrap_operator_count =
+            base_summary.public_bootstrap_profile.bootstrap_operator_count + 1;
+        evidence.bootstrap_operator_registry_count =
+            base_summary.public_bootstrap_profile.bootstrap_operator_count;
+        evidence.bootstrap_operator_registry_root =
+            "missing-bootstrap-operator-registry-root".to_string();
+        evidence.bootstrap_operator_signature_root =
+            "missing-bootstrap-operator-signature-root".to_string();
+        evidence.bootstrap_region_set_root =
+            root(&["test-public-deployment", "wrong-bootstrap-region-set"]);
+        evidence.bootstrap_public_endpoint_count = 0;
+        evidence.bootstrap_node_probe_count = 0;
+        evidence.bootstrap_node_probe_set_root =
+            "missing-bootstrap-node-probe-set-root".to_string();
+        evidence.bootstrap_p2p_endpoint_set_root =
+            "missing-bootstrap-p2p-endpoint-set-root".to_string();
+        evidence.bootstrap_status_page_set_root =
+            "missing-bootstrap-status-page-set-root".to_string();
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.bootstrap_nodes_bound);
+        assert!(!summary.public_deployment.bootstrap_node_set_root_bound);
+        assert!(!summary.public_deployment.bootstrap_node_count_sufficient);
+        assert!(!summary
+            .public_deployment
+            .bootstrap_operator_set_root_bound);
+        assert!(!summary.public_deployment.bootstrap_operator_count_bound);
+        assert!(!summary
+            .public_deployment
+            .bootstrap_operator_registry_count_bound);
+        assert!(!summary
+            .public_deployment
+            .bootstrap_operator_registry_root_bound);
+        assert!(!summary
+            .public_deployment
+            .bootstrap_operator_signature_root_bound);
+        assert!(!summary.public_deployment.bootstrap_region_set_root_bound);
+        assert!(!summary
+            .public_deployment
+            .bootstrap_public_endpoint_count_bound);
+        assert!(!summary.public_deployment.bootstrap_node_probe_count_bound);
+        assert!(!summary
+            .public_deployment
+            .bootstrap_node_probe_set_root_bound);
+        assert!(!summary
+            .public_deployment
+            .bootstrap_p2p_endpoint_set_root_bound);
+        assert!(!summary
+            .public_deployment
+            .bootstrap_status_page_set_root_bound);
+        assert_eq!(
+            summary.public_deployment.bootstrap_operator_count,
+            base_summary.public_bootstrap_profile.bootstrap_operator_count + 1
+        );
+        assert_eq!(
+            summary.public_launch_readiness.blocking_gaps,
+            vec!["public-launch-deployment-attestation"]
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        for failed_subcheck in [
+            "bootstrap_nodes_bound",
+            "bootstrap_node_set_root_bound",
+            "bootstrap_node_count_sufficient",
+            "bootstrap_operator_set_root_bound",
+            "bootstrap_operator_count_bound",
+            "bootstrap_operator_registry_count_bound",
+            "bootstrap_operator_registry_root_bound",
+            "bootstrap_operator_signature_root_bound",
+            "bootstrap_region_set_root_bound",
+            "bootstrap_public_endpoint_count_bound",
+            "bootstrap_node_probe_count_bound",
+            "bootstrap_node_probe_set_root_bound",
+            "bootstrap_p2p_endpoint_set_root_bound",
+            "bootstrap_status_page_set_root_bound",
         ] {
             assert!(
                 remediation
