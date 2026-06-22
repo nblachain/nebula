@@ -1137,6 +1137,13 @@ struct PublicDeploymentReport {
     tls_endpoint_pin_count_sufficient: bool,
     tls_required: bool,
     proxy_policy_verified: bool,
+    rate_limits_enforced: bool,
+    firewall_allows_public_only: bool,
+    public_status_manifest_redacted: bool,
+    proxy_policy_claims_root_bound: bool,
+    firewall_policy_claims_root_bound: bool,
+    rate_limit_policy_claims_root_bound: bool,
+    private_summary_probe_root_bound: bool,
     bootstrap_nodes_bound: bool,
     live_probe_roots_bound: bool,
     no_private_summary_exposed: bool,
@@ -1168,6 +1175,10 @@ struct PublicDeploymentReport {
     tls_spki_pin_root: Option<String>,
     tls_endpoint_pin_set_root: Option<String>,
     tls_endpoint_pin_count: u64,
+    proxy_policy_claims_root: Option<String>,
+    firewall_policy_claims_root: Option<String>,
+    rate_limit_policy_claims_root: Option<String>,
+    private_summary_probe_root: Option<String>,
     preflight_receipt_bound: bool,
     deployment_preflight_receipt_root: Option<String>,
     deployment_preflight_phase_set_root: Option<String>,
@@ -5622,14 +5633,25 @@ impl Testnet {
             && tls_endpoint_pin_set_root_bound
             && tls_endpoint_pin_count_sufficient
             && tls_required;
-        let proxy_policy_verified = evidence.rate_limits_enforced
-            && evidence.firewall_allows_public_only
-            && evidence.no_private_summary_exposed
-            && evidence.public_status_manifest_redacted
-            && is_hex_root(&evidence.proxy_policy_claims_root)
-            && is_hex_root(&evidence.firewall_policy_claims_root)
-            && is_hex_root(&evidence.rate_limit_policy_claims_root)
-            && is_hex_root(&evidence.private_summary_probe_root);
+        let rate_limits_enforced = evidence.rate_limits_enforced;
+        let firewall_allows_public_only = evidence.firewall_allows_public_only;
+        let public_status_manifest_redacted = evidence.public_status_manifest_redacted;
+        let no_private_summary_exposed = evidence.no_private_summary_exposed;
+        let proxy_policy_claims_root_bound = is_hex_root(&evidence.proxy_policy_claims_root);
+        let firewall_policy_claims_root_bound =
+            is_hex_root(&evidence.firewall_policy_claims_root);
+        let rate_limit_policy_claims_root_bound =
+            is_hex_root(&evidence.rate_limit_policy_claims_root);
+        let private_summary_probe_root_bound =
+            is_hex_root(&evidence.private_summary_probe_root);
+        let proxy_policy_verified = rate_limits_enforced
+            && firewall_allows_public_only
+            && no_private_summary_exposed
+            && public_status_manifest_redacted
+            && proxy_policy_claims_root_bound
+            && firewall_policy_claims_root_bound
+            && rate_limit_policy_claims_root_bound
+            && private_summary_probe_root_bound;
         let bootstrap_nodes_bound = evidence.bootstrap_node_set_root
             == summary.public_bootstrap_profile.bootstrap_node_set_root
             && evidence.bootstrap_node_count >= summary.public_bootstrap_profile.bootstrap_node_count
@@ -5741,9 +5763,16 @@ impl Testnet {
             tls_endpoint_pin_count_sufficient,
             tls_required,
             proxy_policy_verified,
+            rate_limits_enforced,
+            firewall_allows_public_only,
+            public_status_manifest_redacted,
+            proxy_policy_claims_root_bound,
+            firewall_policy_claims_root_bound,
+            rate_limit_policy_claims_root_bound,
+            private_summary_probe_root_bound,
             bootstrap_nodes_bound,
             live_probe_roots_bound,
-            no_private_summary_exposed: evidence.no_private_summary_exposed,
+            no_private_summary_exposed,
             mainnet_custody_disabled,
             public_launch_bundle_root: Some(evidence.public_launch_bundle_root.clone()),
             public_launch_package_file_set_root: Some(
@@ -5786,6 +5815,12 @@ impl Testnet {
             tls_spki_pin_root: Some(evidence.tls_spki_pin_root.clone()),
             tls_endpoint_pin_set_root: Some(evidence.tls_endpoint_pin_set_root.clone()),
             tls_endpoint_pin_count: evidence.tls_endpoint_pin_count,
+            proxy_policy_claims_root: Some(evidence.proxy_policy_claims_root.clone()),
+            firewall_policy_claims_root: Some(evidence.firewall_policy_claims_root.clone()),
+            rate_limit_policy_claims_root: Some(
+                evidence.rate_limit_policy_claims_root.clone(),
+            ),
+            private_summary_probe_root: Some(evidence.private_summary_probe_root.clone()),
             preflight_receipt_bound,
             deployment_preflight_receipt_root: Some(
                 evidence.deployment_preflight_receipt_root.clone(),
@@ -6717,6 +6752,13 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         tls_endpoint_pin_count_sufficient: false,
         tls_required: false,
         proxy_policy_verified: false,
+        rate_limits_enforced: false,
+        firewall_allows_public_only: false,
+        public_status_manifest_redacted: false,
+        proxy_policy_claims_root_bound: false,
+        firewall_policy_claims_root_bound: false,
+        rate_limit_policy_claims_root_bound: false,
+        private_summary_probe_root_bound: false,
         bootstrap_nodes_bound: false,
         live_probe_roots_bound: false,
         no_private_summary_exposed: false,
@@ -6748,6 +6790,10 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         tls_spki_pin_root: None,
         tls_endpoint_pin_set_root: None,
         tls_endpoint_pin_count: 0,
+        proxy_policy_claims_root: None,
+        firewall_policy_claims_root: None,
+        rate_limit_policy_claims_root: None,
+        private_summary_probe_root: None,
         preflight_receipt_bound: false,
         deployment_preflight_receipt_root: None,
         deployment_preflight_phase_set_root: None,
@@ -7050,6 +7096,31 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
         ),
         ("tls_required", report.tls_required),
         ("proxy_policy_verified", report.proxy_policy_verified),
+        ("rate_limits_enforced", report.rate_limits_enforced),
+        (
+            "firewall_allows_public_only",
+            report.firewall_allows_public_only,
+        ),
+        (
+            "public_status_manifest_redacted",
+            report.public_status_manifest_redacted,
+        ),
+        (
+            "proxy_policy_claims_root_bound",
+            report.proxy_policy_claims_root_bound,
+        ),
+        (
+            "firewall_policy_claims_root_bound",
+            report.firewall_policy_claims_root_bound,
+        ),
+        (
+            "rate_limit_policy_claims_root_bound",
+            report.rate_limit_policy_claims_root_bound,
+        ),
+        (
+            "private_summary_probe_root_bound",
+            report.private_summary_probe_root_bound,
+        ),
         ("bootstrap_nodes_bound", report.bootstrap_nodes_bound),
         ("live_probe_roots_bound", report.live_probe_roots_bound),
         (
@@ -27725,6 +27796,46 @@ mod tests {
         ));
         assert!(summary.public_deployment.tls_endpoint_pin_count >= 7);
         assert!(summary.public_deployment.proxy_policy_verified);
+        assert!(summary.public_deployment.rate_limits_enforced);
+        assert!(summary.public_deployment.firewall_allows_public_only);
+        assert!(summary.public_deployment.public_status_manifest_redacted);
+        assert!(summary.public_deployment.no_private_summary_exposed);
+        assert!(summary.public_deployment.proxy_policy_claims_root_bound);
+        assert!(summary
+            .public_deployment
+            .firewall_policy_claims_root_bound);
+        assert!(summary
+            .public_deployment
+            .rate_limit_policy_claims_root_bound);
+        assert!(summary.public_deployment.private_summary_probe_root_bound);
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .proxy_policy_claims_root
+                .as_deref()
+                .expect("proxy policy claims root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .firewall_policy_claims_root
+                .as_deref()
+                .expect("firewall policy claims root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .rate_limit_policy_claims_root
+                .as_deref()
+                .expect("rate limit policy claims root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .private_summary_probe_root
+                .as_deref()
+                .expect("private summary probe root")
+        ));
         assert!(summary.public_deployment.preflight_receipt_bound);
         assert!(summary.public_deployment.runbook_receipt_bound);
         assert!(is_hex_root(
@@ -30414,6 +30525,83 @@ mod tests {
             "tls_endpoint_pin_set_root_bound",
             "tls_endpoint_pin_count_sufficient",
             "tls_required",
+        ] {
+            assert!(
+                remediation
+                    .failed_subchecks
+                    .contains(&failed_subcheck.to_string()),
+                "missing failed subcheck {failed_subcheck}"
+            );
+        }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_unverified_proxy_policy() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path = write_public_deployment_evidence(&valid_public_deployment_evidence(
+            &base_summary,
+        ));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        evidence.rate_limits_enforced = false;
+        evidence.firewall_allows_public_only = false;
+        evidence.no_private_summary_exposed = false;
+        evidence.public_status_manifest_redacted = false;
+        evidence.proxy_policy_claims_root = "missing-proxy-policy-claims-root".to_string();
+        evidence.firewall_policy_claims_root =
+            "missing-firewall-policy-claims-root".to_string();
+        evidence.rate_limit_policy_claims_root =
+            "missing-rate-limit-policy-claims-root".to_string();
+        evidence.private_summary_probe_root = "missing-private-summary-probe-root".to_string();
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.proxy_policy_verified);
+        assert!(!summary.public_deployment.rate_limits_enforced);
+        assert!(!summary.public_deployment.firewall_allows_public_only);
+        assert!(!summary.public_deployment.no_private_summary_exposed);
+        assert!(!summary.public_deployment.public_status_manifest_redacted);
+        assert!(!summary.public_deployment.proxy_policy_claims_root_bound);
+        assert!(!summary
+            .public_deployment
+            .firewall_policy_claims_root_bound);
+        assert!(!summary
+            .public_deployment
+            .rate_limit_policy_claims_root_bound);
+        assert!(!summary.public_deployment.private_summary_probe_root_bound);
+        assert_eq!(
+            summary
+                .public_deployment
+                .proxy_policy_claims_root
+                .as_deref()
+                .expect("proxy policy claims root"),
+            "missing-proxy-policy-claims-root"
+        );
+        assert_eq!(
+            summary.public_launch_readiness.blocking_gaps,
+            vec!["public-launch-deployment-attestation"]
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        for failed_subcheck in [
+            "proxy_policy_verified",
+            "rate_limits_enforced",
+            "firewall_allows_public_only",
+            "public_status_manifest_redacted",
+            "proxy_policy_claims_root_bound",
+            "firewall_policy_claims_root_bound",
+            "rate_limit_policy_claims_root_bound",
+            "private_summary_probe_root_bound",
+            "no_private_summary_exposed",
         ] {
             assert!(
                 remediation

@@ -687,8 +687,9 @@ Deployment-attestation remediations
 also list failed subchecks, including capture-plan, launch-bundle, package
 file-set, bootstrap profile/report/rate-limit policy roots, status-manifest
 root/payload, preflight, runbook, per-endpoint publicness, TLS pin
-roots/counts, probe, privacy-denial, and custody bindings; the redacted public
-status manifest does not include that local operator report.
+roots/counts, proxy/firewall/rate-limit policy roots, probe, privacy-denial,
+and custody bindings; the redacted public status manifest does not include that
+local operator report.
 
 `--fail-on-readiness-gaps` also requires `--mainnet-readiness` and turns the
 dry-run report into a CI/release gate: the command exits nonzero until every
