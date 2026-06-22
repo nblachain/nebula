@@ -11308,19 +11308,20 @@ fn public_launch_artifact_manifest(summary: &TestnetSummary) -> Value {
                     publishable,
                 ),
             )| {
-                let artifact_record_root = root(&[
-                    "public-launch-artifact-record",
-                    CHAIN_ID,
+                let artifact_record_root = public_launch_artifact_record_root(
                     &summary.manifest_id,
                     artifact_id,
                     kind,
                     export_flag,
                     root_field,
                     artifact_root_value,
-                    bool_str(*operator_private),
-                    bool_str(*publishable),
-                    bool_str(true),
-                ]);
+                    index + 1,
+                    *operator_private,
+                    *publishable,
+                    true,
+                    false,
+                    false,
+                );
                 artifact_record_roots.push(artifact_record_root.clone());
                 json!({
                     "order": index + 1,
@@ -11384,6 +11385,38 @@ fn public_launch_artifact_manifest(summary: &TestnetSummary) -> Value {
     let manifest_root = value_root("public-launch-artifact-manifest", &manifest);
     manifest["public_launch_artifact_manifest_root"] = json!(manifest_root);
     manifest
+}
+
+fn public_launch_artifact_record_root(
+    manifest_id: &str,
+    artifact_id: &str,
+    kind: &str,
+    export_flag: &str,
+    root_field: &str,
+    artifact_root: &str,
+    order: usize,
+    operator_private: bool,
+    publishable: bool,
+    required_before_capture: bool,
+    usable_as_public_deployment_evidence: bool,
+    usable_as_mainnet_custody_approval: bool,
+) -> String {
+    root(&[
+        "public-launch-artifact-record",
+        CHAIN_ID,
+        manifest_id,
+        artifact_id,
+        kind,
+        export_flag,
+        root_field,
+        artifact_root,
+        &order.to_string(),
+        bool_str(operator_private),
+        bool_str(publishable),
+        bool_str(required_before_capture),
+        bool_str(usable_as_public_deployment_evidence),
+        bool_str(usable_as_mainnet_custody_approval),
+    ])
 }
 
 fn public_bootstrap_profile_template(summary: &TestnetSummary) -> Value {
@@ -23476,6 +23509,7 @@ mod tests {
             artifacts[3]["root"],
             expected_bundle["public_launch_bundle_root"]
         );
+        let mut expected_record_roots = Vec::new();
         for (index, artifact) in artifacts.iter().enumerate() {
             assert_eq!(artifact["order"], index + 1);
             assert_eq!(artifact["required_before_capture"], true);
@@ -23486,12 +23520,51 @@ mod tests {
                     .as_str()
                     .expect("artifact record root")
             ));
+            let expected_record_root = public_launch_artifact_record_root(
+                &summary.manifest_id,
+                artifact["artifact_id"].as_str().expect("artifact id"),
+                artifact["kind"].as_str().expect("artifact kind"),
+                artifact["export_flag"].as_str().expect("export flag"),
+                artifact["root_field"].as_str().expect("root field"),
+                artifact["root"].as_str().expect("artifact root"),
+                index + 1,
+                artifact["operator_private"]
+                    .as_bool()
+                    .expect("operator private"),
+                artifact["publishable"].as_bool().expect("publishable"),
+                true,
+                false,
+                false,
+            );
+            assert_eq!(artifact["artifact_record_root"], expected_record_root);
+            let metadata_tampered_record_root = public_launch_artifact_record_root(
+                &summary.manifest_id,
+                artifact["artifact_id"].as_str().expect("artifact id"),
+                artifact["kind"].as_str().expect("artifact kind"),
+                artifact["export_flag"].as_str().expect("export flag"),
+                artifact["root_field"].as_str().expect("root field"),
+                artifact["root"].as_str().expect("artifact root"),
+                index + 1,
+                artifact["operator_private"]
+                    .as_bool()
+                    .expect("operator private"),
+                artifact["publishable"].as_bool().expect("publishable"),
+                false,
+                false,
+                false,
+            );
+            assert_ne!(expected_record_root, metadata_tampered_record_root);
+            expected_record_roots.push(expected_record_root);
         }
         assert!(is_hex_root(
             value["artifact_set_root"]
                 .as_str()
                 .expect("artifact set root")
         ));
+        assert_eq!(
+            value["artifact_set_root"],
+            collection_root("public-launch-artifact-set", expected_record_roots)
+        );
         assert!(is_hex_root(
             value["public_launch_artifact_manifest_root"]
                 .as_str()

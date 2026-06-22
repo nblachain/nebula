@@ -372,8 +372,9 @@ binding rollback/reset communications, and confirming no mainnet custody.
 `nebula-public-launch-artifact-manifest` over the pre-capture handoff set:
 public status manifest, public bootstrap profile template, typed deployment
 runbook, and public launch bundle. It records each artifact's export flag,
-root field, root, record root, and a collection `artifact_set_root` without
-embedding operator-private evidence. The capture plan and deployment evidence
+root field, root, order, required-before-capture flag, publishability flag,
+non-evidence/non-custody flags, record root, and a collection `artifact_set_root`
+without embedding operator-private evidence. The capture plan and deployment evidence
 worksheet bind `public_launch_artifact_manifest_root` and
 `public_launch_artifact_set_root`, so deployment CI can freeze the exact files
 used before public probes, TLS pin capture, and observer attestations begin.
