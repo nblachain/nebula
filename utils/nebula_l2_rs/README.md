@@ -525,8 +525,8 @@ bootstrap operator registry records, observer records, and observer/operator
 signature verification transcripts must all bind the same `deployment_run_id`
 so deployment CI cannot stitch together independently valid fragments from
 different captures. The runner binds the current run's public status manifest,
-launch bundle, bootstrap profile, node set, and policy roots, derives
-TLS endpoint-pin set roots and the aggregate SPKI root from
+launch bundle, package file-set root, bootstrap profile, node set, and policy
+roots, derives TLS endpoint-pin set roots and the aggregate SPKI root from
 `tls_endpoint_pins`, derives bootstrap node/operator/region roots plus public
 endpoint-set roots and the bootstrap operator count from `bootstrap_nodes`,
 derives `bootstrap_node_probe_set_root` from one reachability record per
@@ -547,8 +547,9 @@ evidence root and immediately validates the assembled output with the same
 The verifier and public deployment report also compare the embedded
 `capture_plan_root`, `capture_contract_root`, and
 `deployment_preflight_checklist_root` against the current generated capture plan,
-and require the embedded preflight receipt root, phase-set root, and phase count
-to match the completed receipt body. Schema v5 also requires the embedded
+require the embedded `public_launch_package_file_set_root` to match the current
+rooted package file set, and require the embedded preflight receipt root,
+phase-set root, and phase count to match the completed receipt body. Schema v5 also requires the embedded
 public deployment runbook root, step-set root, runbook receipt root,
 step-receipt-set root, and step receipt count to match the completed runbook
 receipt body and the current generated runbook. A self-consistent attestation
@@ -567,7 +568,8 @@ and sensitive field names, requires HTTPS publicly routable
 RPC/status/health/metrics/incident-contact/faucet/reset endpoints, and requires a publicly
 routable P2P endpoint. It must bind the capture plan root, capture contract
 root, and deployment preflight checklist root generated for the same run.
-It also must bind `deployment_preflight_receipt`,
+It also must bind the current `public_launch_package_file_set_root`,
+`deployment_preflight_receipt`,
 `deployment_preflight_receipt_root`, `deployment_preflight_phase_set_root`, and
 `deployment_preflight_phase_count`, proving every required preflight phase was
 completed in order before the public deployment evidence was assembled.

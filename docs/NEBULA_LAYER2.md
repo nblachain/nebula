@@ -3301,8 +3301,8 @@ real XMR.
   capture-plan, and freshness transcripts into the runner and receive a rooted schema v5
   attestation. The
   assembler binds the current run's public status manifest, launch bundle,
-  bootstrap profile, launch artifact manifest roots, capture plan, preflight
-  checklist, completed preflight
+  package file-set root, bootstrap profile, launch artifact manifest roots,
+  capture plan, preflight checklist, completed preflight
   receipt, completed runbook receipt, node set, and policy roots, derives
   preflight phase-set and receipt roots, derives runbook step-receipt-set and
   receipt roots, derives TLS endpoint-pin set
@@ -3332,10 +3332,11 @@ real XMR.
   the public launch gate. The public deployment report compares the embedded
   `capture_plan_root`, `capture_contract_root`, and
   `deployment_preflight_checklist_root` against the current generated capture
-  plan, and requires the embedded `deployment_preflight_receipt_root`,
-  `deployment_preflight_phase_set_root`, and phase count to match the completed
-  receipt body. It also requires the embedded public deployment runbook root,
-  step-set root, `public_deployment_runbook_receipt_root`,
+  plan, requires the embedded `public_launch_package_file_set_root` to match
+  the current rooted package file set, and requires the embedded
+  `deployment_preflight_receipt_root`, `deployment_preflight_phase_set_root`,
+  and phase count to match the completed receipt body. It also requires the
+  embedded public deployment runbook root, step-set root, `public_deployment_runbook_receipt_root`,
   `public_deployment_runbook_step_receipt_set_root`, and step receipt count to
   match the completed receipt body and the current generated runbook. Missing,
   incomplete, out-of-order, stale, source-mismatched, or root-mismatched
@@ -3350,9 +3351,9 @@ real XMR.
   artifact.
 - Filled public deployment attestations bind the launch bundle to publicly
   routable HTTPS endpoints, the exact capture plan root, capture contract root,
-  deployment preflight checklist root, completed preflight receipt root and
-  phase-set root, completed runbook receipt root and step-receipt-set root,
-  typed TLS endpoint-pin records for public RPC,
+  deployment preflight checklist root, package file-set root, completed
+  preflight receipt root and phase-set root, completed runbook receipt root and
+  step-receipt-set root, typed TLS endpoint-pin records for public RPC,
   status-page, health, metrics, incident-contact, faucet, and reset-runbook surfaces, typed bootstrap node
   records whose derived node/operator/region roots must match the public bootstrap profile,
   proxy/firewall/rate-limit roots and their typed claim bodies, the captured

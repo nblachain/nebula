@@ -162,6 +162,7 @@ const REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS: &[&str] = &[
     "capture_plan_root",
     "capture_contract_root",
     "deployment_preflight_checklist_root",
+    "public_launch_package_file_set_root",
     "deployment_preflight_receipt",
     "public_deployment_runbook_receipt",
     "tls_endpoint_pins",
@@ -985,6 +986,7 @@ struct PublicDeploymentEvidence {
     public_deployment_runbook_step_receipt_set_root: String,
     public_deployment_runbook_step_receipt_count: u64,
     public_launch_bundle_root: String,
+    public_launch_package_file_set_root: String,
     testnet_manifest_id: String,
     public_status_manifest_root: String,
     public_status_manifest: Value,
@@ -1090,6 +1092,7 @@ struct PublicDeploymentReport {
     capture_plan_bound: bool,
     matches_current_manifest: bool,
     public_launch_bundle_root_bound: bool,
+    public_launch_package_file_set_root_bound: bool,
     bootstrap_profile_bound: bool,
     status_manifest_root_bound: bool,
     endpoint_set_public: bool,
@@ -1100,6 +1103,7 @@ struct PublicDeploymentReport {
     no_private_summary_exposed: bool,
     mainnet_custody_disabled: bool,
     public_launch_bundle_root: Option<String>,
+    public_launch_package_file_set_root: Option<String>,
     public_status_manifest_root: Option<String>,
     capture_plan_root: Option<String>,
     preflight_receipt_bound: bool,
@@ -5423,6 +5427,8 @@ impl Testnet {
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
+        let expected_public_launch_package_file_set_root =
+            public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
         let expected_capture_plan = public_deployment_capture_plan(summary);
         let expected_capture_plan_root = expected_capture_plan["capture_plan_root"]
             .as_str()
@@ -5504,6 +5510,8 @@ impl Testnet {
                 );
         let public_launch_bundle_root_bound =
             evidence.public_launch_bundle_root == expected_public_launch_bundle_root;
+        let public_launch_package_file_set_root_bound =
+            evidence.public_launch_package_file_set_root == expected_public_launch_package_file_set_root;
         let bootstrap_profile_bound = evidence.public_bootstrap_profile_root
             == summary.public_bootstrap_profile.profile_root
             && evidence.public_bootstrap_profile_report_root
@@ -5569,6 +5577,7 @@ impl Testnet {
             && capture_plan_bound
             && matches_current_manifest
             && public_launch_bundle_root_bound
+            && public_launch_package_file_set_root_bound
             && bootstrap_profile_bound
             && status_manifest_root_bound
             && endpoint_set_public
@@ -5600,6 +5609,8 @@ impl Testnet {
                 .to_string(),
             &evidence.public_launch_bundle_root,
             &expected_public_launch_bundle_root,
+            &evidence.public_launch_package_file_set_root,
+            &expected_public_launch_package_file_set_root,
             &evidence.public_status_manifest_root,
             &expected_public_status_manifest_root,
             &summary.public_bootstrap_profile.report_root,
@@ -5614,6 +5625,7 @@ impl Testnet {
             capture_plan_bound,
             matches_current_manifest,
             public_launch_bundle_root_bound,
+            public_launch_package_file_set_root_bound,
             bootstrap_profile_bound,
             status_manifest_root_bound,
             endpoint_set_public,
@@ -5624,6 +5636,9 @@ impl Testnet {
             no_private_summary_exposed: evidence.no_private_summary_exposed,
             mainnet_custody_disabled,
             public_launch_bundle_root: Some(evidence.public_launch_bundle_root.clone()),
+            public_launch_package_file_set_root: Some(
+                evidence.public_launch_package_file_set_root.clone(),
+            ),
             public_status_manifest_root: Some(evidence.public_status_manifest_root.clone()),
             capture_plan_root: Some(evidence.capture_plan_root.clone()),
             preflight_receipt_bound,
@@ -6531,6 +6546,7 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         capture_plan_bound: false,
         matches_current_manifest: false,
         public_launch_bundle_root_bound: false,
+        public_launch_package_file_set_root_bound: false,
         bootstrap_profile_bound: false,
         status_manifest_root_bound: false,
         endpoint_set_public: false,
@@ -6541,6 +6557,7 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         no_private_summary_exposed: false,
         mainnet_custody_disabled: false,
         public_launch_bundle_root: None,
+        public_launch_package_file_set_root: None,
         public_status_manifest_root: None,
         capture_plan_root: None,
         preflight_receipt_bound: false,
@@ -7783,6 +7800,8 @@ fn write_public_deployment_evidence_from_capture(
         .as_str()
         .unwrap_or_default()
         .to_string();
+    let public_launch_package_file_set_root =
+        public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
     let deployment_runbook = public_deployment_runbook(summary);
     let public_deployment_runbook_root = deployment_runbook["public_deployment_runbook_root"]
         .as_str()
@@ -7822,6 +7841,8 @@ fn write_public_deployment_evidence_from_capture(
     let capture_contract_root = required_root(&value, "capture_contract_root")?;
     let deployment_preflight_checklist_root =
         required_root(&value, "deployment_preflight_checklist_root")?;
+    let capture_package_file_set_root =
+        required_root(&value, "public_launch_package_file_set_root")?;
     ensure(
         capture_plan_root == expected_capture_plan_root,
         "public deployment capture_plan_root mismatch",
@@ -7833,6 +7854,10 @@ fn write_public_deployment_evidence_from_capture(
     ensure(
         deployment_preflight_checklist_root == expected_preflight_checklist_root,
         "public deployment deployment_preflight_checklist_root mismatch",
+    )?;
+    ensure(
+        capture_package_file_set_root == public_launch_package_file_set_root,
+        "public deployment public_launch_package_file_set_root mismatch",
     )?;
     let preflight_receipt_validation = derive_public_deployment_preflight_receipt_fields(
         &mut value,
@@ -7982,6 +8007,10 @@ fn write_public_deployment_evidence_from_capture(
         map.insert(
             "public_launch_bundle_root".to_string(),
             json!(&public_launch_bundle_root),
+        );
+        map.insert(
+            "public_launch_package_file_set_root".to_string(),
+            json!(&public_launch_package_file_set_root),
         );
         map.insert(
             "testnet_manifest_id".to_string(),
@@ -13996,6 +14025,8 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
         )?;
     }
     let public_launch_bundle_root = required_root(&value, "public_launch_bundle_root")?;
+    let public_launch_package_file_set_root =
+        required_root(&value, "public_launch_package_file_set_root")?;
     let testnet_manifest_id = required_root(&value, "testnet_manifest_id")?;
     let public_status_manifest_root = required_root(&value, "public_status_manifest_root")?;
     let public_status_manifest =
@@ -14633,6 +14664,7 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
         public_deployment_runbook_step_receipt_set_root,
         public_deployment_runbook_step_receipt_count,
         public_launch_bundle_root,
+        public_launch_package_file_set_root,
         testnet_manifest_id,
         public_status_manifest_root,
         public_status_manifest,
@@ -20077,6 +20109,7 @@ fn public_deployment_provenance_root_from_value(value: &Value) -> Result<String,
         required_root(value, "public_deployment_runbook_step_receipt_set_root")?.as_str(),
         &required_u64(value, "public_deployment_runbook_step_receipt_count")?.to_string(),
         required_root(value, "public_launch_bundle_root")?.as_str(),
+        required_root(value, "public_launch_package_file_set_root")?.as_str(),
         required_root(value, "public_status_manifest_root")?.as_str(),
         required_root(value, "probe_observer_set_root")?.as_str(),
         required_root(value, "attestor_registry_root")?.as_str(),
@@ -20144,6 +20177,7 @@ fn public_deployment_attestation_root_from_value(value: &Value) -> Result<String
         required_root(value, "public_deployment_runbook_step_receipt_set_root")?.as_str(),
         &required_u64(value, "public_deployment_runbook_step_receipt_count")?.to_string(),
         required_root(value, "public_launch_bundle_root")?.as_str(),
+        required_root(value, "public_launch_package_file_set_root")?.as_str(),
         required_root(value, "testnet_manifest_id")?.as_str(),
         required_root(value, "public_status_manifest_root")?.as_str(),
         required_root(value, "public_bootstrap_profile_root")?.as_str(),
@@ -20286,6 +20320,7 @@ fn public_deployment_provenance_root(evidence: &PublicDeploymentEvidence) -> Str
             .public_deployment_runbook_step_receipt_count
             .to_string(),
         &evidence.public_launch_bundle_root,
+        &evidence.public_launch_package_file_set_root,
         &evidence.public_status_manifest_root,
         &evidence.probe_observer_set_root,
         &evidence.attestor_registry_root,
@@ -20344,6 +20379,7 @@ fn public_deployment_attestation_root(evidence: &PublicDeploymentEvidence) -> St
             .public_deployment_runbook_step_receipt_count
             .to_string(),
         &evidence.public_launch_bundle_root,
+        &evidence.public_launch_package_file_set_root,
         &evidence.testnet_manifest_id,
         &evidence.public_status_manifest_root,
         &evidence.public_bootstrap_profile_root,
@@ -25823,6 +25859,40 @@ mod tests {
     }
 
     #[test]
+    fn public_deployment_report_rejects_self_consistent_wrong_package_file_set_root() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut value: Value =
+            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
+                .expect("deployment evidence json");
+        value["public_launch_package_file_set_root"] =
+            json!(root(&["test-public-deployment", "wrong-package-file-set"]));
+        value["provenance_root"] =
+            json!(public_deployment_provenance_root_from_value(&value)
+                .expect("provenance root"));
+        value["evidence_root"] =
+            json!(public_deployment_attestation_root_from_value(&value)
+                .expect("evidence root"));
+        let path = write_public_deployment_evidence(
+            &serde_json::to_string_pretty(&value).expect("deployment evidence json"),
+        );
+        let evidence = load_public_deployment_evidence(&path)
+            .expect("self-consistent wrong package file set evidence loads");
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.public_launch_package_file_set_root_bound);
+        assert_eq!(
+            summary.public_launch_readiness.blocking_gaps,
+            vec!["public-launch-deployment-attestation"]
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn public_deployment_report_rejects_self_consistent_wrong_runbook_source_root() {
         let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
             .expect("mainnet readiness should parse");
@@ -28082,6 +28152,8 @@ mod tests {
             .as_str()
             .expect("launch bundle root")
             .to_string();
+        let public_launch_package_file_set_root =
+            public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
         let deployment_runbook = public_deployment_runbook(summary);
         let public_deployment_runbook_root = deployment_runbook["public_deployment_runbook_root"]
             .as_str()
@@ -28838,6 +28910,7 @@ mod tests {
                 public_deployment_runbook_receipt_validation
                     .public_deployment_runbook_step_receipt_count,
             public_launch_bundle_root,
+            public_launch_package_file_set_root,
             testnet_manifest_id: summary.manifest_id.clone(),
             public_status_manifest_root: public_status_manifest_root.clone(),
             public_status_manifest: public_status.clone(),
