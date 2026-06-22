@@ -3355,8 +3355,9 @@ real XMR.
   capture audit that lists missing required fields, missing or invalid public
   endpoint fields, invalid freshness windows, stale capture times,
   invalid deployment run ids, missing or extra TLS endpoint pin roles,
-  missing or extra public-surface probe roles, malformed public-surface probe
-  records, insufficient bootstrap node counts, missing or extra bootstrap-node
+  malformed TLS endpoint pin records, missing or extra public-surface probe
+  roles, malformed public-surface probe records, insufficient bootstrap node
+  counts, missing or extra bootstrap-node
   probe slots, malformed bootstrap-node probe records, missing or extra
   bootstrap-operator registry commitments, malformed bootstrap-operator
   registry records, unreachable

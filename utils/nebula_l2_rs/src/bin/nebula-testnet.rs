@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     env, fs,
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, TcpListener, TcpStream},
@@ -7755,6 +7755,14 @@ fn public_deployment_capture_audit(
         extra_tls_endpoint_pin_roles,
         duplicate_tls_endpoint_pin_roles,
         tls_endpoint_pin_coverage_valid,
+        invalid_tls_endpoint_pin_record_indexes,
+        invalid_tls_endpoint_pin_binding_indexes,
+        invalid_tls_endpoint_pin_endpoint_indexes,
+        duplicate_tls_endpoint_pin_url_indexes,
+        invalid_tls_endpoint_pin_assertion_indexes,
+        invalid_tls_endpoint_pin_root_indexes,
+        invalid_tls_endpoint_pin_observation_time_indexes,
+        tls_endpoint_pin_fields_valid,
         public_surface_probe_count,
         missing_public_surface_probe_roles,
         extra_public_surface_probe_roles,
@@ -7885,6 +7893,7 @@ fn public_deployment_capture_audit(
                     .map(|run_id| validate_public_deployment_run_id(run_id).is_ok())
                     .unwrap_or(true);
                 let tls_pin_coverage = public_tls_endpoint_pin_coverage_audit(&value);
+                let tls_pin_fields = public_tls_endpoint_pin_field_audit(&value);
                 let surface_probe_coverage = public_surface_probe_coverage_audit(&value);
                 let surface_probe_fields = public_surface_probe_field_audit(&value);
                 let bootstrap_coverage =
@@ -7993,6 +8002,14 @@ fn public_deployment_capture_audit(
                     tls_pin_coverage.extra_pin_roles,
                     tls_pin_coverage.duplicate_pin_roles,
                     tls_pin_coverage.pin_coverage_valid,
+                    tls_pin_fields.invalid_record_indexes,
+                    tls_pin_fields.invalid_binding_indexes,
+                    tls_pin_fields.invalid_endpoint_indexes,
+                    tls_pin_fields.duplicate_url_indexes,
+                    tls_pin_fields.invalid_assertion_indexes,
+                    tls_pin_fields.invalid_root_indexes,
+                    tls_pin_fields.invalid_observation_time_indexes,
+                    tls_pin_fields.fields_valid,
                     surface_probe_coverage.public_surface_probe_count,
                     surface_probe_coverage.missing_probe_roles,
                     surface_probe_coverage.extra_probe_roles,
@@ -8092,6 +8109,14 @@ fn public_deployment_capture_audit(
                 Vec::new(),
                 Vec::new(),
                 true,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                true,
                 0,
                 Vec::new(),
                 Vec::new(),
@@ -8179,6 +8204,7 @@ fn public_deployment_capture_audit(
         && capture_time_current
         && deployment_run_id_valid
         && tls_endpoint_pin_coverage_valid
+        && tls_endpoint_pin_fields_valid
         && public_surface_probe_coverage_valid
         && public_surface_probe_fields_valid
         && bootstrap_node_count_valid
@@ -8239,6 +8265,9 @@ fn public_deployment_capture_audit(
     }
     if !tls_endpoint_pin_coverage_valid {
         structural_failed_checks.push("tls_endpoint_pin_coverage_valid".to_string());
+    }
+    if !tls_endpoint_pin_fields_valid {
+        structural_failed_checks.push("tls_endpoint_pin_fields_valid".to_string());
     }
     if !public_surface_probe_coverage_valid {
         structural_failed_checks.push("public_surface_probe_coverage_valid".to_string());
@@ -8390,6 +8419,20 @@ fn public_deployment_capture_audit(
     audit["extra_tls_endpoint_pin_roles"] = json!(extra_tls_endpoint_pin_roles);
     audit["duplicate_tls_endpoint_pin_roles"] = json!(duplicate_tls_endpoint_pin_roles);
     audit["tls_endpoint_pin_coverage_valid"] = json!(tls_endpoint_pin_coverage_valid);
+    audit["invalid_tls_endpoint_pin_record_indexes"] =
+        json!(invalid_tls_endpoint_pin_record_indexes);
+    audit["invalid_tls_endpoint_pin_binding_indexes"] =
+        json!(invalid_tls_endpoint_pin_binding_indexes);
+    audit["invalid_tls_endpoint_pin_endpoint_indexes"] =
+        json!(invalid_tls_endpoint_pin_endpoint_indexes);
+    audit["duplicate_tls_endpoint_pin_url_indexes"] =
+        json!(duplicate_tls_endpoint_pin_url_indexes);
+    audit["invalid_tls_endpoint_pin_assertion_indexes"] =
+        json!(invalid_tls_endpoint_pin_assertion_indexes);
+    audit["invalid_tls_endpoint_pin_root_indexes"] = json!(invalid_tls_endpoint_pin_root_indexes);
+    audit["invalid_tls_endpoint_pin_observation_time_indexes"] =
+        json!(invalid_tls_endpoint_pin_observation_time_indexes);
+    audit["tls_endpoint_pin_fields_valid"] = json!(tls_endpoint_pin_fields_valid);
     audit["required_public_surface_probe_roles"] = json!(REQUIRED_PUBLIC_SURFACE_PROBE_ROLES);
     audit["public_surface_probe_count"] = json!(public_surface_probe_count);
     audit["missing_public_surface_probe_roles"] = json!(missing_public_surface_probe_roles);
@@ -8550,6 +8593,170 @@ fn public_tls_endpoint_pin_coverage_audit(value: &Value) -> PublicTlsPinCoverage
         duplicate_pin_roles: duplicate_roles.into_iter().collect(),
         pin_coverage_valid,
     }
+}
+
+#[derive(Clone, Debug)]
+struct PublicTlsPinFieldAudit {
+    invalid_record_indexes: Vec<usize>,
+    invalid_binding_indexes: Vec<usize>,
+    invalid_endpoint_indexes: Vec<usize>,
+    duplicate_url_indexes: Vec<usize>,
+    invalid_assertion_indexes: Vec<usize>,
+    invalid_root_indexes: Vec<usize>,
+    invalid_observation_time_indexes: Vec<usize>,
+    fields_valid: bool,
+}
+
+fn public_tls_endpoint_pin_field_audit(value: &Value) -> PublicTlsPinFieldAudit {
+    let tls_endpoint_pins = value.get("tls_endpoint_pins");
+    let deployment_run_id = value.get("deployment_run_id").and_then(Value::as_str);
+    let observed_at_unix_ms = value.get("observed_at_unix_ms").and_then(Value::as_u64);
+    let expires_at_unix_ms = value.get("expires_at_unix_ms").and_then(Value::as_u64);
+    let public_launch_bundle_root = value
+        .get("public_launch_bundle_root")
+        .and_then(Value::as_str);
+    let expected_endpoints = public_tls_endpoint_specs_from_capture(value);
+    let mut invalid_record_indexes = Vec::new();
+    let mut invalid_binding_indexes = Vec::new();
+    let mut invalid_endpoint_indexes = Vec::new();
+    let mut duplicate_url_indexes = Vec::new();
+    let mut invalid_assertion_indexes = Vec::new();
+    let mut invalid_root_indexes = Vec::new();
+    let mut invalid_observation_time_indexes = Vec::new();
+    if let Some(pins) = tls_endpoint_pins.and_then(Value::as_array) {
+        let mut seen_urls = BTreeSet::new();
+        for (index, pin) in pins.iter().enumerate() {
+            if let Some(url) = pin.get("url").and_then(Value::as_str) {
+                if !seen_urls.insert(url.to_string()) {
+                    duplicate_url_indexes.push(index);
+                }
+            }
+        }
+        for (index, pin) in pins.iter().enumerate() {
+            if !pin.is_object() {
+                invalid_record_indexes.push(index);
+                continue;
+            }
+            if pin.get("chain_id").and_then(Value::as_str) != Some(CHAIN_ID)
+                || deployment_run_id
+                    .map(|run_id| {
+                        pin.get("deployment_run_id").and_then(Value::as_str) == Some(run_id)
+                    })
+                    .unwrap_or(false)
+                    == false
+                || pin
+                    .get("public_launch_bundle_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                    == false
+                || public_launch_bundle_root
+                    .map(|root| {
+                        pin.get("public_launch_bundle_root").and_then(Value::as_str) == Some(root)
+                    })
+                    .unwrap_or(true)
+                    == false
+            {
+                invalid_binding_indexes.push(index);
+            }
+            let endpoint_role = pin.get("endpoint_role").and_then(Value::as_str);
+            let url = pin.get("url").and_then(Value::as_str);
+            let expected_url = endpoint_role
+                .and_then(|role| expected_endpoints.get(role))
+                .map(String::as_str);
+            if endpoint_role
+                .map(|role| PUBLIC_TLS_ENDPOINT_PIN_ROLES.contains(&role))
+                != Some(true)
+                || url.map(public_https_endpoint) != Some(true)
+                || expected_url.zip(url).is_some_and(|(expected, observed)| expected != observed)
+            {
+                invalid_endpoint_indexes.push(index);
+            }
+            if pin.get("tls_version").and_then(Value::as_str) != Some("TLS1.3")
+                || pin.get("hostname_verified").and_then(Value::as_bool) != Some(true)
+                || pin.get("spki_pin_matched").and_then(Value::as_bool) != Some(true)
+                || pin.get("certificate_not_expired").and_then(Value::as_bool) != Some(true)
+            {
+                invalid_assertion_indexes.push(index);
+            }
+            let observed_at = pin.get("observed_at_unix_ms").and_then(Value::as_u64);
+            if observed_at
+                .map(|observed_at| {
+                    observed_at_unix_ms
+                        .zip(expires_at_unix_ms)
+                        .map(|(window_start, window_end)| {
+                            observed_at >= window_start && observed_at <= window_end
+                        })
+                        .unwrap_or(true)
+                })
+                != Some(true)
+            {
+                invalid_observation_time_indexes.push(index);
+            }
+            let roots_valid = ["spki_pin_root", "certificate_chain_root", "issuer_root"]
+                .iter()
+                .all(|field| {
+                    pin.get(*field)
+                        .and_then(Value::as_str)
+                        .is_some_and(is_hex_root)
+                })
+                && pin
+                    .get("pin_record_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                && public_tls_endpoint_pin_record_root(pin)
+                    .map(|root| {
+                        pin.get("pin_record_root").and_then(Value::as_str)
+                            == Some(root.as_str())
+                    })
+                    .unwrap_or(false);
+            if !roots_valid {
+                invalid_root_indexes.push(index);
+            }
+        }
+    }
+    let fields_valid = match tls_endpoint_pins {
+        Some(Value::Array(_)) => {
+            invalid_record_indexes.is_empty()
+                && invalid_binding_indexes.is_empty()
+                && invalid_endpoint_indexes.is_empty()
+                && duplicate_url_indexes.is_empty()
+                && invalid_assertion_indexes.is_empty()
+                && invalid_root_indexes.is_empty()
+                && invalid_observation_time_indexes.is_empty()
+        }
+        Some(_) => false,
+        None => true,
+    };
+    PublicTlsPinFieldAudit {
+        invalid_record_indexes,
+        invalid_binding_indexes,
+        invalid_endpoint_indexes,
+        duplicate_url_indexes,
+        invalid_assertion_indexes,
+        invalid_root_indexes,
+        invalid_observation_time_indexes,
+        fields_valid,
+    }
+}
+
+fn public_tls_endpoint_specs_from_capture(value: &Value) -> BTreeMap<String, String> {
+    [
+        ("public_rpc_url", "public_rpc_url"),
+        ("status_page_url", "status_page_url"),
+        ("health_check_url", "health_check_url"),
+        ("metrics_url", "metrics_url"),
+        ("incident_contact_url", "incident_contact_url"),
+        ("faucet_url", "faucet_url"),
+        ("reset_runbook_url", "reset_runbook_url"),
+    ]
+    .into_iter()
+    .filter_map(|(role, field)| {
+        value
+            .get(field)
+            .and_then(Value::as_str)
+            .map(|endpoint| (role.to_string(), endpoint.to_string()))
+    })
+    .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -27072,6 +27279,48 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("tls_endpoint_pin_coverage_valid")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_invalid_tls_endpoint_pin_fields() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        capture["tls_endpoint_pins"][0]["chain_id"] = json!("wrong-chain");
+        capture["tls_endpoint_pins"][0]["url"] = json!("http://127.0.0.1:8080");
+        capture["tls_endpoint_pins"][0]["tls_version"] = json!("TLS1.2");
+        capture["tls_endpoint_pins"][0]["hostname_verified"] = json!(false);
+        capture["tls_endpoint_pins"][0]["observed_at_unix_ms"] = json!(0);
+        capture["tls_endpoint_pins"][1]["url"] = json!("http://127.0.0.1:8080");
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit invalid TLS endpoint pin capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["tls_endpoint_pin_fields_valid"], false);
+        assert_eq!(audit["invalid_tls_endpoint_pin_binding_indexes"], json!([0]));
+        assert_eq!(audit["invalid_tls_endpoint_pin_endpoint_indexes"], json!([0, 1]));
+        assert_eq!(audit["duplicate_tls_endpoint_pin_url_indexes"], json!([1]));
+        assert_eq!(audit["invalid_tls_endpoint_pin_assertion_indexes"], json!([0]));
+        assert_eq!(
+            audit["invalid_tls_endpoint_pin_observation_time_indexes"],
+            json!([0])
+        );
+        assert!(audit["invalid_tls_endpoint_pin_root_indexes"]
+            .as_array()
+            .expect("invalid TLS pin root indexes")
+            .contains(&json!(0)));
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("tls_endpoint_pin_fields_valid")));
         let _ = fs::remove_file(capture_path);
     }
 

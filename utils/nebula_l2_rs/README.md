@@ -488,8 +488,9 @@ requires `--mainnet-readiness` and writes a non-passing
 required capture fields, missing and invalid public endpoint fields, invalid
 timestamp types, freshness-window bounds, current capture-time validity,
 deployment-run-id validity, TLS endpoint pin counts and missing/extra/duplicate
-TLS endpoint pin roles, public-surface probe counts and missing/extra/duplicate
-probe roles, indexed malformed public-surface probe records, bootstrap
+TLS endpoint pin roles, indexed malformed TLS endpoint pin records,
+public-surface probe counts and missing/extra/duplicate probe roles,
+indexed malformed public-surface probe records, bootstrap
 node/probe counts, missing/extra/duplicate bootstrap-node probe slots,
 indexed malformed bootstrap-node probe records, bootstrap operator/registry counts,
 missing/extra/duplicate operator-registry commitments, indexed malformed
