@@ -7646,7 +7646,11 @@ fn public_launch_package_artifact_value(
         "public-launch-bundle" => Ok(public_launch_bundle(summary)),
         "public-launch-readiness-report" => Ok(public_launch_readiness_report_artifact(summary)),
         "public-deployment-evidence-template" => Ok(public_deployment_evidence_template(summary)),
-        "public-deployment-capture-plan" => Ok(public_deployment_capture_plan(summary)),
+        "public-deployment-capture-plan" => {
+            let plan = public_deployment_capture_plan(summary);
+            ensure_public_deployment_capture_plan_redacted(&plan)?;
+            Ok(plan)
+        }
         other => Err(format!("unknown public launch package artifact '{other}'")),
     }
 }
@@ -7683,6 +7687,7 @@ fn write_public_deployment_capture_plan(
 ) -> Result<(), String> {
     ensure_local_json_path(path, "--write-public-deployment-capture-plan")?;
     let plan = public_deployment_capture_plan(summary);
+    ensure_public_deployment_capture_plan_redacted(&plan)?;
     let encoded = serde_json::to_string_pretty(&plan).map_err(|error| {
         format!("failed to encode public deployment capture plan json: {error}")
     })?;
@@ -12620,6 +12625,189 @@ fn ensure_public_launch_bundle_redacted(value: &Value) -> Result<(), String> {
         value.get("public_launch_bundle_root").and_then(Value::as_str)
             == Some(expected_bundle_root.as_str()),
         "public launch bundle root mismatch",
+    )
+}
+
+fn ensure_public_deployment_capture_plan_redacted(value: &Value) -> Result<(), String> {
+    ensure(
+        value.get("kind").and_then(Value::as_str)
+            == Some("nebula-public-deployment-capture-plan"),
+        "public deployment capture plan kind mismatch",
+    )?;
+    ensure(
+        value
+            .get("operator_fill_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment capture plan must require operator fill-in",
+    )?;
+    ensure(
+        value
+            .get("usable_as_public_deployment_evidence")
+            .and_then(Value::as_bool)
+            == Some(false),
+        "public deployment capture plan must not be accepted as deployment evidence",
+    )?;
+    ensure(
+        value
+            .get("usable_as_mainnet_custody_approval")
+            .and_then(Value::as_bool)
+            == Some(false),
+        "public deployment capture plan must not be usable as mainnet custody approval",
+    )?;
+    ensure(
+        value.get("custody_mode").and_then(Value::as_str) == Some("no-mainnet-custody"),
+        "public deployment capture plan custody_mode mismatch",
+    )?;
+    for key in PUBLIC_STATUS_FORBIDDEN_KEYS {
+        ensure(
+            !value_contains_exact_key(value, key),
+            &format!("public deployment capture plan contains forbidden key '{key}'"),
+        )?;
+    }
+    for marker in SENSITIVE_FIELD_MARKERS {
+        ensure(
+            !value_contains_key_marker(value, marker),
+            &format!("public deployment capture plan contains sensitive marker '{marker}'"),
+        )?;
+    }
+    let deployment_preflight = value
+        .get("deployment_preflight")
+        .ok_or_else(|| "public deployment capture plan missing deployment_preflight".to_string())?;
+    ensure(
+        deployment_preflight.get("kind").and_then(Value::as_str)
+            == Some("nebula-public-deployment-preflight-checklist"),
+        "public deployment capture plan preflight checklist kind mismatch",
+    )?;
+    ensure(
+        deployment_preflight.get("phase_count").and_then(Value::as_u64)
+            == Some(REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len() as u64),
+        "public deployment capture plan preflight phase_count mismatch",
+    )?;
+    let required_phase_ids = deployment_preflight
+        .get("required_phase_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            "public deployment capture plan missing preflight required_phase_ids".to_string()
+        })?;
+    ensure(
+        required_phase_ids
+            .iter()
+            .map(Value::as_str)
+            .collect::<Option<Vec<_>>>()
+            == Some(REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.to_vec()),
+        "public deployment capture plan preflight required_phase_ids mismatch",
+    )?;
+    let phases = deployment_preflight
+        .get("phases")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "public deployment capture plan missing preflight phases".to_string())?;
+    ensure(
+        phases.len() == REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len(),
+        "public deployment capture plan preflight phase list length mismatch",
+    )?;
+    for (index, phase) in phases.iter().enumerate() {
+        ensure(
+            phase.get("order").and_then(Value::as_u64) == Some((index + 1) as u64),
+            "public deployment capture plan preflight phase order mismatch",
+        )?;
+        ensure(
+            phase.get("id").and_then(Value::as_str)
+                == Some(REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES[index]),
+            "public deployment capture plan preflight phase id mismatch",
+        )?;
+        ensure(
+            phase.get("required").and_then(Value::as_bool) == Some(true),
+            "public deployment capture plan preflight phase must be required",
+        )?;
+        ensure(
+            phase.get("blocks_public_launch").and_then(Value::as_bool) == Some(true),
+            "public deployment capture plan preflight phase must block public launch",
+        )?;
+    }
+    let mut rootless_preflight = deployment_preflight.clone();
+    if let Some(map) = rootless_preflight.as_object_mut() {
+        map.remove("checklist_root");
+    }
+    let expected_preflight_root =
+        value_root("public-deployment-preflight-checklist", &rootless_preflight);
+    ensure(
+        deployment_preflight
+            .get("checklist_root")
+            .and_then(Value::as_str)
+            == Some(expected_preflight_root.as_str()),
+        "public deployment capture plan preflight checklist root mismatch",
+    )?;
+    let capture_contract = value
+        .get("capture_contract")
+        .ok_or_else(|| "public deployment capture plan missing capture_contract".to_string())?;
+    ensure(
+        capture_contract
+            .get("deployment_preflight_checklist_root")
+            .and_then(Value::as_str)
+            == Some(expected_preflight_root.as_str()),
+        "public deployment capture contract preflight checklist root mismatch",
+    )?;
+    ensure(
+        capture_contract
+            .get("deployment_preflight_receipt_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment capture contract must require preflight receipt",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_deployment_runbook_receipt_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment capture contract must require runbook receipt",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_launch_artifact_manifest_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment capture contract must require launch artifact manifest",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_launch_package_file_set_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment capture contract must require package file-set root",
+    )?;
+    ensure(
+        capture_contract
+            .get("required_capture_fields")
+            .and_then(Value::as_array)
+            .and_then(|fields| fields.iter().map(Value::as_str).collect::<Option<Vec<_>>>())
+            == Some(REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS.to_vec()),
+        "public deployment capture contract required_capture_fields mismatch",
+    )?;
+    ensure(
+        capture_contract
+            .get("required_preflight_phase_ids")
+            .and_then(Value::as_array)
+            .and_then(|fields| fields.iter().map(Value::as_str).collect::<Option<Vec<_>>>())
+            == Some(REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.to_vec()),
+        "public deployment capture contract required_preflight_phase_ids mismatch",
+    )?;
+    let expected_contract_root =
+        value_root("public-deployment-capture-contract", capture_contract);
+    ensure(
+        value.get("capture_contract_root").and_then(Value::as_str)
+            == Some(expected_contract_root.as_str()),
+        "public deployment capture contract root mismatch",
+    )?;
+    let mut rootless_plan = value.clone();
+    if let Some(map) = rootless_plan.as_object_mut() {
+        map.remove("capture_plan_root");
+    }
+    let expected_plan_root = value_root("public-deployment-capture-plan", &rootless_plan);
+    ensure(
+        value.get("capture_plan_root").and_then(Value::as_str)
+            == Some(expected_plan_root.as_str()),
+        "public deployment capture plan root mismatch",
     )
 }
 
@@ -24794,6 +24982,20 @@ mod tests {
                 .as_str()
                 .expect("capture plan root")
         ));
+        ensure_public_deployment_capture_plan_redacted(&value)
+            .expect("redacted capture plan should verify its roots");
+        let mut contract_tampered = value.clone();
+        contract_tampered["capture_contract"]["freshness_window_ms"] =
+            json!(MAX_PUBLIC_DEPLOYMENT_FRESHNESS_MS + 1);
+        let error = ensure_public_deployment_capture_plan_redacted(&contract_tampered)
+            .expect_err("contract-tampered capture plan should fail");
+        assert!(error.contains("capture contract root mismatch"));
+        let mut root_tampered = value.clone();
+        root_tampered["capture_plan_root"] =
+            json!(root(&["test-public-deployment-capture-plan", "wrong-root"]));
+        let error = ensure_public_deployment_capture_plan_redacted(&root_tampered)
+            .expect_err("root-tampered capture plan should fail");
+        assert!(error.contains("capture plan root mismatch"));
         assert!(!value_contains_placeholder(&value));
         let _ = fs::remove_file(path);
     }

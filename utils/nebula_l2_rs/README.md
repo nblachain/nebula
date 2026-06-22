@@ -459,10 +459,11 @@ preflight checklist, and `deployment_run_id` propagation rule that the assembler
 will enforce. The plan publishes both `capture_contract_root` and
 `capture_plan_root`; a later filled
 deployment attestation must carry those roots, proving it followed the exact
-rooted work order for this run. This
-turns the remaining public-launch blocker into a deterministic capture
-checklist without letting the local runner invent external reachability,
-TLS, or observer-signature evidence.
+rooted work order for this run. The capture-plan guard recomputes the preflight
+checklist, capture contract, and plan roots before export/package verification.
+This turns the remaining public-launch blocker into a deterministic capture
+checklist without letting the local runner invent external reachability, TLS,
+or observer-signature evidence.
 
 The capture plan also includes `deployment_preflight`, a rooted ordered
 checklist with twelve required phases: freeze launch roots, publish the redacted
