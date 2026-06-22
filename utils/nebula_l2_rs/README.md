@@ -461,6 +461,16 @@ order. The assembler derives `deployment_preflight_phase_set_root`,
 from that receipt and rejects missing, incomplete, out-of-order, stale, or
 root-mismatched phase receipts.
 
+`--audit-public-deployment-capture path\to\capture.json
+--write-public-deployment-capture-audit path\to\capture-audit.json` also
+requires `--mainnet-readiness` and writes a non-passing
+`nebula-public-deployment-capture-audit` report. The audit lists missing
+required capture fields, placeholder presence, sensitive key markers,
+public-forbidden key names, size/parseability checks, current capture-plan root
+matches, and an `assembler_ready` boolean. It is diagnostic only:
+`usable_as_public_deployment_evidence` is false, so it helps deployment CI
+repair incomplete captures without clearing the public launch gate.
+
 `--verify-public-deployment-capture path\to\capture.json` also requires
 `--mainnet-readiness` and dry-runs the same assembler/verifier path without
 leaving a final `nebula-public-deployment` artifact on disk. It derives the

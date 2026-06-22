@@ -3331,8 +3331,11 @@ real XMR.
   match the completed receipt body and the current generated runbook. Missing,
   incomplete, out-of-order, stale, source-mismatched, or root-mismatched
   preflight or runbook receipts cannot clear the public launch gate. Deployment
-  CI can also run `--verify-public-deployment-capture` to dry-run the same
-  assembler/verifier path and feed the resulting temporary attestation into
+  CI can run `--audit-public-deployment-capture` first to write a non-passing
+  capture audit that lists missing fields, placeholders, sensitive markers,
+  public-forbidden keys, and current capture-plan root mismatches, then run
+  `--verify-public-deployment-capture` to dry-run the same assembler/verifier
+  path and feed the resulting temporary attestation into
   `--fail-on-public-launch-gaps` before writing the final public deployment
   artifact.
 - Filled public deployment attestations bind the launch bundle to publicly

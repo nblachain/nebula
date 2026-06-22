@@ -352,6 +352,8 @@ struct Cli {
     public_deployment_evidence_template_path: Option<String>,
     public_deployment_capture_plan_path: Option<String>,
     public_deployment_capture_verify_path: Option<String>,
+    public_deployment_capture_audit_path: Option<String>,
+    public_deployment_capture_audit_output_path: Option<String>,
     public_deployment_evidence_assembly_path: Option<String>,
     public_deployment_evidence_output_path: Option<String>,
     adversarial_self_test: bool,
@@ -415,6 +417,8 @@ impl Default for Cli {
             public_deployment_evidence_template_path: None,
             public_deployment_capture_plan_path: None,
             public_deployment_capture_verify_path: None,
+            public_deployment_capture_audit_path: None,
+            public_deployment_capture_audit_output_path: None,
             public_deployment_evidence_assembly_path: None,
             public_deployment_evidence_output_path: None,
             adversarial_self_test: false,
@@ -6439,6 +6443,12 @@ fn run() -> Result<(), String> {
     if let Some(path) = cli.public_deployment_capture_plan_path.as_deref() {
         write_public_deployment_capture_plan(path, &summary)?;
     }
+    if let (Some(capture_path), Some(output_path)) = (
+        cli.public_deployment_capture_audit_path.as_deref(),
+        cli.public_deployment_capture_audit_output_path.as_deref(),
+    ) {
+        write_public_deployment_capture_audit(capture_path, output_path, &summary)?;
+    }
     let readiness_gap_error = if cli.fail_on_readiness_gaps {
         ensure_artifact_readiness_gates(&summary).err()
     } else {
@@ -7367,6 +7377,145 @@ fn write_public_deployment_capture_plan(
     fs::write(path, format!("{encoded}\n"))
         .map_err(|error| format!("failed to write public deployment capture plan: {error}"))?;
     Ok(())
+}
+
+fn write_public_deployment_capture_audit(
+    capture_path: &str,
+    output_path: &str,
+    summary: &TestnetSummary,
+) -> Result<(), String> {
+    ensure_local_json_path(capture_path, "--audit-public-deployment-capture")?;
+    ensure_local_json_path(output_path, "--write-public-deployment-capture-audit")?;
+    let audit = public_deployment_capture_audit(capture_path, summary)?;
+    let encoded = serde_json::to_string_pretty(&audit).map_err(|error| {
+        format!("failed to encode public deployment capture audit json: {error}")
+    })?;
+    fs::write(output_path, format!("{encoded}\n"))
+        .map_err(|error| format!("failed to write public deployment capture audit: {error}"))
+}
+
+fn public_deployment_capture_audit(
+    capture_path: &str,
+    summary: &TestnetSummary,
+) -> Result<Value, String> {
+    ensure_local_json_path(capture_path, "--audit-public-deployment-capture")?;
+    let bytes = fs::read(capture_path)
+        .map_err(|error| format!("failed to read public deployment capture: {error}"))?;
+    let within_size_limit = bytes.len() <= MAX_PUBLIC_DEPLOYMENT_EVIDENCE_BYTES;
+    let parse_result: Result<Value, _> = serde_json::from_slice(&bytes);
+    let (parseable_json, top_level_object, mut missing_required_fields, placeholder_present,
+        sensitive_markers_present, forbidden_keys_present, capture_plan_root_matches,
+        capture_contract_root_matches, deployment_preflight_checklist_root_matches) =
+        match parse_result {
+            Ok(value) => {
+                let missing = REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS
+                    .iter()
+                    .filter(|field| value.get(**field).is_none())
+                    .map(|field| (*field).to_string())
+                    .collect::<Vec<_>>();
+                let sensitive_markers = SENSITIVE_FIELD_MARKERS
+                    .iter()
+                    .filter(|marker| value_contains_key_marker(&value, marker))
+                    .map(|marker| (*marker).to_string())
+                    .collect::<Vec<_>>();
+                let forbidden_keys = PUBLIC_STATUS_FORBIDDEN_KEYS
+                    .iter()
+                    .filter(|key| value_contains_exact_key(&value, key))
+                    .map(|key| (*key).to_string())
+                    .collect::<Vec<_>>();
+                let capture_plan = public_deployment_capture_plan(summary);
+                let expected_capture_plan_root = capture_plan["capture_plan_root"]
+                    .as_str()
+                    .unwrap_or_default();
+                let expected_capture_contract_root = capture_plan["capture_contract_root"]
+                    .as_str()
+                    .unwrap_or_default();
+                let expected_preflight_checklist_root =
+                    capture_plan["deployment_preflight"]["checklist_root"]
+                        .as_str()
+                        .unwrap_or_default();
+                (
+                    true,
+                    value.is_object(),
+                    missing,
+                    value_contains_placeholder(&value),
+                    sensitive_markers,
+                    forbidden_keys,
+                    value.get("capture_plan_root").and_then(Value::as_str)
+                        == Some(expected_capture_plan_root),
+                    value.get("capture_contract_root").and_then(Value::as_str)
+                        == Some(expected_capture_contract_root),
+                    value.get("deployment_preflight_checklist_root")
+                        .and_then(Value::as_str)
+                        == Some(expected_preflight_checklist_root),
+                )
+            }
+            Err(_) => (
+                false,
+                false,
+                REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS
+                    .iter()
+                    .map(|field| (*field).to_string())
+                    .collect(),
+                false,
+                Vec::new(),
+                Vec::new(),
+                false,
+                false,
+                false,
+            ),
+        };
+    missing_required_fields.sort();
+    let assembler_ready = within_size_limit
+        && parseable_json
+        && top_level_object
+        && missing_required_fields.is_empty()
+        && !placeholder_present
+        && sensitive_markers_present.is_empty()
+        && forbidden_keys_present.is_empty()
+        && capture_plan_root_matches
+        && capture_contract_root_matches
+        && deployment_preflight_checklist_root_matches;
+    let mut audit = json!({
+        "kind": "nebula-public-deployment-capture-audit",
+        "schema_version": 1,
+        "chain_id": CHAIN_ID,
+        "testnet_id": &summary.testnet_id,
+        "manifest_id": &summary.manifest_id,
+        "public_alpha_only": true,
+        "template_only": false,
+        "usable_as_public_deployment_evidence": false,
+        "usable_as_mainnet_custody_approval": false,
+        "operator_fill_required": true,
+        "capture_path_root": root(&[
+            "public-deployment-capture-path",
+            CHAIN_ID,
+            &summary.manifest_id,
+            capture_path,
+        ]),
+        "capture_size_bytes": bytes.len(),
+        "max_capture_size_bytes": MAX_PUBLIC_DEPLOYMENT_EVIDENCE_BYTES,
+        "within_size_limit": within_size_limit,
+        "parseable_json": parseable_json,
+        "top_level_object": top_level_object,
+        "required_field_count": REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS.len(),
+        "missing_required_fields": missing_required_fields,
+        "placeholder_present": placeholder_present,
+        "sensitive_markers_present": sensitive_markers_present,
+        "forbidden_public_status_keys_present": forbidden_keys_present,
+        "capture_plan_root_matches": capture_plan_root_matches,
+        "capture_contract_root_matches": capture_contract_root_matches,
+        "deployment_preflight_checklist_root_matches": deployment_preflight_checklist_root_matches,
+        "assembler_ready": assembler_ready,
+        "next_step": if assembler_ready {
+            "--verify-public-deployment-capture <capture.json> --fail-on-public-launch-gaps"
+        } else {
+            "fill missing fields, remove placeholders/sensitive markers, and bind the current capture plan roots"
+        },
+    });
+    let audit_root = value_root("public-deployment-capture-audit", &audit);
+    audit["capture_audit_root"] = json!(audit_root);
+    Ok(audit)
 }
 
 fn write_public_deployment_evidence_from_capture(
@@ -12793,6 +12942,22 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
                     "--verify-public-deployment-capture",
                 )?);
             }
+            "--audit-public-deployment-capture" => {
+                index += 1;
+                cli.public_deployment_capture_audit_path = Some(parse_string(
+                    &args,
+                    index,
+                    "--audit-public-deployment-capture",
+                )?);
+            }
+            "--write-public-deployment-capture-audit" => {
+                index += 1;
+                cli.public_deployment_capture_audit_output_path = Some(parse_string(
+                    &args,
+                    index,
+                    "--write-public-deployment-capture-audit",
+                )?);
+            }
             "--assemble-public-deployment-evidence" => {
                 index += 1;
                 cli.public_deployment_evidence_assembly_path = Some(parse_string(
@@ -12973,6 +13138,31 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
             "--verify-public-deployment-capture requires --mainnet-readiness",
         )?;
         ensure_local_json_path(path, "--verify-public-deployment-capture")?;
+    }
+    if let Some(path) = cli.public_deployment_capture_audit_path.as_deref() {
+        ensure(
+            cli.mainnet_readiness,
+            "--audit-public-deployment-capture requires --mainnet-readiness",
+        )?;
+        ensure_local_json_path(path, "--audit-public-deployment-capture")?;
+        ensure(
+            cli.public_deployment_capture_audit_output_path.is_some(),
+            "--audit-public-deployment-capture requires --write-public-deployment-capture-audit",
+        )?;
+    }
+    if let Some(path) = cli
+        .public_deployment_capture_audit_output_path
+        .as_deref()
+    {
+        ensure(
+            cli.mainnet_readiness,
+            "--write-public-deployment-capture-audit requires --mainnet-readiness",
+        )?;
+        ensure(
+            cli.public_deployment_capture_audit_path.is_some(),
+            "--write-public-deployment-capture-audit requires --audit-public-deployment-capture",
+        )?;
+        ensure_local_json_path(path, "--write-public-deployment-capture-audit")?;
     }
     if let Some(path) = cli.public_deployment_evidence_assembly_path.as_deref() {
         ensure(
@@ -20162,6 +20352,10 @@ OPTIONS:
                               Write a redacted deployment CI capture plan listing required public evidence and probe coverage
         --verify-public-deployment-capture PATH
                               Verify captured deployment probe/policy JSON without writing the final attestation
+        --audit-public-deployment-capture PATH
+                              Inspect captured deployment JSON and list missing fields/placeholders before assembly
+        --write-public-deployment-capture-audit PATH
+                              Write the non-passing public deployment capture audit JSON
         --assemble-public-deployment-evidence PATH
                               Read captured deployment probe/policy JSON and assemble rooted schema v5 public evidence
         --write-public-deployment-evidence PATH
@@ -22443,6 +22637,32 @@ mod tests {
     }
 
     #[test]
+    fn public_deployment_capture_audit_requires_mainnet_readiness_and_output() {
+        let capture = temp_json_path("nebula-public-deployment-capture-audit-rejected");
+        let output = temp_json_path("nebula-public-deployment-capture-audit-output-rejected");
+        let error = parse_cli(vec![
+            "--audit-public-deployment-capture".to_string(),
+            capture.clone(),
+        ])
+        .expect_err("public deployment capture audit should require mainnet-readiness mode");
+        assert!(error.contains("requires --mainnet-readiness"));
+        let error = parse_cli(vec![
+            "--mainnet-readiness".to_string(),
+            "--audit-public-deployment-capture".to_string(),
+            capture,
+        ])
+        .expect_err("public deployment capture audit should require output path");
+        assert!(error.contains("--write-public-deployment-capture-audit"));
+        let error = parse_cli(vec![
+            "--mainnet-readiness".to_string(),
+            "--write-public-deployment-capture-audit".to_string(),
+            output,
+        ])
+        .expect_err("public deployment capture audit output should require capture path");
+        assert!(error.contains("--audit-public-deployment-capture"));
+    }
+
+    #[test]
     fn public_deployment_evidence_requires_mainnet_readiness_mode() {
         let path = temp_json_path("nebula-public-deployment-rejected");
         let error = parse_cli(vec!["--public-deployment-evidence".to_string(), path])
@@ -23781,6 +24001,65 @@ mod tests {
         assert!(summary.public_launch_readiness.public_launch_ready);
         ensure_public_launch_gates(&summary)
             .expect("verified capture should satisfy public launch gates");
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_missing_fields_without_passing() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let capture_path = write_public_deployment_evidence("{}");
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit incomplete capture");
+        assert_eq!(audit["kind"], "nebula-public-deployment-capture-audit");
+        assert_eq!(audit["usable_as_public_deployment_evidence"], false);
+        assert_eq!(audit["usable_as_mainnet_custody_approval"], false);
+        assert_eq!(audit["parseable_json"], true);
+        assert_eq!(audit["top_level_object"], true);
+        assert_eq!(audit["assembler_ready"], false);
+        let missing = audit["missing_required_fields"]
+            .as_array()
+            .expect("missing fields");
+        assert_eq!(missing.len(), REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS.len());
+        assert!(missing
+            .iter()
+            .any(|field| field.as_str() == Some("capture_plan_root")));
+        assert!(is_hex_root(
+            audit["capture_audit_root"].as_str().expect("audit root")
+        ));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_marks_complete_capture_assembler_ready() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let capture_path = write_public_deployment_evidence(&valid_public_deployment_capture(
+            &base_summary,
+        ));
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit complete capture");
+        assert_eq!(audit["assembler_ready"], true);
+        assert_eq!(audit["placeholder_present"], false);
+        assert_eq!(audit["capture_plan_root_matches"], true);
+        assert_eq!(audit["capture_contract_root_matches"], true);
+        assert_eq!(audit["deployment_preflight_checklist_root_matches"], true);
+        assert_eq!(
+            audit["missing_required_fields"]
+                .as_array()
+                .expect("missing fields")
+                .len(),
+            0
+        );
+        assert!(is_hex_root(
+            audit["capture_audit_root"].as_str().expect("audit root")
+        ));
         let _ = fs::remove_file(capture_path);
     }
 
