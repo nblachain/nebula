@@ -825,3 +825,11 @@ fn bool_str(value: bool) -> &'static str {
         "false"
     }
 }
+
+pub fn public_record() -> Value {
+    devnet().public_record()
+}
+
+pub fn state_root() -> String {
+    devnet().state_root()
+}

@@ -960,6 +960,15 @@ impl DeployState {
         Ok(state)
     }
 
+    pub fn testnet(operator_label: &str, created_at_height: u64) -> DeployResult<Self> {
+        let mut state = Self::new(created_at_height);
+        state.add_manifest(DeploymentManifest::testnet(
+            operator_label,
+            created_at_height,
+        )?)?;
+        Ok(state)
+    }
+
     pub fn add_manifest(&mut self, manifest: DeploymentManifest) -> DeployResult<String> {
         manifest.validate()?;
         let manifest_id = manifest.manifest_id.clone();
@@ -1538,4 +1547,20 @@ fn ensure_unique_strings(values: &[String], field: &str) -> DeployResult<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn testnet_deploy_state_uses_testnet_manifest() {
+        let state = DeployState::testnet("test-operator", 42).expect("testnet deploy state");
+        let manifest = state.latest_manifest().expect("latest manifest");
+
+        assert_eq!(state.height, 42);
+        assert_eq!(manifest.tier, DeploymentTier::Testnet);
+        assert_eq!(manifest.monero.network, "monero-testnet");
+        assert!(manifest.readiness_score_bps() >= DEPLOY_MIN_READY_SCORE_BPS);
+    }
 }

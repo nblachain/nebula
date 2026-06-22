@@ -1436,3 +1436,15 @@ fn bool_str(value: bool) -> &'static str {
         "false"
     }
 }
+
+pub fn public_record() -> Value {
+    devnet()
+        .map(|state| state.public_record())
+        .unwrap_or_else(|error| json!({ "error": error }))
+}
+
+pub fn state_root() -> String {
+    devnet()
+        .map(|state| state.state_root())
+        .unwrap_or_else(|error| record_root("devnet-error", &json!({ "error": error })))
+}

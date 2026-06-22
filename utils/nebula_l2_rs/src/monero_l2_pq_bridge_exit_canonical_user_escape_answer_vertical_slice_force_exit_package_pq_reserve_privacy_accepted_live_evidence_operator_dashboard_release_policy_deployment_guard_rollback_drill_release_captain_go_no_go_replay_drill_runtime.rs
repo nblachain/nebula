@@ -1407,3 +1407,11 @@ pub fn summarize_blockers(blockers: &[ReplayBlocker]) -> BTreeMap<String, u64> {
     }
     counts
 }
+
+pub fn public_record() -> Value {
+    devnet().public_record()
+}
+
+pub fn state_root() -> String {
+    devnet().state_root()
+}

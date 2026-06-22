@@ -10,6 +10,7 @@ use crate::{
 
 pub type Result<T> = std::result::Result<T, String>;
 pub type PrivateL2PqConfidentialTokenizedReorgInsurancePerpsClearingRuntimeResult<T> = Result<T>;
+pub type Runtime = State;
 
 pub const PRIVATE_L2_PQ_CONFIDENTIAL_TOKENIZED_REORG_INSURANCE_PERPS_CLEARING_RUNTIME_PROTOCOL_VERSION: &str =
     "nebula-private-l2-pq-confidential-tokenized-reorg-insurance-perps-clearing-runtime-v1";

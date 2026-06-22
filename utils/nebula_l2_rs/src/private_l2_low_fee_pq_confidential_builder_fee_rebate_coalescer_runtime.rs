@@ -1478,6 +1478,8 @@ impl State {
     }
 
     pub fn public_record_without_state_root(&self) -> Value {
+        let mut roots = self.roots.public_record();
+        roots["state_root"] = json!(null);
         json!({
             "protocol_version": PROTOCOL_VERSION,
             "schema_version": SCHEMA_VERSION,
@@ -1490,11 +1492,7 @@ impl State {
             "privacy_boundary": PRIVACY_BOUNDARY,
             "config_root": record_root(D_CONFIG, &self.config.public_record()),
             "counters_root": record_root(D_COUNTERS, &self.counters.public_record()),
-            "roots": {
-                let mut roots = self.roots.public_record();
-                roots["state_root"] = json!(null);
-                roots
-            },
+            "roots": roots,
             "block_builder_coupon_lane_count": self.block_builder_coupon_lanes.len(),
             "builder_fee_claim_count": self.builder_fee_claims.len(),
             "congestion_discount_count": self.congestion_discounts.len(),

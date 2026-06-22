@@ -26,6 +26,8 @@ pub const LOCAL_FAST_RPC_BIND: &str = "127.0.0.1:28480";
 pub const LOCAL_FAST_P2P_BIND: &str = "127.0.0.1:28481";
 pub const PRIVATE_BRIDGE_RPC_BIND: &str = "127.0.0.1:38480";
 pub const PRIVATE_BRIDGE_P2P_BIND: &str = "127.0.0.1:38481";
+pub const TESTNET_RPC_BIND: &str = "127.0.0.1:58480";
+pub const TESTNET_P2P_BIND: &str = "127.0.0.1:58481";
 pub const ARCHIVE_VALIDATOR_RPC_BIND: &str = "127.0.0.1:48480";
 pub const ARCHIVE_VALIDATOR_P2P_BIND: &str = "127.0.0.1:48481";
 pub const DEFAULT_PRIVACY_MODE: &str = "hashes_only";
@@ -47,6 +49,7 @@ pub enum NebulaNetworkProfile {
     Devnet,
     LocalFast,
     PrivateBridge,
+    Testnet,
     ArchiveValidator,
 }
 
@@ -56,6 +59,7 @@ impl NebulaNetworkProfile {
             Self::Devnet => "devnet",
             Self::LocalFast => "local_fast",
             Self::PrivateBridge => "private_bridge",
+            Self::Testnet => "testnet",
             Self::ArchiveValidator => "archive_validator",
         }
     }
@@ -70,6 +74,7 @@ impl NebulaNetworkProfile {
             "devnet" | "default" | "devnet_default" => Ok(Self::Devnet),
             "local_fast" | "local" | "fast" => Ok(Self::LocalFast),
             "private_bridge" | "bridge" => Ok(Self::PrivateBridge),
+            "testnet" | "bridge_testnet" | "private_bridge_testnet" => Ok(Self::Testnet),
             "archive_validator" | "archive" | "validator_archive" => Ok(Self::ArchiveValidator),
             _ => Err(format!("unknown Nebula network profile: {profile_name}")),
         }
@@ -280,6 +285,50 @@ impl NebulaRuntimeProfile {
         .refresh_generated()
     }
 
+    pub fn testnet() -> Self {
+        let mut policy = fast_block_packing_policy();
+        policy.max_batched_da_bytes = 1_024_000;
+        policy.max_estimated_proof_bytes = 12 * 1024 * 1024;
+        policy.lane_reserve_tx_count = 8;
+
+        Self {
+            profile: NebulaNetworkProfile::Testnet,
+            node_roles: canonical_roles(vec![
+                NodeRole::Sequencer,
+                NodeRole::Validator,
+                NodeRole::DataAvailability,
+                NodeRole::MoneroObserver,
+                NodeRole::BridgeSigner,
+                NodeRole::Watchtower,
+                NodeRole::WalletRpc,
+            ]),
+            daemon_mode: DaemonMode::Sequencer,
+            epoch_size: 20,
+            block_time_ms: TARGET_BLOCK_MS,
+            admission_ttl_blocks: 8,
+            finality_depth: 20,
+            block_packing_policy: policy,
+            api_session_ttl_blocks: 2_000,
+            api_request_ttl_blocks: 20,
+            api_rate_limit_units: 5_000,
+            max_api_response_bytes: 512 * 1024,
+            max_pending_transactions: 1_024,
+            storage_snapshot_interval_blocks: 10,
+            storage_chunk_target_bytes: 512 * 1024,
+            monero_network: "monero-stagenet".to_string(),
+            privacy_mode: RELAY_PRIVATE_PRIVACY_MODE.to_string(),
+            privacy_payload_policy: CONFIDENTIAL_PRIVACY_PAYLOAD_POLICY.to_string(),
+            low_fee: LowFeeSettings {
+                epoch_budget_units: DEFAULT_LOW_FEE_BUDGET_UNITS * 4,
+                max_rebate_bps: 9_800,
+                ..LowFeeSettings::enabled_default()
+            },
+            ..Self::base(NebulaNetworkProfile::Testnet, DEFAULT_OPERATOR_LABEL)
+        }
+        .with_bind_commitments(TESTNET_RPC_BIND, TESTNET_P2P_BIND)
+        .refresh_generated()
+    }
+
     pub fn archive_validator() -> Self {
         let mut policy = BlockPackingPolicy::default();
         policy.max_tx_count = 256;
@@ -337,6 +386,7 @@ impl NebulaRuntimeProfile {
             NebulaNetworkProfile::Devnet => Ok(Self::devnet_default()),
             NebulaNetworkProfile::LocalFast => Ok(Self::local_fast()),
             NebulaNetworkProfile::PrivateBridge => Ok(Self::private_bridge()),
+            NebulaNetworkProfile::Testnet => Ok(Self::testnet()),
             NebulaNetworkProfile::ArchiveValidator => Ok(Self::archive_validator()),
         }
     }
@@ -968,6 +1018,7 @@ impl ConfigManifest {
                 NebulaRuntimeProfile::devnet_default(),
                 NebulaRuntimeProfile::local_fast(),
                 NebulaRuntimeProfile::private_bridge(),
+                NebulaRuntimeProfile::testnet(),
                 NebulaRuntimeProfile::archive_validator(),
             ],
         )
@@ -1127,4 +1178,37 @@ fn is_supported_privacy_mode(privacy_mode: &str) -> bool {
         privacy_mode,
         DEFAULT_PRIVACY_MODE | CONFIDENTIAL_PRIVACY_MODE | RELAY_PRIVATE_PRIVACY_MODE
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn testnet_profile_resolves_to_stagenet_bridge_roles() {
+        let profile = NebulaRuntimeProfile::from_profile_name("testnet").expect("testnet profile");
+
+        assert_eq!(profile.profile, NebulaNetworkProfile::Testnet);
+        assert_eq!(profile.monero_network, "monero-stagenet");
+        assert_eq!(profile.daemon_mode, DaemonMode::Sequencer);
+        assert!(profile.node_roles.contains(&NodeRole::Sequencer));
+        assert!(profile.node_roles.contains(&NodeRole::Validator));
+        assert!(profile.node_roles.contains(&NodeRole::DataAvailability));
+        assert!(profile.node_roles.contains(&NodeRole::MoneroObserver));
+        assert!(profile.node_roles.contains(&NodeRole::BridgeSigner));
+        assert!(profile.node_roles.contains(&NodeRole::Watchtower));
+        assert!(profile.node_roles.contains(&NodeRole::WalletRpc));
+
+        let resolved = profile.resolved().expect("resolved testnet profile");
+        assert!(resolved.validation.valid);
+        assert_eq!(resolved.node_config.monero_network, "monero-stagenet");
+    }
+
+    #[test]
+    fn default_config_manifest_includes_testnet_profile() {
+        let manifest = ConfigManifest::default_suite().expect("default config suite");
+        let testnet = manifest.profile("testnet").expect("testnet in suite");
+
+        assert_eq!(testnet.profile, NebulaNetworkProfile::Testnet);
+    }
 }

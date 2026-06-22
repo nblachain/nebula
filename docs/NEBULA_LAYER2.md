@@ -1273,6 +1273,10 @@ with a historical `--block-height`, but the submission now commits to the epoch
 checkpoint root and range that height finalizes up to. This is the mechanism
 that lets one Monero transaction amortize many L2 blocks while still giving
 watchtowers a small root to verify against DA and block headers.
+Mainnet readiness must also include anchor-capacity evidence: a signed benchmark
+root proving the fixed-format payload can commit at least 10,000 L2 transactions
+per anchor, with the capacity policy, payload-shape root, observed epoch count,
+and benchmark root bound into the release-candidate run.
 
 The `settlement` command gives wallets a single finality surface for a block. It
 reports whether the block has L2 soft finality, which local epoch checkpoint root
@@ -3084,6 +3088,9 @@ It must:
   throughput, proof-size, bandwidth, and fee-curve workloads.
 - Extend signed calibration records against live prover, signer, DA, and
   contract-runtime benchmark harnesses.
+- Bind adversarial campaign evidence to the release-candidate run by declaring
+  covered block count, validator count, and local quorum-certificate finality
+  target, with a coverage root committed into the adversarial transcript.
 - Commission external review before mainnet value is accepted.
 
 ## Minimum Viable Product
@@ -3127,10 +3134,286 @@ real XMR.
 ## Success Metrics
 
 - L2 soft finality under 5 seconds.
-- Fees below one-tenth of an equivalent Monero L1 payment during normal load.
+- Mainnet readiness evidence includes a distributed validator benchmark whose
+  quorum-certificate max latency is at or below 200ms for the release-candidate
+  validator count and threshold. The benchmark must bind the
+  release-candidate manifest id, local run-profile report root, local validator
+  quorum, local loopback region count, target finality, and latest block height.
+- Fees below one-tenth of an equivalent Monero L1 payment during normal load,
+  backed by a signed fee policy, normal-load profile, L1 reference-fee, and fee
+  curve evidence root.
 - No user-visible transparent balance mode.
 - Post-quantum signatures on every account authorization.
 - No KZG, BLS, or pairing dependency in the core trust model.
-- One Monero anchor can commit at least 10,000 L2 transactions.
-- A wallet can recover and audit its own history from view keys and DA data.
-- Bridge reserves can be independently monitored.
+- Mainnet readiness evidence binds a `crypto_policy_root` for ML-DSA-65
+  authorization, SLH-DSA recovery, ML-KEM-768 sessions, SHA-3 transcript
+  domains, hash-based DA commitments, and no BLS/KZG/pairing exceptions.
+  That evidence must also bind the release-candidate manifest id, latest
+  height, local crypto-inventory report root, dependency inventory root, and
+  PQ policy root.
+- Proof-system audit evidence binds transparent/PQ proof assumptions,
+  hash-based commitments, no trusted setup, and no pairing assumptions.
+- Mainnet readiness evidence includes registry-bound provenance attestations
+  for every external evidence family, binding each section root to a producer
+  identity, signer commitment, PQ public-key root, attestation id, and registry
+  root before the release authority can consider custody.
+- One Monero anchor can commit at least 10,000 L2 transactions, backed by signed
+  capacity policy, fixed-format payload, capacity, and benchmark roots.
+- Mainnet readiness evidence includes signed privacy profiles for anchor
+  payload/cadence/submitter diversity, one-time and batched deposits,
+  delayed/bucketed withdrawals, and wallet recovery from view keys plus DA.
+  Those profiles must bind the release-candidate manifest id, latest block
+  height, local privacy-surface report root, wallet-recovery audit report root,
+  and `privacy_policy.run_binding_root`.
+- The release-candidate testnet locally audits public privacy surfaces for
+  root-shaped identifiers, bucketed amounts, delayed withdrawals, and absence of
+  raw Monero addresses, txids, wallet secrets, transparent balances, or exact
+  relay paths.
+- The release-candidate testnet binds local run-profile provenance into the
+  run checkpoint: runner version, block count, non-mainnet network profile,
+  loopback-only endpoints, finality target, quorums, bridge amounts, release
+  delay/rate limit, anchor capacity, and operations drill limits.
+- Live Monero readiness evidence must bind the same non-mainnet runner network
+  profile (`stagenet` or `regtest`) as the release-candidate testnet; mainnet
+  remains a separate release-approval target outside the runner. It must also
+  bind the release-candidate manifest id, run-profile report root, local bridge
+  signer-set root, reserve-report root, latest block height, and synthetic
+  observed Monero height.
+- The release-candidate testnet binds local deterministic Wasm runtime coverage
+  into blocks and the run checkpoint via `wasm_runtime_root` values, module
+  validation roots, fuel/memory bounds, private-argument commitments,
+  append-only event roots, and timelocked-upgrade rejection roots.
+- The release-candidate testnet binds a local finality latency profile into the
+  run checkpoint, including quorum-certificate sample roots, p50/p95/p99/max
+  latency under the 200ms target, block-construction latency, slow-sample
+  count, and target margin. Distributed validator finality evidence is still
+  required before mainnet value.
+- The release-candidate testnet binds a threaded loopback distributed-finality
+  profile into the run checkpoint, including per-block validator vote roots,
+  threshold-arrival latency, logical region count, quorum-certificate roots,
+  and p50/p95/p99/max latency under the 200ms target. External distributed
+  validator evidence must cover that region count and still remains required
+  before mainnet value.
+- A controlled public-alpha bootstrap profile binds endpoint commitments, typed
+  bootstrap node commitment records, node/operator/region set roots, RPC rate
+  limits, P2P peer caps, faucet caps, reset policy, monitoring roots,
+  health-check roots, status-page commitments, incident contact commitments,
+  and deployment runbooks while the local runner remains loopback-only. Public
+  bootstrap topology must meet minimum node, committed-operator, and region
+  coverage before the profile passes, and the filled deployment evidence must
+  derive the same operator count from `bootstrap_nodes`. Public
+  endpoint deployment happens outside the runner and must not weaken the
+  no-mainnet-custody boundary.
+- Public testnet status surfaces expose a redacted
+  `nebula-public-status-manifest` with chain, latest-block, finality,
+  no-mainnet-custody, and public-bootstrap root commitments only. Full bridge
+  ledgers, run profiles, block roots, probe binds, release approvals, and
+  authority registries remain local operator output.
+- A typed public deployment runbook export gives launch operators a rooted
+  `nebula-public-deployment-runbook` handoff before external capture. It is
+  not evidence and not custody approval; it binds the public status manifest
+  root, bootstrap profile roots, committed deployment runbook root, incident,
+  status, monitoring, health, faucet, reset, rate-limit, bootstrap, local
+  operations, reserve, privacy, run-checkpoint, and no-mainnet-custody boundary
+  roots. Its ordered twelve-step set covers redacted status publication,
+  private-summary denial, public RPC/P2P provisioning, status/health/metrics,
+  faucet caps, reset communications, incident handoff, bootstrap node rollout,
+  operator-registry verification, public deployment evidence capture,
+  rollback/reset communications, and no-mainnet-custody confirmation. The
+  launch bundle and capture plan both freeze the runbook root and step-set
+  root so deployment CI can detect stale or mismatched operator handoffs.
+- A public launch artifact manifest export gives operators a rooted
+  `nebula-public-launch-artifact-manifest` before public probe capture starts.
+  It freezes the pre-capture handoff set: redacted public status manifest,
+  public bootstrap profile template, typed deployment runbook, and public
+  launch bundle. Each record carries its export flag, root field, artifact
+  root, and record root, plus a collection `artifact_set_root`, without
+  embedding operator-private evidence. The evidence worksheet and capture plan
+  bind `public_launch_artifact_manifest_root` and
+  `public_launch_artifact_set_root` so CI can detect swapped or stale launch
+  artifacts before TLS, public probes, or observer attestations are captured.
+- Public launch automation consumes a redacted
+  `nebula-public-testnet-launch-bundle` that binds the status manifest,
+  bootstrap profile, proxy policy, typed bootstrap-node commitment manifest,
+  bootstrap operator registry manifest, faucet/reset policies, monitoring
+  commitments, the typed public deployment runbook root and step-set root,
+  preflight gates, and operator action list without enabling public runner
+  listeners or authorizing mainnet custody. The registry manifest
+  requires exactly one independently verified ML-DSA-65-signed registry record
+  per committed operator before deployment evidence can clear the public launch
+  gate.
+- Public deployment evidence templates give deployment automation a schema v5
+  worksheet with the canonical public status manifest, launch bundle root,
+  launch artifact manifest roots, typed public deployment runbook roots, a
+  public deployment runbook receipt template,
+  typed bootstrap node commitments, typed proxy/firewall/rate-limit policy claims,
+  health/status-page/metrics/deployed-finality/incident-contact/faucet/reset body shapes,
+  private-summary denial probe shape, typed bootstrap-node reachability probes,
+  typed public surface probe records, typed bootstrap-operator registry records,
+  typed probe-observer records, freshness fields, and policy/status/P2P/ops/
+  finality/private-summary/public-surface-probe-set/bootstrap-node-probe-set/
+  public-probe-set/operator-registry/observer/provenance/attestation root
+  derivation rules. Templates remain rejected
+  until every placeholder is replaced by captured deployment evidence.
+- A public deployment capture-plan export gives deployment CI a rooted
+  `nebula-public-deployment-capture-plan` work order before capture starts. It
+  is not evidence; it lists the exact required capture fields, public surfaces,
+  probe-root fields, freshness window, bootstrap node slots, operator
+  commitments, TLS pin roles, required typed public surface probe roles,
+  observer quorum, a rooted ordered deployment preflight checklist, and
+  `deployment_run_id` propagation rule that the assembler will enforce. The
+  plan publishes `capture_contract_root` and `capture_plan_root`; filled public
+  deployment attestations must carry those roots so they prove they followed the
+  exact rooted capture work order for the current run. The capture contract also
+  freezes the public launch artifact manifest root, artifact-set root, typed
+  public deployment runbook root, and step-set root, keeping the operator
+  handoff aligned with the same status, bootstrap, launch, and
+  evidence-template roots, and requires a completed
+  `deployment_preflight_receipt` covering every required preflight phase in
+  order plus a completed `public_deployment_runbook_receipt` covering every
+  ordered public deployment runbook step. This keeps the remaining
+  public-launch blocker operationally precise without letting the local runner
+  invent external reachability, TLS, or observer-signature evidence.
+- A public deployment evidence assembler lets deployment automation feed
+  captured endpoint, TLS, typed policy, probe, observer, runbook receipt,
+  capture-plan, and freshness transcripts into the runner and receive a rooted schema v5
+  attestation. The
+  assembler binds the current run's public status manifest, launch bundle,
+  bootstrap profile, launch artifact manifest roots, capture plan, preflight
+  checklist, completed preflight
+  receipt, completed runbook receipt, node set, and policy roots, derives
+  preflight phase-set and receipt roots, derives runbook step-receipt-set and
+  receipt roots, derives TLS endpoint-pin set
+  roots and the aggregate SPKI root from captured `tls_endpoint_pins`, derives
+  bootstrap node/operator/region roots, public endpoint-set roots, and the
+  bootstrap operator count from captured
+  `bootstrap_nodes`, derives `bootstrap_node_probe_set_root` from one
+  reachability record per committed bootstrap node, derives
+  `public_surface_probe_set_root` from typed status, aggregate P2P, health,
+  status-page, metrics, deployed-finality, incident-contact, faucet, reset-runbook, and
+  private-summary-denial records, derives bootstrap operator
+  registry, independence, and signature roots from captured
+  `bootstrap_operator_registry`, derives canonical observer attestation, signature-payload,
+  and signature-verification roots, and rejects observer records that do not
+  carry externally verified ML-DSA-65 signature roots plus typed verification
+  transcripts over those payloads. TLS pin records, bootstrap operator registry
+  records, observer records, and observer/operator signature verification
+  transcripts must all bind the same `deployment_run_id`, preventing a public
+  launch attestation from being assembled out of valid fragments from different
+  deployment captures. It then derives observer set, attestor
+  registry, region-count, observer-count, and PQ-signature collection roots
+  from unique probe-observer records, derives the canonical public probe-set
+  root from the required probe transcript roots, including the typed public
+  surface probe-set root and bootstrap-node probe-set root, computes every
+  policy/probe/provenance/evidence root, writes
+  the assembled artifact, and validates it through the same verifier used by
+  the public launch gate. The public deployment report compares the embedded
+  `capture_plan_root`, `capture_contract_root`, and
+  `deployment_preflight_checklist_root` against the current generated capture
+  plan, and requires the embedded `deployment_preflight_receipt_root`,
+  `deployment_preflight_phase_set_root`, and phase count to match the completed
+  receipt body. It also requires the embedded public deployment runbook root,
+  step-set root, `public_deployment_runbook_receipt_root`,
+  `public_deployment_runbook_step_receipt_set_root`, and step receipt count to
+  match the completed receipt body and the current generated runbook. Missing,
+  incomplete, out-of-order, stale, source-mismatched, or root-mismatched
+  preflight or runbook receipts cannot clear the public launch gate.
+- Filled public deployment attestations bind the launch bundle to publicly
+  routable HTTPS endpoints, the exact capture plan root, capture contract root,
+  deployment preflight checklist root, completed preflight receipt root and
+  phase-set root, completed runbook receipt root and step-receipt-set root,
+  typed TLS endpoint-pin records for public RPC,
+  status-page, health, metrics, incident-contact, faucet, and reset-runbook surfaces, typed bootstrap node
+  records whose derived node/operator/region roots must match the public bootstrap profile,
+  proxy/firewall/rate-limit roots and their typed claim bodies, the captured
+  public status manifest, the P2P handshake derived from that canonical status
+  JSON, health/status-page/metrics/incident-contact/faucet/reset probe bodies, a
+  deployed-finality probe, a private-summary denial probe, and observer
+  provenance. Bootstrap node records must cover every committed node slot with
+  unique public P2P and HTTPS status-page endpoints whose set roots are bound
+  into the deployment attestation, and they must cover at least the minimum
+  committed operator count. Literal private, loopback, link-local,
+  documentation, multicast, CGNAT, and local-only endpoint addresses are
+  rejected; deployment DNS names and public IP or multiaddr endpoints remain
+  valid. Typed `bootstrap_node_probes` must also cover every
+  committed node slot, bind the deployment run id, launch bundle root,
+  status-manifest root, node slot, public P2P endpoint, canonical P2P
+  handshake, verified handshake flag, HTTPS status-page endpoint, 200
+  status-page response root, and observation time. Their aggregate
+  `bootstrap_node_probe_set_root` is included in observer attestations and the
+  canonical `public_probe_set_root`. Typed `public_surface_probes` must also
+  cover the status manifest, aggregate P2P handshake, health, status-page,
+  metrics, deployed-finality, incident-contact, faucet, reset-runbook, and private-summary denial
+  surfaces exactly once. Each record must bind the public endpoint, transport,
+  transcript kind/status, transcript root, probe root, launch bundle root,
+  status-manifest root, `deployment_run_id`, `observed_at_unix_ms`, and
+  public-routability claim; the derived `public_surface_probe_set_root` is
+  included in observer attestations, provenance, the final attestation, and the
+  canonical `public_probe_set_root`. A typed bootstrap operator registry must cover every
+  committed operator exactly once, require unique entity/control-plane/
+  infrastructure/contact commitments, bind an independence proof root, assert
+  verified independence, and bind ML-DSA-65 signature verification transcripts.
+  Probe-observer records must have
+  unique observer ids and keys,
+  multiple regions, observation times inside the freshness window, attestations
+  bound to every captured probe root, `signature_scheme: ML-DSA-65`, canonical
+  `signature_payload_root` values, `signature_verified: true`, typed
+  `signature_verification` transcripts, and matching
+  `signature_verification_root` values; the verifier derives and checks
+  observer set, registry, and PQ-signature roots from those records. The
+  artifact also binds `public_probe_set_root` and `public_probe_count`, derived
+  from the status, P2P, health, status-page, metrics, deployed-finality, incident-contact,
+  faucet, reset-runbook, bootstrap-node reachability, and private-summary-denial probe roots. The
+  proxy claims must disable public runner listeners, restrict output to
+  approved public surfaces, require TLS/redaction, and require the
+  private-summary probe. Firewall claims must keep loopback runner ports
+  private and block private-summary, admin, debug, and non-public routes.
+  Rate-limit claims must bind the public bootstrap RPC/P2P/faucet caps and
+  include observed 429 rejections, retry-after data, route coverage,
+  peer-limit observation, and faucet-cap enforcement. Probe bodies bind
+  status/bootstrap roots, public ops commitments, faucet caps, reset window,
+  and deployment runbook roots while asserting no-mainnet-custody. The
+  deployed-finality probe must cover the same manifest, latest height,
+  validator count, threshold, region count, sample count, and <=200ms p95/max
+  finality target as the public manifest. Its body binds network-profile,
+  clock-sync, and sample-set roots, and the verifier requires a real quorum
+  plus `p95 <= max <= target`. The private-summary probe must target
+  `/operator-summary`, prove 403/404 denial, bind a response-body root and
+  small content-length cap, and assert no redirect or private-summary content.
+  The local verifier rejects stale self-consistent captures by requiring the
+  status manifest and launch bundle roots to match the current run's generated
+  public artifacts and by enforcing an observed/expires freshness window,
+  multi-observer/multi-region probe roots, unique bootstrap endpoint roots, an
+  attestor registry root, and a PQ signature root. Live reachability checks and
+  raw PQ signature verification remain deployment-system evidence outside the
+  local runner, but duplicate bootstrap endpoints and unsigned or unverified
+  observer captures are rejected by the assembler and verifier.
+- A dedicated public launch gate fails until local public-alpha surfaces,
+  bounded bootstrap policies, redacted launch artifacts, and schema v5
+  deployment evidence all pass. This gate is separate from the mainnet evidence
+  and custody-approval gate, and the full local operator summary exposes a
+  `public_launch_readiness` report with blocker ids, check roots,
+  machine-actionable remediation entries, and a remediation root. Each
+  remediation names the expected artifact, relevant command, expected evidence
+  root, privacy classification, and whether external deployment capture is
+  required. That private operator report is intentionally absent from the public status
+  manifest and launch bundle.
+- External review evidence must bind the release-candidate manifest id, latest
+  height, and local run-profile, Wasm runtime, crypto-inventory,
+  privacy-surface, and operations-readiness report roots. Timing-sample
+  coverage remains enforced by the dedicated local and distributed finality
+  gates.
+- A wallet can recover and audit its own history from view keys and DA data,
+  with the release-candidate testnet binding local admission, block-status,
+  DA/proof, anchor, and bridge-history roots into a wallet recovery audit report.
+- Mainnet readiness evidence includes signed incident handoff, rollback,
+  withdrawal queue-drain, pause/resume, and reserve reconciliation drills.
+- The release-candidate testnet binds local operations drill coverage receipts
+  for incident handoff, rollback replay/restore, withdrawal queue drain,
+  pause/reject/resume behavior, and reserve reconciliation into the run
+  checkpoint, while still requiring signed operations evidence for mainnet.
+- Bridge reserves can be independently monitored, with the release-candidate
+  testnet binding reserve address hashes, reserve attestations, liability
+  snapshots, independent reporter commitments, monitoring cadence,
+  completed-withdrawal exclusion, and underreserve alert drills into a reserve
+  monitoring report.

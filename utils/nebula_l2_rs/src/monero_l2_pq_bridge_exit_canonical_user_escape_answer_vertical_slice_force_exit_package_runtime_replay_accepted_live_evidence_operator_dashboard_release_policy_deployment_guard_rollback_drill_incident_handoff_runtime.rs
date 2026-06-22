@@ -14,6 +14,16 @@ pub type MoneroL2PqBridgeExitCanonicalUserEscapeAnswerVerticalSliceForceExitPack
 > = Result<T>;
 pub type Runtime = State;
 
+macro_rules! ensure {
+    ($condition:expr, $message:expr $(,)?) => {
+        if $condition {
+            Ok(())
+        } else {
+            Err($message.to_string())
+        }
+    };
+}
+
 pub const MONERO_L2_PQ_BRIDGE_EXIT_CANONICAL_USER_ESCAPE_ANSWER_VERTICAL_SLICE_FORCE_EXIT_PACKAGE_RUNTIME_REPLAY_ACCEPTED_LIVE_EVIDENCE_OPERATOR_DASHBOARD_RELEASE_POLICY_DEPLOYMENT_GUARD_ROLLBACK_DRILL_INCIDENT_HANDOFF_RUNTIME_PROTOCOL_VERSION: &str =
     "nebula-monero-l2-pq-bridge-exit-canonical-user-escape-answer-vertical-slice-force-exit-package-runtime-replay-accepted-live-evidence-operator-dashboard-release-policy-deployment-guard-rollback-drill-incident-handoff-runtime-v1";
 pub const PROTOCOL_VERSION: &str =
@@ -797,6 +807,18 @@ pub fn devnet() -> Result<Runtime> {
         vec![gate_a, gate_b, gate_c],
         command_room_acks,
     )
+}
+
+pub fn public_record() -> Value {
+    devnet()
+        .map(|state| state.public_record())
+        .unwrap_or_else(|error| json!({ "error": error }))
+}
+
+pub fn state_root() -> String {
+    devnet()
+        .map(|state| state.state_root())
+        .unwrap_or_else(|error| record_root("devnet-error", &json!({ "error": error })))
 }
 
 fn validate_replay_transcripts(

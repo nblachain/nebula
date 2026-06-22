@@ -1543,3 +1543,11 @@ fn live_settlement_payload_hint_root(release_claim_id: &str, ordinal: u64) -> St
         &[HashPart::Str(release_claim_id), HashPart::U64(ordinal)],
     )
 }
+
+pub fn public_record() -> Value {
+    State::devnet().public_record()
+}
+
+pub fn state_root() -> String {
+    State::devnet().state_root()
+}

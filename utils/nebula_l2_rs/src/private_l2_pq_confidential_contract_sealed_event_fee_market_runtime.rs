@@ -11,6 +11,7 @@ use crate::{
 pub type PrivateL2PqConfidentialContractSealedEventFeeMarketRuntimeResult<T> =
     std::result::Result<T, String>;
 pub type Result<T> = PrivateL2PqConfidentialContractSealedEventFeeMarketRuntimeResult<T>;
+pub type Runtime = State;
 
 pub const PRIVATE_L2_PQ_CONFIDENTIAL_CONTRACT_SEALED_EVENT_FEE_MARKET_RUNTIME_PROTOCOL_VERSION:
     &str = "nebula-private-l2-pq-confidential-contract-sealed-event-fee-market-runtime-v1";

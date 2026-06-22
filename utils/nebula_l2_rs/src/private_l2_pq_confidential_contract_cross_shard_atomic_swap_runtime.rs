@@ -12,6 +12,16 @@ pub type Result<T> = std::result::Result<T, String>;
 pub type PrivateL2PqConfidentialContractCrossShardAtomicSwapRuntimeResult<T> = Result<T>;
 pub type Runtime = State;
 
+macro_rules! require {
+    ($condition:expr, $message:expr $(,)?) => {
+        if $condition {
+            Ok(())
+        } else {
+            Err($message.to_string())
+        }
+    };
+}
+
 pub const PROTOCOL_VERSION: &str =
     "nebula-private-l2-pq-confidential-contract-cross-shard-atomic-swap-runtime-v1";
 pub const PRIVATE_L2_PQ_CONFIDENTIAL_CONTRACT_CROSS_SHARD_ATOMIC_SWAP_RUNTIME_PROTOCOL_VERSION:

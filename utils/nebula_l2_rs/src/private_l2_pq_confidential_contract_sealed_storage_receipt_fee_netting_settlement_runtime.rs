@@ -195,7 +195,6 @@ pub enum SealedSettlementReceiptStatus {
     Settled,
     Quoted,
     Netted,
-    Settled,
     Repriced,
     Refunded,
     DuplicateRejected,

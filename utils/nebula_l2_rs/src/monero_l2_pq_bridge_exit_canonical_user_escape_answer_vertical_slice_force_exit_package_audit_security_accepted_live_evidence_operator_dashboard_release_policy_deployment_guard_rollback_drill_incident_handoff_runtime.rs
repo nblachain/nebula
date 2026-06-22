@@ -1426,3 +1426,11 @@ fn ensure_capacity(current: usize, max: usize) -> Result<()> {
         Ok(())
     }
 }
+
+pub fn public_record() -> Value {
+    devnet().public_record()
+}
+
+pub fn state_root() -> String {
+    devnet().state_root()
+}

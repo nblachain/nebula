@@ -1,4 +1,4 @@
-#![recursion_limit = "4096"]
+#![recursion_limit = "8192"]
 
 pub mod accounts;
 pub mod api;

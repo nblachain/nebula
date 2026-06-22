@@ -9,8 +9,9 @@ use crate::{
         ReleaseReadinessDimension, ReleaseReadinessStatus, State as ReleaseReadinessState,
     },
     monero_l2_pq_bridge_exit_release_remediation_planner_runtime::{
-        ReleaseRemediationPlanStatus, RemediationAction, RemediationActionKind,
-        RemediationActionStatus, RemediationSeverity, State as ReleaseRemediationPlannerState,
+        RemediationAction, RemediationActionKind, RemediationActionStatus,
+        RemediationPlanStatus as ReleaseRemediationPlanStatus, RemediationSeverity,
+        State as ReleaseRemediationPlannerState,
     },
     CHAIN_ID,
 };

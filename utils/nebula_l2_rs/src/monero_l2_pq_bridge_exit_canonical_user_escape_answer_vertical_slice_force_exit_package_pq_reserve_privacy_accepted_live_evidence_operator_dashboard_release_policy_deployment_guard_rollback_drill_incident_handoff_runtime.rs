@@ -587,3 +587,11 @@ fn ensure_bps(label: &str, value: u16) -> Result<()> {
 fn ensure_bps_at_least(label: &str, value: u16, floor: u16) -> Result<()> {
     ensure(value >= floor, &format!("{label} must be >= {floor}"))
 }
+
+pub fn public_record() -> Value {
+    devnet().public_record()
+}
+
+pub fn state_root() -> String {
+    devnet().state_root()
+}

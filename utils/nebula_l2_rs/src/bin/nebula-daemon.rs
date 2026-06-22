@@ -8,6 +8,7 @@ use serde_json::json;
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Command {
     Devnet(CliDevnetOptions),
+    Testnet(CliDevnetOptions),
     Help,
     Version,
 }
@@ -53,6 +54,7 @@ fn main() {
 fn run() -> Result<(), String> {
     match parse_args(env::args().skip(1).collect::<Vec<_>>())? {
         Command::Devnet(options) => run_devnet(options),
+        Command::Testnet(options) => run_devnet(options),
         Command::Help => {
             print_help();
             Ok(())
@@ -109,6 +111,13 @@ fn parse_args(args: Vec<String>) -> Result<Command, String> {
     }
     match args[0].as_str() {
         "devnet" => parse_devnet_args(&args[1..]).map(Command::Devnet),
+        "testnet" => {
+            let mut options = parse_devnet_args(&args[1..])?;
+            if options.profile_name == CliDevnetOptions::default().profile_name {
+                options.profile_name = "testnet".to_string();
+            }
+            Ok(Command::Testnet(options))
+        }
         "help" | "--help" | "-h" => Ok(Command::Help),
         "version" | "--version" | "-V" => Ok(Command::Version),
         other => Err(format!("unknown command '{other}'")),
@@ -198,15 +207,17 @@ fn print_help() {
 
 USAGE:
     nebula-daemon devnet [--blocks N] [--profile NAME] [--operator LABEL] [--json]
+    nebula-daemon testnet [--blocks N] [--operator LABEL] [--json]
 
 COMMANDS:
     devnet      Run a deterministic in-process Monero L2 devnet loop
+    testnet     Run the bridge testnet profile against committed Monero stagenet surfaces
     version     Print the devnet runner version
     help        Print this help
 
 OPTIONS:
     -b, --blocks N          Number of blocks to produce
-        --profile NAME      Runtime profile: devnet, local_fast, private_bridge, archive_validator
+        --profile NAME      Runtime profile: devnet, local_fast, private_bridge, testnet, archive_validator
         --operator LABEL    Operator label used for deterministic devnet keys
         --block-time-ms N   Deterministic block time used for receipts
         --json              Print machine-readable roots and summary
