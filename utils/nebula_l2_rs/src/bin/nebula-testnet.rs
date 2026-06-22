@@ -7740,6 +7740,7 @@ fn public_deployment_capture_audit(
         freshness_window_valid,
         capture_time_window_valid,
         capture_time_current,
+        deployment_run_id_valid,
         placeholder_present,
         sensitive_markers_present,
         forbidden_keys_present,
@@ -7803,6 +7804,11 @@ fn public_deployment_capture_audit(
                     }
                     _ => true,
                 };
+                let run_id_valid = value
+                    .get("deployment_run_id")
+                    .and_then(Value::as_str)
+                    .map(|run_id| validate_public_deployment_run_id(run_id).is_ok())
+                    .unwrap_or(true);
                 let sensitive_markers = SENSITIVE_FIELD_MARKERS
                     .iter()
                     .filter(|marker| value_contains_key_marker(&value, marker))
@@ -7836,6 +7842,7 @@ fn public_deployment_capture_audit(
                     freshness_valid,
                     window_valid,
                     time_current,
+                    run_id_valid,
                     value_contains_placeholder(&value),
                     sensitive_markers,
                     forbidden_keys,
@@ -7868,6 +7875,7 @@ fn public_deployment_capture_audit(
                 true,
                 true,
                 true,
+                true,
                 false,
                 Vec::new(),
                 Vec::new(),
@@ -7892,6 +7900,7 @@ fn public_deployment_capture_audit(
         && freshness_window_valid
         && capture_time_window_valid
         && capture_time_current
+        && deployment_run_id_valid
         && !placeholder_present
         && sensitive_markers_present.is_empty()
         && forbidden_keys_present.is_empty()
@@ -7929,6 +7938,9 @@ fn public_deployment_capture_audit(
     }
     if !capture_time_current {
         structural_failed_checks.push("capture_time_current".to_string());
+    }
+    if !deployment_run_id_valid {
+        structural_failed_checks.push("deployment_run_id_valid".to_string());
     }
     if placeholder_present {
         structural_failed_checks.push("placeholders_absent".to_string());
@@ -8022,6 +8034,7 @@ fn public_deployment_capture_audit(
     audit["freshness_window_valid"] = json!(freshness_window_valid);
     audit["capture_time_window_valid"] = json!(capture_time_window_valid);
     audit["capture_time_current"] = json!(capture_time_current);
+    audit["deployment_run_id_valid"] = json!(deployment_run_id_valid);
     let audit_root = value_root("public-deployment-capture-audit", &audit);
     audit["capture_audit_root"] = json!(audit_root);
     Ok(audit)
@@ -25467,6 +25480,31 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("capture_time_current")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_invalid_deployment_run_id() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        capture["deployment_run_id"] = json!("<fill-in-deployment-tooling-run-id>");
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit invalid deployment_run_id capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["deployment_run_id_valid"], false);
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("deployment_run_id_valid")));
         let _ = fs::remove_file(capture_path);
     }
 
