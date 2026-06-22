@@ -485,11 +485,13 @@ root-mismatched phase receipts.
 --write-public-deployment-capture-audit path\to\capture-audit.json` also
 requires `--mainnet-readiness` and writes a non-passing
 `nebula-public-deployment-capture-audit` report. The audit lists missing
-required capture fields, missing and invalid public endpoint fields, placeholder
-presence, sensitive key markers, public-forbidden key names, size/parseability
-checks, current capture-plan root matches, the expected package file-set root,
-package file-set root matches, and `structural_failed_checks`/`failed_checks`
-arrays with counts for CI routing, plus an `assembler_ready` boolean. It is diagnostic only:
+required capture fields, missing and invalid public endpoint fields, invalid
+timestamp types, freshness-window bounds, current capture-time validity,
+placeholder presence, sensitive key markers, public-forbidden key names,
+size/parseability checks, current capture-plan root matches, the expected
+package file-set root, package file-set root matches, and
+`structural_failed_checks`/`failed_checks` arrays with counts for CI routing,
+plus an `assembler_ready` boolean. It is diagnostic only:
 `usable_as_public_deployment_evidence` is false, so it helps deployment CI
 repair incomplete captures without clearing the public launch gate. The audit
 separates cheap `structural_ready` checks from `strict_verifier_passed`; when a

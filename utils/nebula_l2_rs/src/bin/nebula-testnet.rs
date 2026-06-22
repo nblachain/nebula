@@ -7736,6 +7736,10 @@ fn public_deployment_capture_audit(
         mut missing_required_fields,
         mut missing_endpoint_fields,
         mut invalid_endpoint_fields,
+        mut invalid_capture_time_fields,
+        freshness_window_valid,
+        capture_time_window_valid,
+        capture_time_current,
         placeholder_present,
         sensitive_markers_present,
         forbidden_keys_present,
@@ -7769,6 +7773,36 @@ fn public_deployment_capture_audit(
                         (!valid).then(|| (*field).to_string())
                     })
                     .collect::<Vec<_>>();
+                let invalid_time_fields = [
+                    "observed_at_unix_ms",
+                    "expires_at_unix_ms",
+                    "freshness_window_ms",
+                ]
+                .iter()
+                .filter(|field| value.get(**field).is_some_and(|field| !field.is_u64()))
+                .map(|field| (*field).to_string())
+                .collect::<Vec<_>>();
+                let observed_at = value.get("observed_at_unix_ms").and_then(Value::as_u64);
+                let expires_at = value.get("expires_at_unix_ms").and_then(Value::as_u64);
+                let freshness_window = value.get("freshness_window_ms").and_then(Value::as_u64);
+                let freshness_valid = freshness_window
+                    .map(|window| window > 0 && window <= MAX_PUBLIC_DEPLOYMENT_FRESHNESS_MS)
+                    .unwrap_or(true);
+                let window_valid = match (observed_at, expires_at, freshness_window) {
+                    (Some(observed), Some(expires), Some(window)) => {
+                        expires > observed && expires.saturating_sub(observed) <= window
+                    }
+                    _ => true,
+                };
+                let now = unix_time_ms().min(u128::from(u64::MAX)) as u64;
+                let time_current = match (observed_at, expires_at, freshness_window) {
+                    (Some(observed), Some(expires), Some(window)) => {
+                        observed <= now.saturating_add(MAX_PUBLIC_DEPLOYMENT_CLOCK_SKEW_MS)
+                            && now <= expires
+                            && now.saturating_sub(observed) <= window
+                    }
+                    _ => true,
+                };
                 let sensitive_markers = SENSITIVE_FIELD_MARKERS
                     .iter()
                     .filter(|marker| value_contains_key_marker(&value, marker))
@@ -7798,6 +7832,10 @@ fn public_deployment_capture_audit(
                     missing,
                     missing_endpoints,
                     invalid_endpoints,
+                    invalid_time_fields,
+                    freshness_valid,
+                    window_valid,
+                    time_current,
                     value_contains_placeholder(&value),
                     sensitive_markers,
                     forbidden_keys,
@@ -7826,6 +7864,10 @@ fn public_deployment_capture_audit(
                     .map(|field| (*field).to_string())
                     .collect(),
                 Vec::new(),
+                Vec::new(),
+                true,
+                true,
+                true,
                 false,
                 Vec::new(),
                 Vec::new(),
@@ -7839,12 +7881,17 @@ fn public_deployment_capture_audit(
     missing_required_fields.sort();
     missing_endpoint_fields.sort();
     invalid_endpoint_fields.sort();
+    invalid_capture_time_fields.sort();
     let structural_ready = within_size_limit
         && parseable_json
         && top_level_object
         && missing_required_fields.is_empty()
         && missing_endpoint_fields.is_empty()
         && invalid_endpoint_fields.is_empty()
+        && invalid_capture_time_fields.is_empty()
+        && freshness_window_valid
+        && capture_time_window_valid
+        && capture_time_current
         && !placeholder_present
         && sensitive_markers_present.is_empty()
         && forbidden_keys_present.is_empty()
@@ -7870,6 +7917,18 @@ fn public_deployment_capture_audit(
     }
     if !invalid_endpoint_fields.is_empty() {
         structural_failed_checks.push("endpoint_fields_valid".to_string());
+    }
+    if !invalid_capture_time_fields.is_empty() {
+        structural_failed_checks.push("capture_time_fields_valid".to_string());
+    }
+    if !freshness_window_valid {
+        structural_failed_checks.push("freshness_window_within_limit".to_string());
+    }
+    if !capture_time_window_valid {
+        structural_failed_checks.push("capture_time_window_valid".to_string());
+    }
+    if !capture_time_current {
+        structural_failed_checks.push("capture_time_current".to_string());
     }
     if placeholder_present {
         structural_failed_checks.push("placeholders_absent".to_string());
@@ -7957,6 +8016,12 @@ fn public_deployment_capture_audit(
             "fill missing fields/endpoints, remove placeholders/sensitive markers, and bind the current capture plan and package file-set roots"
         },
     });
+    audit["invalid_capture_time_fields"] = json!(invalid_capture_time_fields);
+    audit["max_capture_freshness_window_ms"] = json!(MAX_PUBLIC_DEPLOYMENT_FRESHNESS_MS);
+    audit["max_capture_clock_skew_ms"] = json!(MAX_PUBLIC_DEPLOYMENT_CLOCK_SKEW_MS);
+    audit["freshness_window_valid"] = json!(freshness_window_valid);
+    audit["capture_time_window_valid"] = json!(capture_time_window_valid);
+    audit["capture_time_current"] = json!(capture_time_current);
     let audit_root = value_root("public-deployment-capture-audit", &audit);
     audit["capture_audit_root"] = json!(audit_root);
     Ok(audit)
@@ -25338,6 +25403,70 @@ mod tests {
             .contains(&json!("endpoint_fields_valid")));
         assert_eq!(audit["missing_endpoint_fields"], json!([]));
         assert_eq!(audit["missing_required_fields"], json!([]));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_invalid_capture_time_window() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        let now = unix_time_ms().min(u128::from(u64::MAX)) as u64;
+        capture["observed_at_unix_ms"] = json!(now);
+        capture["expires_at_unix_ms"] = json!(now + MAX_PUBLIC_DEPLOYMENT_FRESHNESS_MS + 2);
+        capture["freshness_window_ms"] = json!(MAX_PUBLIC_DEPLOYMENT_FRESHNESS_MS + 1);
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit invalid-time capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["freshness_window_valid"], false);
+        assert_eq!(audit["capture_time_window_valid"], false);
+        assert_eq!(audit["capture_time_current"], true);
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("freshness_window_within_limit")));
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("capture_time_window_valid")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_stale_capture_time() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        capture["observed_at_unix_ms"] = json!(1_u64);
+        capture["expires_at_unix_ms"] = json!(2_u64);
+        capture["freshness_window_ms"] = json!(MAX_PUBLIC_DEPLOYMENT_FRESHNESS_MS);
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit stale-time capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["freshness_window_valid"], true);
+        assert_eq!(audit["capture_time_window_valid"], true);
+        assert_eq!(audit["capture_time_current"], false);
+        assert_eq!(audit["invalid_capture_time_fields"], json!([]));
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("capture_time_current")));
         let _ = fs::remove_file(capture_path);
     }
 
