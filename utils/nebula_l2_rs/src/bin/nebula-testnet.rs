@@ -7741,6 +7741,9 @@ fn public_deployment_capture_audit(
         capture_time_window_valid,
         capture_time_current,
         deployment_run_id_valid,
+        probe_observer_count,
+        observer_quorum_threshold_valid,
+        observer_quorum_reachable,
         placeholder_present,
         sensitive_markers_present,
         forbidden_keys_present,
@@ -7809,6 +7812,29 @@ fn public_deployment_capture_audit(
                     .and_then(Value::as_str)
                     .map(|run_id| validate_public_deployment_run_id(run_id).is_ok())
                     .unwrap_or(true);
+                let observer_count = value
+                    .get("probe_observers")
+                    .and_then(Value::as_array)
+                    .map(|observers| observers.len() as u64)
+                    .unwrap_or_default();
+                let observer_quorum_threshold =
+                    value.get("observer_quorum_threshold").and_then(Value::as_u64);
+                let quorum_threshold_valid = match value.get("observer_quorum_threshold") {
+                    Some(_) => observer_quorum_threshold
+                        .map(|threshold| threshold >= MIN_PUBLIC_DEPLOYMENT_OBSERVER_COUNT)
+                        .unwrap_or(false),
+                    None => true,
+                };
+                let quorum_reachable = match (value.get("probe_observers"), observer_quorum_threshold)
+                {
+                    (Some(Value::Array(_)), Some(threshold)) => {
+                        observer_count >= MIN_PUBLIC_DEPLOYMENT_OBSERVER_COUNT
+                            && observer_count >= threshold
+                            && threshold >= MIN_PUBLIC_DEPLOYMENT_OBSERVER_COUNT
+                    }
+                    (None, None) | (None, Some(_)) => true,
+                    _ => false,
+                };
                 let sensitive_markers = SENSITIVE_FIELD_MARKERS
                     .iter()
                     .filter(|marker| value_contains_key_marker(&value, marker))
@@ -7843,6 +7869,9 @@ fn public_deployment_capture_audit(
                     window_valid,
                     time_current,
                     run_id_valid,
+                    observer_count,
+                    quorum_threshold_valid,
+                    quorum_reachable,
                     value_contains_placeholder(&value),
                     sensitive_markers,
                     forbidden_keys,
@@ -7876,6 +7905,9 @@ fn public_deployment_capture_audit(
                 true,
                 true,
                 true,
+                0,
+                true,
+                true,
                 false,
                 Vec::new(),
                 Vec::new(),
@@ -7901,6 +7933,8 @@ fn public_deployment_capture_audit(
         && capture_time_window_valid
         && capture_time_current
         && deployment_run_id_valid
+        && observer_quorum_threshold_valid
+        && observer_quorum_reachable
         && !placeholder_present
         && sensitive_markers_present.is_empty()
         && forbidden_keys_present.is_empty()
@@ -7941,6 +7975,12 @@ fn public_deployment_capture_audit(
     }
     if !deployment_run_id_valid {
         structural_failed_checks.push("deployment_run_id_valid".to_string());
+    }
+    if !observer_quorum_threshold_valid {
+        structural_failed_checks.push("observer_quorum_threshold_valid".to_string());
+    }
+    if !observer_quorum_reachable {
+        structural_failed_checks.push("observer_quorum_reachable".to_string());
     }
     if placeholder_present {
         structural_failed_checks.push("placeholders_absent".to_string());
@@ -8035,6 +8075,10 @@ fn public_deployment_capture_audit(
     audit["capture_time_window_valid"] = json!(capture_time_window_valid);
     audit["capture_time_current"] = json!(capture_time_current);
     audit["deployment_run_id_valid"] = json!(deployment_run_id_valid);
+    audit["minimum_probe_observer_count"] = json!(MIN_PUBLIC_DEPLOYMENT_OBSERVER_COUNT);
+    audit["probe_observer_count"] = json!(probe_observer_count);
+    audit["observer_quorum_threshold_valid"] = json!(observer_quorum_threshold_valid);
+    audit["observer_quorum_reachable"] = json!(observer_quorum_reachable);
     let audit_root = value_root("public-deployment-capture-audit", &audit);
     audit["capture_audit_root"] = json!(audit_root);
     Ok(audit)
@@ -25505,6 +25549,37 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("deployment_run_id_valid")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_unreachable_observer_quorum() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        let observer_count = capture["probe_observers"]
+            .as_array()
+            .expect("probe observers")
+            .len() as u64;
+        capture["observer_quorum_threshold"] = json!(observer_count + 1);
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit unreachable observer quorum capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["probe_observer_count"], observer_count);
+        assert_eq!(audit["observer_quorum_threshold_valid"], true);
+        assert_eq!(audit["observer_quorum_reachable"], false);
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("observer_quorum_reachable")));
         let _ = fs::remove_file(capture_path);
     }
 
