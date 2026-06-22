@@ -3354,13 +3354,14 @@ real XMR.
   CI can run `--audit-public-deployment-capture` first to write a non-passing
   capture audit that lists missing required fields, missing or invalid public
   endpoint fields, invalid freshness windows, stale capture times,
-  invalid deployment run ids, insufficient bootstrap node counts, missing or
-  extra bootstrap-node probe slots, missing or extra bootstrap-operator
-  registry commitments, unreachable observer quorums, insufficient observer
-  region coverage, malformed observer regions, duplicate observer ids or keys,
-  unsigned or unverified observer signatures/transcripts, placeholders,
-  sensitive markers, public-forbidden keys, current capture-plan and package
-  file-set root mismatches, structural readiness, machine-readable
+  invalid deployment run ids, missing or extra TLS endpoint pin roles,
+  insufficient bootstrap node counts, missing or extra bootstrap-node probe
+  slots, missing or extra bootstrap-operator registry commitments, unreachable
+  observer quorums, insufficient observer region coverage, malformed observer
+  regions, duplicate observer ids or keys, unsigned or unverified observer
+  signatures/transcripts, placeholders, sensitive markers, public-forbidden
+  keys, current capture-plan and package file-set root mismatches, structural
+  readiness, machine-readable
   structural and full failed-check lists, strict verifier status, and the first
   nested verifier error, then run
   `--verify-public-deployment-capture` to dry-run the same assembler/verifier

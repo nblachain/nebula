@@ -70,6 +70,15 @@ const REQUIRED_PUBLIC_DEPLOYMENT_ENDPOINT_FIELDS: &[&str] = &[
     "faucet_url",
     "reset_runbook_url",
 ];
+const PUBLIC_TLS_ENDPOINT_PIN_ROLES: &[&str] = &[
+    "public_rpc_url",
+    "status_page_url",
+    "health_check_url",
+    "metrics_url",
+    "incident_contact_url",
+    "faucet_url",
+    "reset_runbook_url",
+];
 const REQUIRED_PUBLIC_SURFACE_PROBE_ROLES: [&str; 10] = [
     "status_manifest",
     "p2p_handshake",
@@ -7741,6 +7750,11 @@ fn public_deployment_capture_audit(
         capture_time_window_valid,
         capture_time_current,
         deployment_run_id_valid,
+        tls_endpoint_pin_count,
+        missing_tls_endpoint_pin_roles,
+        extra_tls_endpoint_pin_roles,
+        duplicate_tls_endpoint_pin_roles,
+        tls_endpoint_pin_coverage_valid,
         bootstrap_node_count,
         bootstrap_node_probe_count,
         missing_bootstrap_node_probe_slots,
@@ -7840,6 +7854,7 @@ fn public_deployment_capture_audit(
                     .and_then(Value::as_str)
                     .map(|run_id| validate_public_deployment_run_id(run_id).is_ok())
                     .unwrap_or(true);
+                let tls_pin_coverage = public_tls_endpoint_pin_coverage_audit(&value);
                 let bootstrap_coverage =
                     public_bootstrap_node_probe_coverage_audit(&value);
                 let operator_registry_coverage =
@@ -7938,6 +7953,11 @@ fn public_deployment_capture_audit(
                     window_valid,
                     time_current,
                     run_id_valid,
+                    tls_pin_coverage.tls_endpoint_pin_count,
+                    tls_pin_coverage.missing_pin_roles,
+                    tls_pin_coverage.extra_pin_roles,
+                    tls_pin_coverage.duplicate_pin_roles,
+                    tls_pin_coverage.pin_coverage_valid,
                     bootstrap_coverage.bootstrap_node_count,
                     bootstrap_coverage.bootstrap_node_probe_count,
                     bootstrap_coverage.missing_probe_slots,
@@ -8003,6 +8023,11 @@ fn public_deployment_capture_audit(
                 true,
                 true,
                 0,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                true,
+                0,
                 0,
                 Vec::new(),
                 Vec::new(),
@@ -8058,6 +8083,7 @@ fn public_deployment_capture_audit(
         && capture_time_window_valid
         && capture_time_current
         && deployment_run_id_valid
+        && tls_endpoint_pin_coverage_valid
         && bootstrap_node_count_valid
         && bootstrap_node_probe_coverage_valid
         && bootstrap_operator_count_valid
@@ -8111,6 +8137,9 @@ fn public_deployment_capture_audit(
     }
     if !deployment_run_id_valid {
         structural_failed_checks.push("deployment_run_id_valid".to_string());
+    }
+    if !tls_endpoint_pin_coverage_valid {
+        structural_failed_checks.push("tls_endpoint_pin_coverage_valid".to_string());
     }
     if !bootstrap_node_count_valid {
         structural_failed_checks.push("bootstrap_node_count_valid".to_string());
@@ -8244,6 +8273,12 @@ fn public_deployment_capture_audit(
     audit["capture_time_window_valid"] = json!(capture_time_window_valid);
     audit["capture_time_current"] = json!(capture_time_current);
     audit["deployment_run_id_valid"] = json!(deployment_run_id_valid);
+    audit["required_tls_endpoint_pin_roles"] = json!(PUBLIC_TLS_ENDPOINT_PIN_ROLES);
+    audit["tls_endpoint_pin_count"] = json!(tls_endpoint_pin_count);
+    audit["missing_tls_endpoint_pin_roles"] = json!(missing_tls_endpoint_pin_roles);
+    audit["extra_tls_endpoint_pin_roles"] = json!(extra_tls_endpoint_pin_roles);
+    audit["duplicate_tls_endpoint_pin_roles"] = json!(duplicate_tls_endpoint_pin_roles);
+    audit["tls_endpoint_pin_coverage_valid"] = json!(tls_endpoint_pin_coverage_valid);
     audit["minimum_bootstrap_node_count"] = json!(DEFAULT_PUBLIC_BOOTSTRAP_NODE_COUNT);
     audit["bootstrap_node_count"] = json!(bootstrap_node_count);
     audit["bootstrap_node_probe_count"] = json!(bootstrap_node_probe_count);
@@ -8292,6 +8327,64 @@ fn public_deployment_capture_audit(
 
 fn public_probe_observer_region_valid(region: &str) -> bool {
     !region.trim().is_empty() && region.len() <= 64 && !region.contains('<') && !region.contains('>')
+}
+
+#[derive(Clone, Debug)]
+struct PublicTlsPinCoverageAudit {
+    tls_endpoint_pin_count: u64,
+    missing_pin_roles: Vec<String>,
+    extra_pin_roles: Vec<String>,
+    duplicate_pin_roles: Vec<String>,
+    pin_coverage_valid: bool,
+}
+
+fn public_tls_endpoint_pin_coverage_audit(value: &Value) -> PublicTlsPinCoverageAudit {
+    let expected_roles = PUBLIC_TLS_ENDPOINT_PIN_ROLES
+        .iter()
+        .map(|role| (*role).to_string())
+        .collect::<BTreeSet<_>>();
+    let tls_endpoint_pins = value.get("tls_endpoint_pins");
+    let mut observed_roles = BTreeSet::new();
+    let mut duplicate_roles = BTreeSet::new();
+    if let Some(pins) = tls_endpoint_pins.and_then(Value::as_array) {
+        for role in pins
+            .iter()
+            .filter_map(|pin| pin.get("endpoint_role").and_then(Value::as_str))
+        {
+            if !observed_roles.insert(role.to_string()) {
+                duplicate_roles.insert(role.to_string());
+            }
+        }
+    }
+    let missing_pin_roles = expected_roles
+        .difference(&observed_roles)
+        .cloned()
+        .collect::<Vec<_>>();
+    let extra_pin_roles = observed_roles
+        .difference(&expected_roles)
+        .cloned()
+        .collect::<Vec<_>>();
+    let pin_count = tls_endpoint_pins
+        .and_then(Value::as_array)
+        .map(|pins| pins.len() as u64)
+        .unwrap_or_default();
+    let pin_coverage_valid = match tls_endpoint_pins {
+        Some(Value::Array(_)) => {
+            pin_count == PUBLIC_TLS_ENDPOINT_PIN_ROLES.len() as u64
+                && missing_pin_roles.is_empty()
+                && extra_pin_roles.is_empty()
+                && duplicate_roles.is_empty()
+        }
+        Some(_) => false,
+        None => true,
+    };
+    PublicTlsPinCoverageAudit {
+        tls_endpoint_pin_count: pin_count,
+        missing_pin_roles,
+        extra_pin_roles,
+        duplicate_pin_roles: duplicate_roles.into_iter().collect(),
+        pin_coverage_valid,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -26013,6 +26106,43 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("observer_quorum_reachable")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_missing_tls_endpoint_pin() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        let missing_role = capture["tls_endpoint_pins"]
+            .as_array_mut()
+            .expect("tls endpoint pins")
+            .pop()
+            .expect("removed TLS pin")["endpoint_role"]
+            .as_str()
+            .expect("removed TLS role")
+            .to_string();
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit missing TLS pin capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(
+            audit["tls_endpoint_pin_count"],
+            PUBLIC_TLS_ENDPOINT_PIN_ROLES.len() as u64 - 1
+        );
+        assert_eq!(audit["tls_endpoint_pin_coverage_valid"], false);
+        assert_eq!(audit["missing_tls_endpoint_pin_roles"], json!([missing_role]));
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("tls_endpoint_pin_coverage_valid")));
         let _ = fs::remove_file(capture_path);
     }
 
