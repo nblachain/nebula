@@ -461,6 +461,14 @@ order. The assembler derives `deployment_preflight_phase_set_root`,
 from that receipt and rejects missing, incomplete, out-of-order, stale, or
 root-mismatched phase receipts.
 
+`--verify-public-deployment-capture path\to\capture.json` also requires
+`--mainnet-readiness` and dry-runs the same assembler/verifier path without
+leaving a final `nebula-public-deployment` artifact on disk. It derives the
+schema v5 attestation into a temporary file, loads it through the normal public
+deployment verifier, and feeds it into the in-memory public-launch report, so
+deployment CI can combine it with `--fail-on-public-launch-gaps` before
+publishing or archiving the final attestation.
+
 `--assemble-public-deployment-evidence path\to\capture.json
 --write-public-deployment-evidence path\to\deployment.json` also requires
 `--mainnet-readiness` and turns captured deployment transcripts into a

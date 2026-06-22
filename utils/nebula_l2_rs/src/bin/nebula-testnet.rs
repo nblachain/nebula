@@ -351,6 +351,7 @@ struct Cli {
     public_launch_package_verify_dir: Option<String>,
     public_deployment_evidence_template_path: Option<String>,
     public_deployment_capture_plan_path: Option<String>,
+    public_deployment_capture_verify_path: Option<String>,
     public_deployment_evidence_assembly_path: Option<String>,
     public_deployment_evidence_output_path: Option<String>,
     adversarial_self_test: bool,
@@ -413,6 +414,7 @@ impl Default for Cli {
             public_launch_package_verify_dir: None,
             public_deployment_evidence_template_path: None,
             public_deployment_capture_plan_path: None,
+            public_deployment_capture_verify_path: None,
             public_deployment_evidence_assembly_path: None,
             public_deployment_evidence_output_path: None,
             adversarial_self_test: false,
@@ -6375,15 +6377,23 @@ fn run() -> Result<(), String> {
         Vec::new()
     };
     let mut summary = testnet.summary(probes.clone());
+    let mut deployment_from_capture = None;
     if let (Some(capture_path), Some(output_path)) = (
         cli.public_deployment_evidence_assembly_path.as_deref(),
         cli.public_deployment_evidence_output_path.as_deref(),
     ) {
         let deployment =
             write_public_deployment_evidence_from_capture(capture_path, output_path, &summary)?;
+        deployment_from_capture = Some(deployment);
+    }
+    if let Some(capture_path) = cli.public_deployment_capture_verify_path.as_deref() {
+        let deployment = verify_public_deployment_capture(capture_path, &summary)?;
+        deployment_from_capture = Some(deployment);
+    }
+    if let Some(deployment) = deployment_from_capture {
         cli.public_deployment_evidence = Some(deployment.clone());
         testnet.cli.public_deployment_evidence = Some(deployment);
-        summary = testnet.summary(probes);
+        summary = testnet.summary(probes.clone());
     }
     if cli.mainnet_readiness {
         ensure(
@@ -6653,7 +6663,7 @@ fn public_launch_remediation_for_check(check: &ReadinessCheck) -> PublicLaunchRe
             ),
             "public-launch-deployment-attestation" => (
                 "nebula-public-launch-artifacts.json + nebula-public-deployment.json",
-                "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-artifact-manifest nebula-public-launch-artifacts.json --write-public-deployment-capture-plan nebula-public-deployment-capture-plan.json --write-public-deployment-evidence-template nebula-public-deployment-template.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json",
+                "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-artifact-manifest nebula-public-launch-artifacts.json --write-public-deployment-capture-plan nebula-public-deployment-capture-plan.json --write-public-deployment-evidence-template nebula-public-deployment-template.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json",
                 "operator-captured-redacted",
                 true,
                 true,
@@ -8069,6 +8079,26 @@ fn write_public_deployment_evidence_from_capture(
     fs::write(output_path, format!("{encoded}\n"))
         .map_err(|error| format!("failed to write assembled public deployment evidence: {error}"))?;
     load_public_deployment_evidence(output_path)
+}
+
+fn verify_public_deployment_capture(
+    capture_path: &str,
+    summary: &TestnetSummary,
+) -> Result<PublicDeploymentEvidence, String> {
+    ensure_local_json_path(capture_path, "--verify-public-deployment-capture")?;
+    let output_path = env::temp_dir().join(format!(
+        "nebula-public-deployment-capture-verify-{}.json",
+        root(&[
+            "public-deployment-capture-verify",
+            &summary.manifest_id,
+            capture_path,
+        ])
+    ));
+    let output_path_string = output_path.to_string_lossy().into_owned();
+    let result =
+        write_public_deployment_evidence_from_capture(capture_path, &output_path_string, summary);
+    let _ = fs::remove_file(&output_path);
+    result
 }
 
 fn ensure_public_deployment_capture_sections(value: &Value) -> Result<(), String> {
@@ -12755,6 +12785,14 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
                     "--write-public-deployment-capture-plan",
                 )?);
             }
+            "--verify-public-deployment-capture" => {
+                index += 1;
+                cli.public_deployment_capture_verify_path = Some(parse_string(
+                    &args,
+                    index,
+                    "--verify-public-deployment-capture",
+                )?);
+            }
             "--assemble-public-deployment-evidence" => {
                 index += 1;
                 cli.public_deployment_evidence_assembly_path = Some(parse_string(
@@ -12928,6 +12966,13 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
             "--write-public-deployment-capture-plan requires --mainnet-readiness",
         )?;
         ensure_local_json_path(path, "--write-public-deployment-capture-plan")?;
+    }
+    if let Some(path) = cli.public_deployment_capture_verify_path.as_deref() {
+        ensure(
+            cli.mainnet_readiness,
+            "--verify-public-deployment-capture requires --mainnet-readiness",
+        )?;
+        ensure_local_json_path(path, "--verify-public-deployment-capture")?;
     }
     if let Some(path) = cli.public_deployment_evidence_assembly_path.as_deref() {
         ensure(
@@ -20115,6 +20160,8 @@ OPTIONS:
                               Write a schema v5 public deployment evidence worksheet for incident-contact probes, runbook receipts, probe transcripts, and observer provenance
         --write-public-deployment-capture-plan PATH
                               Write a redacted deployment CI capture plan listing required public evidence and probe coverage
+        --verify-public-deployment-capture PATH
+                              Verify captured deployment probe/policy JSON without writing the final attestation
         --assemble-public-deployment-evidence PATH
                               Read captured deployment probe/policy JSON and assemble rooted schema v5 public evidence
         --write-public-deployment-evidence PATH
@@ -22385,6 +22432,17 @@ mod tests {
     }
 
     #[test]
+    fn public_deployment_capture_verify_requires_mainnet_readiness_mode() {
+        let path = temp_json_path("nebula-public-deployment-capture-verify-rejected");
+        let error = parse_cli(vec![
+            "--verify-public-deployment-capture".to_string(),
+            path,
+        ])
+        .expect_err("public deployment capture verification should require mainnet-readiness mode");
+        assert!(error.contains("requires --mainnet-readiness"));
+    }
+
+    #[test]
     fn public_deployment_evidence_requires_mainnet_readiness_mode() {
         let path = temp_json_path("nebula-public-deployment-rejected");
         let error = parse_cli(vec!["--public-deployment-evidence".to_string(), path])
@@ -23702,6 +23760,28 @@ mod tests {
             .expect("assembled public deployment evidence clears public launch gate");
         let _ = fs::remove_file(capture_path);
         let _ = fs::remove_file(output_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_verifier_dry_runs_launch_gate() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let capture_path = write_public_deployment_evidence(&valid_public_deployment_capture(
+            &base_summary,
+        ));
+        let evidence = verify_public_deployment_capture(&capture_path, &base_summary)
+            .expect("verify deployment capture");
+        assert!(is_hex_root(&evidence.evidence_root));
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(summary.public_deployment.passed);
+        assert!(summary.public_launch_readiness.public_launch_ready);
+        ensure_public_launch_gates(&summary)
+            .expect("verified capture should satisfy public launch gates");
+        let _ = fs::remove_file(capture_path);
     }
 
     #[test]

@@ -3330,7 +3330,11 @@ real XMR.
   `public_deployment_runbook_step_receipt_set_root`, and step receipt count to
   match the completed receipt body and the current generated runbook. Missing,
   incomplete, out-of-order, stale, source-mismatched, or root-mismatched
-  preflight or runbook receipts cannot clear the public launch gate.
+  preflight or runbook receipts cannot clear the public launch gate. Deployment
+  CI can also run `--verify-public-deployment-capture` to dry-run the same
+  assembler/verifier path and feed the resulting temporary attestation into
+  `--fail-on-public-launch-gaps` before writing the final public deployment
+  artifact.
 - Filled public deployment attestations bind the launch bundle to publicly
   routable HTTPS endpoints, the exact capture plan root, capture contract root,
   deployment preflight checklist root, completed preflight receipt root and
