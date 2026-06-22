@@ -7735,6 +7735,7 @@ fn public_deployment_capture_audit(
         top_level_object,
         mut missing_required_fields,
         mut missing_endpoint_fields,
+        mut invalid_endpoint_fields,
         placeholder_present,
         sensitive_markers_present,
         forbidden_keys_present,
@@ -7755,6 +7756,18 @@ fn public_deployment_capture_audit(
                     .iter()
                     .filter(|field| value.get(**field).and_then(Value::as_str).is_none())
                     .map(|field| (*field).to_string())
+                    .collect::<Vec<_>>();
+                let invalid_endpoints = REQUIRED_PUBLIC_DEPLOYMENT_ENDPOINT_FIELDS
+                    .iter()
+                    .filter_map(|field| {
+                        let endpoint = value.get(*field).and_then(Value::as_str)?;
+                        let valid = if *field == "public_p2p_endpoint" {
+                            public_endpoint(endpoint)
+                        } else {
+                            public_https_endpoint(endpoint)
+                        };
+                        (!valid).then(|| (*field).to_string())
+                    })
                     .collect::<Vec<_>>();
                 let sensitive_markers = SENSITIVE_FIELD_MARKERS
                     .iter()
@@ -7784,6 +7797,7 @@ fn public_deployment_capture_audit(
                     value.is_object(),
                     missing,
                     missing_endpoints,
+                    invalid_endpoints,
                     value_contains_placeholder(&value),
                     sensitive_markers,
                     forbidden_keys,
@@ -7811,6 +7825,7 @@ fn public_deployment_capture_audit(
                     .iter()
                     .map(|field| (*field).to_string())
                     .collect(),
+                Vec::new(),
                 false,
                 Vec::new(),
                 Vec::new(),
@@ -7823,11 +7838,13 @@ fn public_deployment_capture_audit(
         };
     missing_required_fields.sort();
     missing_endpoint_fields.sort();
+    invalid_endpoint_fields.sort();
     let structural_ready = within_size_limit
         && parseable_json
         && top_level_object
         && missing_required_fields.is_empty()
         && missing_endpoint_fields.is_empty()
+        && invalid_endpoint_fields.is_empty()
         && !placeholder_present
         && sensitive_markers_present.is_empty()
         && forbidden_keys_present.is_empty()
@@ -7850,6 +7867,9 @@ fn public_deployment_capture_audit(
     }
     if !missing_endpoint_fields.is_empty() {
         structural_failed_checks.push("endpoint_fields_present".to_string());
+    }
+    if !invalid_endpoint_fields.is_empty() {
+        structural_failed_checks.push("endpoint_fields_valid".to_string());
     }
     if placeholder_present {
         structural_failed_checks.push("placeholders_absent".to_string());
@@ -7911,6 +7931,7 @@ fn public_deployment_capture_audit(
         "missing_required_fields": missing_required_fields,
         "required_endpoint_field_count": REQUIRED_PUBLIC_DEPLOYMENT_ENDPOINT_FIELDS.len(),
         "missing_endpoint_fields": missing_endpoint_fields,
+        "invalid_endpoint_fields": invalid_endpoint_fields,
         "placeholder_present": placeholder_present,
         "sensitive_markers_present": sensitive_markers_present,
         "forbidden_public_status_keys_present": forbidden_keys_present,
@@ -25284,6 +25305,38 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("endpoint_fields_present")));
+        assert_eq!(audit["missing_required_fields"], json!([]));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_invalid_endpoint_fields() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        capture["public_rpc_url"] = json!("https://127.0.0.1/status");
+        capture["public_p2p_endpoint"] = json!("/ip4/10.0.0.1/tcp/58481");
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit invalid-endpoint capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["assembler_ready"], false);
+        assert_eq!(
+            audit["invalid_endpoint_fields"],
+            json!(["public_p2p_endpoint", "public_rpc_url"])
+        );
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("endpoint_fields_valid")));
+        assert_eq!(audit["missing_endpoint_fields"], json!([]));
         assert_eq!(audit["missing_required_fields"], json!([]));
         let _ = fs::remove_file(capture_path);
     }
