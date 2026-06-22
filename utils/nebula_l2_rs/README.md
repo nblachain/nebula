@@ -483,11 +483,13 @@ requires `--mainnet-readiness` and writes a non-passing
 required capture fields, placeholder presence, sensitive key markers,
 public-forbidden key names, size/parseability checks, current capture-plan root
 matches, the expected package file-set root, package file-set root matches, and
+`structural_failed_checks`/`failed_checks` arrays with counts for CI routing, plus
 an `assembler_ready` boolean. It is diagnostic only:
 `usable_as_public_deployment_evidence` is false, so it helps deployment CI
 repair incomplete captures without clearing the public launch gate. The audit
 separates cheap `structural_ready` checks from `strict_verifier_passed`; when a
 top-level-complete capture still fails nested policy/probe/receipt validation,
+`failed_checks` contains `strict_public_deployment_verifier_passed` and
 `strict_verifier_error` records the first assembler/verifier failure.
 
 `--verify-public-deployment-capture path\to\capture.json` also requires

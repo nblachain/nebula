@@ -7775,6 +7775,40 @@ fn public_deployment_capture_audit(
         && capture_contract_root_matches
         && deployment_preflight_checklist_root_matches
         && public_launch_package_file_set_root_matches;
+    let mut structural_failed_checks = Vec::new();
+    if !within_size_limit {
+        structural_failed_checks.push("capture_size_within_limit".to_string());
+    }
+    if !parseable_json {
+        structural_failed_checks.push("parseable_json".to_string());
+    }
+    if !top_level_object {
+        structural_failed_checks.push("top_level_object".to_string());
+    }
+    if !missing_required_fields.is_empty() {
+        structural_failed_checks.push("required_fields_present".to_string());
+    }
+    if placeholder_present {
+        structural_failed_checks.push("placeholders_absent".to_string());
+    }
+    if !sensitive_markers_present.is_empty() {
+        structural_failed_checks.push("sensitive_markers_absent".to_string());
+    }
+    if !forbidden_keys_present.is_empty() {
+        structural_failed_checks.push("public_status_forbidden_keys_absent".to_string());
+    }
+    if !capture_plan_root_matches {
+        structural_failed_checks.push("capture_plan_root_matches".to_string());
+    }
+    if !capture_contract_root_matches {
+        structural_failed_checks.push("capture_contract_root_matches".to_string());
+    }
+    if !deployment_preflight_checklist_root_matches {
+        structural_failed_checks.push("deployment_preflight_checklist_root_matches".to_string());
+    }
+    if !public_launch_package_file_set_root_matches {
+        structural_failed_checks.push("public_launch_package_file_set_root_matches".to_string());
+    }
     let (strict_verifier_passed, strict_verifier_error, strict_evidence_root) = if structural_ready {
         match verify_public_deployment_capture(capture_path, summary) {
             Ok(evidence) => (true, Value::Null, json!(evidence.evidence_root)),
@@ -7784,6 +7818,10 @@ fn public_deployment_capture_audit(
         (false, Value::Null, Value::Null)
     };
     let assembler_ready = structural_ready && strict_verifier_passed;
+    let mut failed_checks = structural_failed_checks.clone();
+    if structural_ready && !strict_verifier_passed {
+        failed_checks.push("strict_public_deployment_verifier_passed".to_string());
+    }
     let mut audit = json!({
         "kind": "nebula-public-deployment-capture-audit",
         "schema_version": 1,
@@ -7817,10 +7855,14 @@ fn public_deployment_capture_audit(
         "expected_public_launch_package_file_set_root": expected_public_launch_package_file_set_root,
         "public_launch_package_file_set_root_matches": public_launch_package_file_set_root_matches,
         "structural_ready": structural_ready,
+        "structural_failed_check_count": structural_failed_checks.len(),
+        "structural_failed_checks": structural_failed_checks,
         "strict_verifier_passed": strict_verifier_passed,
         "strict_verifier_error": strict_verifier_error,
         "strict_evidence_root": strict_evidence_root,
         "assembler_ready": assembler_ready,
+        "failed_check_count": failed_checks.len(),
+        "failed_checks": failed_checks,
         "next_step": if assembler_ready {
             "--verify-public-deployment-capture <capture.json> --fail-on-public-launch-gaps"
         } else if structural_ready {
@@ -24638,6 +24680,14 @@ mod tests {
         assert_eq!(audit["strict_verifier_passed"], false);
         assert_eq!(audit["strict_verifier_error"], Value::Null);
         assert_eq!(audit["assembler_ready"], false);
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("required_fields_present")));
+        assert!(audit["failed_checks"]
+            .as_array()
+            .expect("failed checks")
+            .contains(&json!("public_launch_package_file_set_root_matches")));
         let missing = audit["missing_required_fields"]
             .as_array()
             .expect("missing fields");
@@ -24676,6 +24726,14 @@ mod tests {
         ));
         assert_eq!(audit["strict_verifier_error"], Value::Null);
         assert_eq!(audit["assembler_ready"], true);
+        assert_eq!(audit["structural_failed_check_count"], 0);
+        assert_eq!(
+            audit["failed_checks"]
+                .as_array()
+                .expect("failed checks")
+                .len(),
+            0
+        );
         assert_eq!(audit["placeholder_present"], false);
         assert_eq!(audit["capture_plan_root_matches"], true);
         assert_eq!(audit["capture_contract_root_matches"], true);
@@ -24725,6 +24783,14 @@ mod tests {
         );
         assert_eq!(audit["public_launch_package_file_set_root_matches"], false);
         assert_eq!(
+            audit["structural_failed_checks"],
+            json!(["public_launch_package_file_set_root_matches"])
+        );
+        assert_eq!(
+            audit["failed_checks"],
+            json!(["public_launch_package_file_set_root_matches"])
+        );
+        assert_eq!(
             audit["expected_public_launch_package_file_set_root"],
             public_launch_package_file_set_root(&base_summary.manifest_id, &base_summary.testnet_id)
         );
@@ -24753,6 +24819,11 @@ mod tests {
             .expect("strict verifier error")
             .contains("health probe must assert no-mainnet-custody"));
         assert_eq!(audit["strict_evidence_root"], Value::Null);
+        assert_eq!(audit["structural_failed_check_count"], 0);
+        assert_eq!(
+            audit["failed_checks"],
+            json!(["strict_public_deployment_verifier_passed"])
+        );
         let _ = fs::remove_file(capture_path);
     }
 
