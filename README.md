@@ -3244,9 +3244,10 @@ real XMR.
   metadata-tampered handoff files before public endpoint evidence is assembled.
   When combined with the export step in the same runner invocation,
   `--verify-public-launch-package` recomputes each package artifact and the
-  package manifest root against the current release-candidate summary, failing
-  on stale, tampered, swapped, cross-run, or shape-tampered package directories
-  before public evidence capture begins.
+  package manifest root against the current release-candidate summary, enforces
+  the exact top-level package file set, and fails on stale, tampered, swapped,
+  cross-run, shape-tampered, or extra-file package directories before public
+  evidence capture begins.
 - A local operator-only public launch readiness report export gives CI a
   standalone `nebula-public-launch-readiness-report` with the launch level,
   blocker ids, remediation commands, public status/bundle/capture-plan roots,

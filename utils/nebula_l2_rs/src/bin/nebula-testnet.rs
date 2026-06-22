@@ -7275,6 +7275,7 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
         dir.is_dir(),
         "--verify-public-launch-package must point to an existing directory",
     )?;
+    ensure_public_launch_package_exact_file_set(&dir)?;
     let manifest_path = dir.join("nebula-public-launch-package.json");
     let manifest = read_json_file(&manifest_path, "public launch package manifest")?;
     ensure(
@@ -7426,6 +7427,45 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
         required_root(&manifest, "package_manifest_root")? == expected_package_manifest_root,
         "public launch package manifest root mismatch",
     )
+}
+
+fn ensure_public_launch_package_exact_file_set(dir: &PathBuf) -> Result<(), String> {
+    let mut expected_files = vec!["nebula-public-launch-package.json"];
+    expected_files.extend(
+        PUBLIC_LAUNCH_PACKAGE_ARTIFACTS
+            .iter()
+            .map(|(_, file_name, _)| *file_name),
+    );
+
+    let entries = fs::read_dir(dir)
+        .map_err(|error| format!("failed to list public launch package directory: {error}"))?;
+    let mut actual_files = BTreeSet::new();
+    for entry in entries {
+        let entry = entry
+            .map_err(|error| format!("failed to inspect public launch package entry: {error}"))?;
+        let path = entry.path();
+        let file_name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| "public launch package contains non-utf8 filename".to_string())?;
+        ensure(
+            path.is_file(),
+            &format!("public launch package contains unexpected entry '{file_name}'"),
+        )?;
+        ensure(
+            expected_files.iter().any(|expected| *expected == file_name),
+            &format!("public launch package contains unexpected file '{file_name}'"),
+        )?;
+        actual_files.insert(file_name);
+    }
+
+    for expected in expected_files {
+        ensure(
+            actual_files.contains(expected),
+            &format!("public launch package missing expected file '{expected}'"),
+        )?;
+    }
+    Ok(())
 }
 
 fn public_launch_package_required_before_capture(artifact_id: &str) -> bool {
@@ -23642,6 +23682,34 @@ mod tests {
         let error = verify_public_launch_package(&package_dir_string, &summary)
             .expect_err("tampered package manifest shape should fail verification");
         assert!(error.contains("capture requirement mismatch"));
+        let _ = fs::remove_dir_all(package_dir);
+    }
+
+    #[test]
+    fn public_launch_package_verifier_rejects_extra_files() {
+        let counter = TEST_FILE_COUNTER.fetch_add(1, AtomicOrdering::SeqCst);
+        let package_dir = env::temp_dir().join(format!(
+            "nebula-public-launch-package-extra-{}",
+            root(&["test-public-launch-package-extra", &counter.to_string()])
+        ));
+        let package_dir_string = package_dir.to_string_lossy().into_owned();
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness cli should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_launch_package(&package_dir_string, &summary)
+            .expect("write public launch package");
+
+        fs::write(
+            package_dir.join("operator-private-capture-draft.json"),
+            "{\"placeholder\":\"should-not-ship\"}\n",
+        )
+        .expect("write unexpected package file");
+
+        let error = verify_public_launch_package(&package_dir_string, &summary)
+            .expect_err("extra package files should fail verification");
+        assert!(error.contains("unexpected file"));
         let _ = fs::remove_dir_all(package_dir);
     }
 

@@ -415,8 +415,9 @@ cross-run, or metadata-tampered files before filling public probe evidence.
 the current release-candidate summary, so CI should combine it with the export
 step for the same runner invocation. It recomputes every artifact and package
 root, verifies package-only/public-alpha boundaries and per-artifact
-capture/operator-fill flags, and fails if the directory contains stale,
-tampered, swapped, or cross-run handoff files.
+capture/operator-fill flags, enforces the exact top-level package file set, and
+fails if the directory contains stale, tampered, swapped, cross-run, or extra
+handoff files.
 
 `--write-public-deployment-evidence-template path\to\deployment-template.json`
 also requires `--mainnet-readiness` and writes the schema v5 worksheet that a
