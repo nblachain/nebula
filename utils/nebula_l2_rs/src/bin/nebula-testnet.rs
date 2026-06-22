@@ -7775,6 +7775,15 @@ fn public_deployment_capture_audit(
         duplicate_bootstrap_node_probe_slots,
         bootstrap_node_count_valid,
         bootstrap_node_probe_coverage_valid,
+        invalid_bootstrap_node_probe_record_indexes,
+        invalid_bootstrap_node_probe_binding_indexes,
+        invalid_bootstrap_node_probe_slot_indexes,
+        invalid_bootstrap_node_probe_endpoint_indexes,
+        invalid_bootstrap_node_probe_handshake_indexes,
+        invalid_bootstrap_node_probe_status_page_indexes,
+        invalid_bootstrap_node_probe_root_indexes,
+        invalid_bootstrap_node_probe_observation_time_indexes,
+        bootstrap_node_probe_fields_valid,
         bootstrap_operator_count,
         bootstrap_operator_registry_count,
         missing_bootstrap_operator_registry_commitments,
@@ -7872,6 +7881,7 @@ fn public_deployment_capture_audit(
                 let surface_probe_fields = public_surface_probe_field_audit(&value);
                 let bootstrap_coverage =
                     public_bootstrap_node_probe_coverage_audit(&value);
+                let bootstrap_probe_fields = public_bootstrap_node_probe_field_audit(&value);
                 let operator_registry_coverage =
                     public_bootstrap_operator_registry_coverage_audit(&value);
                 let observer_count = value
@@ -7993,6 +8003,15 @@ fn public_deployment_capture_audit(
                     bootstrap_coverage.duplicate_probe_slots,
                     bootstrap_coverage.node_count_valid,
                     bootstrap_coverage.probe_coverage_valid,
+                    bootstrap_probe_fields.invalid_record_indexes,
+                    bootstrap_probe_fields.invalid_binding_indexes,
+                    bootstrap_probe_fields.invalid_slot_indexes,
+                    bootstrap_probe_fields.invalid_endpoint_indexes,
+                    bootstrap_probe_fields.invalid_handshake_indexes,
+                    bootstrap_probe_fields.invalid_status_page_indexes,
+                    bootstrap_probe_fields.invalid_root_indexes,
+                    bootstrap_probe_fields.invalid_observation_time_indexes,
+                    bootstrap_probe_fields.fields_valid,
                     operator_registry_coverage.bootstrap_operator_count,
                     operator_registry_coverage.bootstrap_operator_registry_count,
                     operator_registry_coverage.missing_registry_commitments,
@@ -8075,6 +8094,15 @@ fn public_deployment_capture_audit(
                 Vec::new(),
                 true,
                 true,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                true,
                 0,
                 0,
                 Vec::new(),
@@ -8129,6 +8157,7 @@ fn public_deployment_capture_audit(
         && public_surface_probe_fields_valid
         && bootstrap_node_count_valid
         && bootstrap_node_probe_coverage_valid
+        && bootstrap_node_probe_fields_valid
         && bootstrap_operator_count_valid
         && bootstrap_operator_registry_coverage_valid
         && probe_observer_signatures_present
@@ -8195,6 +8224,9 @@ fn public_deployment_capture_audit(
     }
     if !bootstrap_node_probe_coverage_valid {
         structural_failed_checks.push("bootstrap_node_probe_coverage_valid".to_string());
+    }
+    if !bootstrap_node_probe_fields_valid {
+        structural_failed_checks.push("bootstrap_node_probe_fields_valid".to_string());
     }
     if !bootstrap_operator_count_valid {
         structural_failed_checks.push("bootstrap_operator_count_valid".to_string());
@@ -8357,6 +8389,23 @@ fn public_deployment_capture_audit(
     audit["duplicate_bootstrap_node_probe_slots"] = json!(duplicate_bootstrap_node_probe_slots);
     audit["bootstrap_node_count_valid"] = json!(bootstrap_node_count_valid);
     audit["bootstrap_node_probe_coverage_valid"] = json!(bootstrap_node_probe_coverage_valid);
+    audit["invalid_bootstrap_node_probe_record_indexes"] =
+        json!(invalid_bootstrap_node_probe_record_indexes);
+    audit["invalid_bootstrap_node_probe_binding_indexes"] =
+        json!(invalid_bootstrap_node_probe_binding_indexes);
+    audit["invalid_bootstrap_node_probe_slot_indexes"] =
+        json!(invalid_bootstrap_node_probe_slot_indexes);
+    audit["invalid_bootstrap_node_probe_endpoint_indexes"] =
+        json!(invalid_bootstrap_node_probe_endpoint_indexes);
+    audit["invalid_bootstrap_node_probe_handshake_indexes"] =
+        json!(invalid_bootstrap_node_probe_handshake_indexes);
+    audit["invalid_bootstrap_node_probe_status_page_indexes"] =
+        json!(invalid_bootstrap_node_probe_status_page_indexes);
+    audit["invalid_bootstrap_node_probe_root_indexes"] =
+        json!(invalid_bootstrap_node_probe_root_indexes);
+    audit["invalid_bootstrap_node_probe_observation_time_indexes"] =
+        json!(invalid_bootstrap_node_probe_observation_time_indexes);
+    audit["bootstrap_node_probe_fields_valid"] = json!(bootstrap_node_probe_fields_valid);
     audit["minimum_bootstrap_operator_count"] = json!(MIN_PUBLIC_DEPLOYMENT_OPERATOR_COUNT);
     audit["bootstrap_operator_count"] = json!(bootstrap_operator_count);
     audit["bootstrap_operator_registry_count"] = json!(bootstrap_operator_registry_count);
@@ -8776,6 +8825,240 @@ fn public_bootstrap_node_probe_coverage_audit(value: &Value) -> PublicBootstrapP
         duplicate_probe_slots: duplicate_probe_slots.into_iter().collect(),
         node_count_valid,
         probe_coverage_valid,
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PublicBootstrapProbeFieldAudit {
+    invalid_record_indexes: Vec<usize>,
+    invalid_binding_indexes: Vec<usize>,
+    invalid_slot_indexes: Vec<usize>,
+    invalid_endpoint_indexes: Vec<usize>,
+    invalid_handshake_indexes: Vec<usize>,
+    invalid_status_page_indexes: Vec<usize>,
+    invalid_root_indexes: Vec<usize>,
+    invalid_observation_time_indexes: Vec<usize>,
+    fields_valid: bool,
+}
+
+fn public_bootstrap_node_probe_field_audit(value: &Value) -> PublicBootstrapProbeFieldAudit {
+    let bootstrap_node_probes = value.get("bootstrap_node_probes");
+    let bootstrap_nodes = value.get("bootstrap_nodes").and_then(Value::as_array);
+    let deployment_run_id = value.get("deployment_run_id").and_then(Value::as_str);
+    let observed_at_unix_ms = value.get("observed_at_unix_ms").and_then(Value::as_u64);
+    let expires_at_unix_ms = value.get("expires_at_unix_ms").and_then(Value::as_u64);
+    let p2p_handshake = value.get("p2p_handshake").and_then(Value::as_str);
+    let public_launch_bundle_root = value
+        .get("public_launch_bundle_root")
+        .and_then(Value::as_str);
+    let public_status_manifest_root = value
+        .get("public_status_manifest_root")
+        .and_then(Value::as_str);
+    let bootstrap_node_set_root = value
+        .get("bootstrap_node_set_root")
+        .and_then(Value::as_str);
+    let mut invalid_record_indexes = Vec::new();
+    let mut invalid_binding_indexes = Vec::new();
+    let mut invalid_slot_indexes = Vec::new();
+    let mut invalid_endpoint_indexes = Vec::new();
+    let mut invalid_handshake_indexes = Vec::new();
+    let mut invalid_status_page_indexes = Vec::new();
+    let mut invalid_root_indexes = Vec::new();
+    let mut invalid_observation_time_indexes = Vec::new();
+    if let Some(probes) = bootstrap_node_probes.and_then(Value::as_array) {
+        for (index, probe) in probes.iter().enumerate() {
+            if !probe.is_object() {
+                invalid_record_indexes.push(index);
+                continue;
+            }
+            if probe.get("status").and_then(Value::as_str) != Some("ok")
+                || probe.get("chain_id").and_then(Value::as_str) != Some(CHAIN_ID)
+                || deployment_run_id
+                    .map(|run_id| {
+                        probe.get("deployment_run_id").and_then(Value::as_str) == Some(run_id)
+                    })
+                    .unwrap_or(false)
+                    == false
+                || probe
+                    .get("public_launch_bundle_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                    == false
+                || probe
+                    .get("public_status_manifest_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                    == false
+                || probe
+                    .get("bootstrap_node_set_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                    == false
+                || public_launch_bundle_root
+                    .map(|root| {
+                        probe
+                            .get("public_launch_bundle_root")
+                            .and_then(Value::as_str)
+                            == Some(root)
+                    })
+                    .unwrap_or(true)
+                    == false
+                || public_status_manifest_root
+                    .map(|root| {
+                        probe
+                            .get("public_status_manifest_root")
+                            .and_then(Value::as_str)
+                            == Some(root)
+                    })
+                    .unwrap_or(true)
+                    == false
+                || bootstrap_node_set_root
+                    .map(|root| {
+                        probe.get("bootstrap_node_set_root").and_then(Value::as_str) == Some(root)
+                    })
+                    .unwrap_or(true)
+                    == false
+            {
+                invalid_binding_indexes.push(index);
+            }
+            let expected_node = probe
+                .get("node_slot_root")
+                .and_then(Value::as_str)
+                .and_then(|slot| {
+                    bootstrap_nodes.and_then(|nodes| {
+                        nodes.iter().find(|node| {
+                            node.get("node_slot_root").and_then(Value::as_str) == Some(slot)
+                        })
+                    })
+                });
+            let node_fields_valid = expected_node
+                .map(|node| {
+                    probe.get("node_index").and_then(Value::as_u64)
+                        == node.get("node_index").and_then(Value::as_u64)
+                        && ["node_id_root", "operator_commitment", "region_commitment"]
+                            .iter()
+                            .all(|field| {
+                                probe.get(*field).and_then(Value::as_str)
+                                    == node.get(*field).and_then(Value::as_str)
+                                    && probe
+                                        .get(*field)
+                                        .and_then(Value::as_str)
+                                        .is_some_and(is_hex_root)
+                            })
+                })
+                .unwrap_or(false);
+            if !node_fields_valid {
+                invalid_slot_indexes.push(index);
+            }
+            let endpoints_valid = expected_node
+                .map(|node| {
+                    let public_p2p_endpoint = probe.get("public_p2p_endpoint").and_then(Value::as_str);
+                    let status_page_url = probe.get("status_page_url").and_then(Value::as_str);
+                    public_p2p_endpoint == node.get("public_p2p_endpoint").and_then(Value::as_str)
+                        && status_page_url == node.get("status_page_url").and_then(Value::as_str)
+                        && public_p2p_endpoint.map(public_endpoint) == Some(true)
+                        && status_page_url.map(public_https_endpoint) == Some(true)
+                })
+                .unwrap_or(false);
+            if !endpoints_valid {
+                invalid_endpoint_indexes.push(index);
+            }
+            let handshake_valid = p2p_handshake
+                .map(|expected| {
+                    probe.get("p2p_handshake").and_then(Value::as_str) == Some(expected)
+                        && probe.get("p2p_handshake_verified").and_then(Value::as_bool)
+                            == Some(true)
+                        && probe
+                            .get("p2p_handshake_root")
+                            .and_then(Value::as_str)
+                            .is_some_and(is_hex_root)
+                        && probe
+                            .get("public_p2p_endpoint")
+                            .and_then(Value::as_str)
+                            .map(|endpoint| {
+                                probe.get("p2p_handshake_root").and_then(Value::as_str)
+                                    == Some(
+                                        public_bootstrap_node_p2p_probe_root(endpoint, expected)
+                                            .as_str(),
+                                    )
+                            })
+                            == Some(true)
+                })
+                .unwrap_or(false);
+            if !handshake_valid {
+                invalid_handshake_indexes.push(index);
+            }
+            let status_page_valid =
+                probe.get("status_page_http_status").and_then(Value::as_u64) == Some(200)
+                    && probe
+                        .get("status_page_body_root")
+                        .and_then(Value::as_str)
+                        .is_some_and(is_hex_root)
+                    && probe
+                        .get("status_page_probe_root")
+                        .and_then(Value::as_str)
+                        .is_some_and(is_hex_root)
+                    && public_bootstrap_node_status_page_probe_root(probe)
+                        .map(|root| {
+                            probe.get("status_page_probe_root").and_then(Value::as_str)
+                                == Some(root.as_str())
+                        })
+                        .unwrap_or(false);
+            if !status_page_valid {
+                invalid_status_page_indexes.push(index);
+            }
+            let observed_at = probe.get("observed_at_unix_ms").and_then(Value::as_u64);
+            if observed_at
+                .map(|observed_at| {
+                    observed_at_unix_ms
+                        .zip(expires_at_unix_ms)
+                        .map(|(window_start, window_end)| {
+                            observed_at >= window_start && observed_at <= window_end
+                        })
+                        .unwrap_or(true)
+                })
+                != Some(true)
+            {
+                invalid_observation_time_indexes.push(index);
+            }
+            let node_probe_root_valid = probe
+                .get("node_probe_root")
+                .and_then(Value::as_str)
+                .is_some_and(is_hex_root)
+                && public_bootstrap_node_probe_root(probe)
+                    .map(|root| {
+                        probe.get("node_probe_root").and_then(Value::as_str) == Some(root.as_str())
+                    })
+                    .unwrap_or(false);
+            if !node_probe_root_valid {
+                invalid_root_indexes.push(index);
+            }
+        }
+    }
+    let fields_valid = match bootstrap_node_probes {
+        Some(Value::Array(_)) => {
+            invalid_record_indexes.is_empty()
+                && invalid_binding_indexes.is_empty()
+                && invalid_slot_indexes.is_empty()
+                && invalid_endpoint_indexes.is_empty()
+                && invalid_handshake_indexes.is_empty()
+                && invalid_status_page_indexes.is_empty()
+                && invalid_root_indexes.is_empty()
+                && invalid_observation_time_indexes.is_empty()
+        }
+        Some(_) => false,
+        None => true,
+    };
+    PublicBootstrapProbeFieldAudit {
+        invalid_record_indexes,
+        invalid_binding_indexes,
+        invalid_slot_indexes,
+        invalid_endpoint_indexes,
+        invalid_handshake_indexes,
+        invalid_status_page_indexes,
+        invalid_root_indexes,
+        invalid_observation_time_indexes,
+        fields_valid,
     }
 }
 
@@ -26577,6 +26860,51 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("bootstrap_node_probe_coverage_valid")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_invalid_bootstrap_node_probe_fields() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        capture["bootstrap_node_probes"][0]["chain_id"] = json!("wrong-chain");
+        capture["bootstrap_node_probes"][0]["public_p2p_endpoint"] = json!("127.0.0.1:18080");
+        capture["bootstrap_node_probes"][0]["p2p_handshake"] =
+            json!("nebula-testnet wrong-handshake");
+        capture["bootstrap_node_probes"][0]["status_page_http_status"] = json!(503);
+        capture["bootstrap_node_probes"][0]["observed_at_unix_ms"] = json!(0);
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit invalid bootstrap node probe capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["bootstrap_node_probe_fields_valid"], false);
+        assert_eq!(audit["invalid_bootstrap_node_probe_binding_indexes"], json!([0]));
+        assert_eq!(audit["invalid_bootstrap_node_probe_endpoint_indexes"], json!([0]));
+        assert_eq!(audit["invalid_bootstrap_node_probe_handshake_indexes"], json!([0]));
+        assert_eq!(
+            audit["invalid_bootstrap_node_probe_status_page_indexes"],
+            json!([0])
+        );
+        assert_eq!(
+            audit["invalid_bootstrap_node_probe_observation_time_indexes"],
+            json!([0])
+        );
+        assert!(audit["invalid_bootstrap_node_probe_root_indexes"]
+            .as_array()
+            .expect("invalid bootstrap node probe root indexes")
+            .contains(&json!(0)));
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("bootstrap_node_probe_fields_valid")));
         let _ = fs::remove_file(capture_path);
     }
 
