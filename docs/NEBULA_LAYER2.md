@@ -3229,8 +3229,10 @@ real XMR.
   launch bundle. Each record carries its export flag, root field, artifact
   root, order, required-before-capture flag, publishability flag,
   non-evidence/non-custody flags, and record root, plus a collection
-  `artifact_set_root`, without embedding operator-private evidence. The evidence worksheet and capture plan
-  bind `public_launch_artifact_manifest_root` and
+  `artifact_set_root`, without embedding operator-private evidence. The
+  manifest guard recomputes those record, set, and manifest roots before export
+  or package verification. The evidence worksheet and capture plan bind
+  `public_launch_artifact_manifest_root` and
   `public_launch_artifact_set_root` so CI can detect swapped or stale launch
   artifacts before TLS, public probes, or observer attestations are captured.
 - A public launch package export gives operators one rooted directory handoff

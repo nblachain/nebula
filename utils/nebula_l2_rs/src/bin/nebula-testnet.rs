@@ -12736,6 +12736,115 @@ fn ensure_public_launch_artifact_manifest_redacted(value: &Value) -> Result<(), 
             .and_then(Value::as_bool)
             == Some(true),
         "public launch artifact manifest must keep mainnet custody disabled",
+    )?;
+    let manifest_id = value
+        .get("manifest_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "public launch artifact manifest missing manifest_id".to_string())?;
+    let artifacts = value
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "public launch artifact manifest missing artifacts".to_string())?;
+    ensure(
+        value.get("artifact_count").and_then(Value::as_u64) == Some(artifacts.len() as u64),
+        "public launch artifact manifest artifact_count mismatch",
+    )?;
+    let mut artifact_record_roots = Vec::new();
+    for (index, artifact) in artifacts.iter().enumerate() {
+        let order = (index + 1) as u64;
+        ensure(
+            artifact.get("order").and_then(Value::as_u64) == Some(order),
+            "public launch artifact manifest artifact order mismatch",
+        )?;
+        ensure(
+            artifact
+                .get("required_before_capture")
+                .and_then(Value::as_bool)
+                == Some(true),
+            "public launch artifact manifest artifact must be required before capture",
+        )?;
+        ensure(
+            artifact
+                .get("usable_as_public_deployment_evidence")
+                .and_then(Value::as_bool)
+                == Some(false),
+            "public launch artifact manifest artifact must not be deployment evidence",
+        )?;
+        ensure(
+            artifact
+                .get("usable_as_mainnet_custody_approval")
+                .and_then(Value::as_bool)
+                == Some(false),
+            "public launch artifact manifest artifact must not be custody approval",
+        )?;
+        let artifact_id = artifact
+            .get("artifact_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "public launch artifact manifest artifact missing id".to_string())?;
+        let kind = artifact
+            .get("kind")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "public launch artifact manifest artifact missing kind".to_string())?;
+        let export_flag = artifact
+            .get("export_flag")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "public launch artifact manifest artifact missing export flag".to_string())?;
+        let root_field = artifact
+            .get("root_field")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "public launch artifact manifest artifact missing root field".to_string())?;
+        let artifact_root = artifact
+            .get("root")
+            .and_then(Value::as_str)
+            .filter(|candidate| is_hex_root(candidate))
+            .ok_or_else(|| "public launch artifact manifest artifact root is not a root".to_string())?;
+        let operator_private = artifact
+            .get("operator_private")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| {
+                "public launch artifact manifest artifact missing operator_private".to_string()
+            })?;
+        let publishable = artifact
+            .get("publishable")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| "public launch artifact manifest artifact missing publishable".to_string())?;
+        let expected_record_root = public_launch_artifact_record_root(
+            manifest_id,
+            artifact_id,
+            kind,
+            export_flag,
+            root_field,
+            artifact_root,
+            index + 1,
+            operator_private,
+            publishable,
+            true,
+            false,
+            false,
+        );
+        ensure(
+            artifact.get("artifact_record_root").and_then(Value::as_str)
+                == Some(expected_record_root.as_str()),
+            "public launch artifact manifest artifact record root mismatch",
+        )?;
+        artifact_record_roots.push(expected_record_root);
+    }
+    let artifact_set_root = collection_root("public-launch-artifact-set", artifact_record_roots);
+    ensure(
+        value.get("artifact_set_root").and_then(Value::as_str) == Some(artifact_set_root.as_str()),
+        "public launch artifact manifest artifact_set_root mismatch",
+    )?;
+    let mut rootless_manifest = value.clone();
+    if let Some(map) = rootless_manifest.as_object_mut() {
+        map.remove("public_launch_artifact_manifest_root");
+    }
+    let expected_manifest_root = value_root("public-launch-artifact-manifest", &rootless_manifest);
+    ensure(
+        value
+            .get("public_launch_artifact_manifest_root")
+            .and_then(Value::as_str)
+            == Some(expected_manifest_root.as_str()),
+        "public launch artifact manifest root mismatch",
     )
 }
 
@@ -23584,6 +23693,14 @@ mod tests {
         assert!(!value_contains_exact_key(&value, "public_launch_readiness"));
         ensure_public_launch_artifact_manifest_redacted(&value)
             .expect("redacted public launch artifact manifest");
+        let mut metadata_tampered = value.clone();
+        let original_operator_private = metadata_tampered["artifacts"][0]["operator_private"]
+            .as_bool()
+            .expect("operator private");
+        metadata_tampered["artifacts"][0]["operator_private"] = json!(!original_operator_private);
+        let error = ensure_public_launch_artifact_manifest_redacted(&metadata_tampered)
+            .expect_err("metadata-tampered artifact manifest should fail");
+        assert!(error.contains("artifact record root mismatch"));
         let _ = fs::remove_file(path);
     }
 
