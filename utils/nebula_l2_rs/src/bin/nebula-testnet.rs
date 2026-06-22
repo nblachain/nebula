@@ -7828,8 +7828,11 @@ fn public_deployment_capture_audit(
         sensitive_markers_present,
         forbidden_keys_present,
         capture_plan_root_matches,
+        expected_capture_plan_root,
         capture_contract_root_matches,
+        expected_capture_contract_root,
         deployment_preflight_checklist_root_matches,
+        expected_deployment_preflight_checklist_root,
         public_launch_bundle_root_matches,
         expected_public_launch_bundle_root,
         public_status_manifest_root_matches,
@@ -8107,11 +8110,14 @@ fn public_deployment_capture_audit(
                     forbidden_keys,
                     value.get("capture_plan_root").and_then(Value::as_str)
                         == Some(expected_capture_plan_root),
+                    expected_capture_plan_root.to_string(),
                     value.get("capture_contract_root").and_then(Value::as_str)
                         == Some(expected_capture_contract_root),
+                    expected_capture_contract_root.to_string(),
                     value.get("deployment_preflight_checklist_root")
                         .and_then(Value::as_str)
                         == Some(expected_preflight_checklist_root),
+                    expected_preflight_checklist_root.to_string(),
                     receipt_root_values_match(
                         "public_launch_bundle_root",
                         expected_launch_bundle_root,
@@ -8231,8 +8237,11 @@ fn public_deployment_capture_audit(
                 Vec::new(),
                 Vec::new(),
                 false,
+                String::new(),
                 false,
+                String::new(),
                 false,
+                String::new(),
                 false,
                 String::new(),
                 false,
@@ -8490,6 +8499,10 @@ fn public_deployment_capture_audit(
     audit["capture_time_window_valid"] = json!(capture_time_window_valid);
     audit["capture_time_current"] = json!(capture_time_current);
     audit["deployment_run_id_valid"] = json!(deployment_run_id_valid);
+    audit["expected_capture_plan_root"] = json!(expected_capture_plan_root);
+    audit["expected_capture_contract_root"] = json!(expected_capture_contract_root);
+    audit["expected_deployment_preflight_checklist_root"] =
+        json!(expected_deployment_preflight_checklist_root);
     audit["expected_public_launch_bundle_root"] = json!(expected_public_launch_bundle_root);
     audit["public_launch_bundle_root_matches"] = json!(public_launch_bundle_root_matches);
     audit["expected_public_status_manifest_root"] = json!(expected_public_status_manifest_root);
@@ -28403,6 +28416,21 @@ mod tests {
         assert_eq!(audit["capture_plan_root_matches"], true);
         assert_eq!(audit["capture_contract_root_matches"], true);
         assert_eq!(audit["deployment_preflight_checklist_root_matches"], true);
+        assert!(is_hex_root(
+            audit["expected_capture_plan_root"]
+                .as_str()
+                .expect("expected capture plan root")
+        ));
+        assert!(is_hex_root(
+            audit["expected_capture_contract_root"]
+                .as_str()
+                .expect("expected capture contract root")
+        ));
+        assert!(is_hex_root(
+            audit["expected_deployment_preflight_checklist_root"]
+                .as_str()
+                .expect("expected preflight checklist root")
+        ));
         assert_eq!(audit["public_launch_bundle_root_matches"], true);
         assert_eq!(audit["public_status_manifest_root_matches"], true);
         assert_eq!(
@@ -28420,6 +28448,60 @@ mod tests {
         assert!(is_hex_root(
             audit["capture_audit_root"].as_str().expect("audit root")
         ));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_capture_root_mismatches() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        capture["capture_plan_root"] =
+            json!(root(&["test-public-deployment", "wrong-capture-plan"]));
+        capture["capture_contract_root"] =
+            json!(root(&["test-public-deployment", "wrong-capture-contract"]));
+        capture["deployment_preflight_checklist_root"] =
+            json!(root(&["test-public-deployment", "wrong-preflight-checklist"]));
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit capture root mismatch");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["assembler_ready"], false);
+        assert_eq!(audit["capture_plan_root_matches"], false);
+        assert_eq!(audit["capture_contract_root_matches"], false);
+        assert_eq!(
+            audit["deployment_preflight_checklist_root_matches"],
+            false
+        );
+        assert!(is_hex_root(
+            audit["expected_capture_plan_root"]
+                .as_str()
+                .expect("expected capture plan root")
+        ));
+        assert!(is_hex_root(
+            audit["expected_capture_contract_root"]
+                .as_str()
+                .expect("expected capture contract root")
+        ));
+        assert!(is_hex_root(
+            audit["expected_deployment_preflight_checklist_root"]
+                .as_str()
+                .expect("expected preflight checklist root")
+        ));
+        let structural_failed_checks = audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks");
+        assert!(structural_failed_checks.contains(&json!("capture_plan_root_matches")));
+        assert!(structural_failed_checks.contains(&json!("capture_contract_root_matches")));
+        assert!(structural_failed_checks
+            .contains(&json!("deployment_preflight_checklist_root_matches")));
         let _ = fs::remove_file(capture_path);
     }
 

@@ -488,8 +488,9 @@ requires `--mainnet-readiness` and writes a non-passing
 required capture fields, missing and invalid public endpoint fields, invalid
 timestamp types, freshness-window bounds, current capture-time validity,
 deployment-run-id validity, malformed preflight receipt fields/phases,
-malformed runbook receipt fields/steps, mismatched frozen launch/status roots,
-TLS endpoint pin counts and missing/extra/duplicate TLS endpoint pin roles,
+malformed runbook receipt fields/steps, expected capture-plan, capture-contract,
+and preflight roots, mismatched frozen launch/status roots, TLS endpoint pin
+counts and missing/extra/duplicate TLS endpoint pin roles,
 indexed malformed TLS endpoint pin records,
 public-surface probe counts and missing/extra/duplicate probe roles,
 indexed malformed public-surface probe records, bootstrap
@@ -501,8 +502,9 @@ quorum reachability, placeholder presence, observer region coverage, malformed
 observer region indexes, duplicate observer ids or keys, unsigned/unverified
 observer signature indexes, invalid observer signature-verification transcript
 indexes, sensitive key markers, public-forbidden key names, size/parseability
-checks, current capture-plan root matches, the
-expected package file-set root, package file-set root matches, and
+checks, current capture-plan/contract/preflight root matches, expected
+capture-plan, capture-contract, and preflight roots, the expected package
+file-set root, package file-set root matches, and
 `structural_failed_checks`/`failed_checks` arrays with counts for CI routing,
 plus an `assembler_ready` boolean. It is diagnostic only:
 `usable_as_public_deployment_evidence` is false, so it helps deployment CI
