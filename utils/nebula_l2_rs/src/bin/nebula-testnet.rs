@@ -7830,6 +7830,10 @@ fn public_deployment_capture_audit(
         capture_plan_root_matches,
         capture_contract_root_matches,
         deployment_preflight_checklist_root_matches,
+        invalid_preflight_receipt_binding_fields,
+        invalid_preflight_receipt_phase_indexes,
+        preflight_receipt_roots_valid,
+        preflight_receipt_fields_valid,
         public_launch_package_file_set_root_matches,
         expected_public_launch_package_file_set_root,
     ) =
@@ -7903,6 +7907,7 @@ fn public_deployment_capture_audit(
                     public_bootstrap_operator_registry_coverage_audit(&value);
                 let operator_registry_fields =
                     public_bootstrap_operator_registry_field_audit(&value);
+                let preflight_receipt_fields = public_deployment_preflight_receipt_field_audit(&value);
                 let observer_count = value
                     .get("probe_observers")
                     .and_then(Value::as_array)
@@ -8081,6 +8086,10 @@ fn public_deployment_capture_audit(
                     value.get("deployment_preflight_checklist_root")
                         .and_then(Value::as_str)
                         == Some(expected_preflight_checklist_root),
+                    preflight_receipt_fields.invalid_binding_fields,
+                    preflight_receipt_fields.invalid_phase_indexes,
+                    preflight_receipt_fields.roots_valid,
+                    preflight_receipt_fields.fields_valid,
                     value.get("public_launch_package_file_set_root")
                         .and_then(Value::as_str)
                         == Some(expected_package_file_set_root.as_str()),
@@ -8184,6 +8193,10 @@ fn public_deployment_capture_audit(
                 false,
                 false,
                 false,
+                Vec::new(),
+                Vec::new(),
+                true,
+                true,
                 false,
                 public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id),
             ),
@@ -8228,6 +8241,7 @@ fn public_deployment_capture_audit(
         && capture_plan_root_matches
         && capture_contract_root_matches
         && deployment_preflight_checklist_root_matches
+        && preflight_receipt_fields_valid
         && public_launch_package_file_set_root_matches;
     let mut structural_failed_checks = Vec::new();
     if !within_size_limit {
@@ -8338,6 +8352,9 @@ fn public_deployment_capture_audit(
     if !deployment_preflight_checklist_root_matches {
         structural_failed_checks.push("deployment_preflight_checklist_root_matches".to_string());
     }
+    if !preflight_receipt_fields_valid {
+        structural_failed_checks.push("preflight_receipt_fields_valid".to_string());
+    }
     if !public_launch_package_file_set_root_matches {
         structural_failed_checks.push("public_launch_package_file_set_root_matches".to_string());
     }
@@ -8413,6 +8430,12 @@ fn public_deployment_capture_audit(
     audit["capture_time_window_valid"] = json!(capture_time_window_valid);
     audit["capture_time_current"] = json!(capture_time_current);
     audit["deployment_run_id_valid"] = json!(deployment_run_id_valid);
+    audit["invalid_preflight_receipt_binding_fields"] =
+        json!(invalid_preflight_receipt_binding_fields);
+    audit["invalid_preflight_receipt_phase_indexes"] =
+        json!(invalid_preflight_receipt_phase_indexes);
+    audit["preflight_receipt_roots_valid"] = json!(preflight_receipt_roots_valid);
+    audit["preflight_receipt_fields_valid"] = json!(preflight_receipt_fields_valid);
     audit["required_tls_endpoint_pin_roles"] = json!(PUBLIC_TLS_ENDPOINT_PIN_ROLES);
     audit["tls_endpoint_pin_count"] = json!(tls_endpoint_pin_count);
     audit["missing_tls_endpoint_pin_roles"] = json!(missing_tls_endpoint_pin_roles);
@@ -9678,6 +9701,219 @@ fn public_bootstrap_operator_signature_verification_field_valid(
                 == Some(root.as_str())
         })
         .unwrap_or(false)
+}
+
+#[derive(Clone, Debug)]
+struct PublicPreflightReceiptFieldAudit {
+    invalid_binding_fields: Vec<String>,
+    invalid_phase_indexes: Vec<usize>,
+    roots_valid: bool,
+    fields_valid: bool,
+}
+
+fn public_deployment_preflight_receipt_field_audit(value: &Value) -> PublicPreflightReceiptFieldAudit {
+    let receipt = value.get("deployment_preflight_receipt");
+    let mut invalid_binding_fields = Vec::new();
+    let mut invalid_phase_indexes = Vec::new();
+    let mut roots_valid = true;
+    if let Some(receipt) = receipt {
+        let Some(receipt_map) = receipt.as_object() else {
+            return PublicPreflightReceiptFieldAudit {
+                invalid_binding_fields: vec!["deployment_preflight_receipt".to_string()],
+                invalid_phase_indexes,
+                roots_valid: false,
+                fields_valid: false,
+            };
+        };
+        let deployment_run_id = value
+            .get("deployment_run_id")
+            .and_then(Value::as_str)
+            .or_else(|| receipt.get("deployment_run_id").and_then(Value::as_str));
+        let observed_at_unix_ms = value.get("observed_at_unix_ms").and_then(Value::as_u64);
+        let expires_at_unix_ms = value.get("expires_at_unix_ms").and_then(Value::as_u64);
+        let deployment_preflight_checklist_root = value
+            .get("deployment_preflight_checklist_root")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                receipt
+                    .get("deployment_preflight_checklist_root")
+                    .and_then(Value::as_str)
+            });
+        let capture_contract_root = value
+            .get("capture_contract_root")
+            .and_then(Value::as_str)
+            .or_else(|| receipt.get("capture_contract_root").and_then(Value::as_str));
+        let public_launch_bundle_root = value
+            .get("public_launch_bundle_root")
+            .and_then(Value::as_str)
+            .or_else(|| receipt.get("public_launch_bundle_root").and_then(Value::as_str));
+        let public_status_manifest_root = value
+            .get("public_status_manifest_root")
+            .and_then(Value::as_str)
+            .or_else(|| receipt.get("public_status_manifest_root").and_then(Value::as_str));
+        if receipt.get("schema_version").and_then(Value::as_u64) != Some(1) {
+            invalid_binding_fields.push("schema_version".to_string());
+        }
+        if receipt.get("kind").and_then(Value::as_str)
+            != Some("nebula-public-deployment-preflight-receipt")
+        {
+            invalid_binding_fields.push("kind".to_string());
+        }
+        if receipt.get("chain_id").and_then(Value::as_str) != Some(CHAIN_ID) {
+            invalid_binding_fields.push("chain_id".to_string());
+        }
+        if receipt.get("completed").and_then(Value::as_bool) != Some(true) {
+            invalid_binding_fields.push("completed".to_string());
+        }
+        for (field, expected) in [
+            ("deployment_run_id", deployment_run_id),
+            (
+                "deployment_preflight_checklist_root",
+                deployment_preflight_checklist_root,
+            ),
+            ("capture_contract_root", capture_contract_root),
+            ("public_launch_bundle_root", public_launch_bundle_root),
+            ("public_status_manifest_root", public_status_manifest_root),
+        ] {
+            let actual = receipt.get(field).and_then(Value::as_str);
+            if actual.is_none()
+                || expected.map(|expected| actual == Some(expected)).unwrap_or(true) == false
+            {
+                invalid_binding_fields.push(field.to_string());
+            }
+        }
+        let required_phase_ids_valid = receipt
+            .get("required_phase_ids")
+            .and_then(Value::as_array)
+            .map(|phase_ids| {
+                phase_ids.len() == REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len()
+                    && REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES
+                        .iter()
+                        .enumerate()
+                        .all(|(index, expected)| {
+                            phase_ids.get(index).and_then(Value::as_str) == Some(*expected)
+                        })
+            })
+            == Some(true);
+        if !required_phase_ids_valid {
+            invalid_binding_fields.push("required_phase_ids".to_string());
+        }
+        let mut phase_roots = Vec::new();
+        let phases = receipt.get("phases").and_then(Value::as_array);
+        if phases.map(|phases| phases.len()) != Some(REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len()) {
+            invalid_binding_fields.push("phases".to_string());
+        }
+        if let Some(phases) = phases {
+            for (index, phase) in phases.iter().enumerate() {
+                let expected_id = REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.get(index).copied();
+                let order = phase.get("order").and_then(Value::as_u64);
+                let id = phase.get("id").and_then(Value::as_str);
+                let completed_at = phase.get("completed_at_unix_ms").and_then(Value::as_u64);
+                let phase_evidence_root = phase.get("phase_evidence_root").and_then(Value::as_str);
+                let phase_time_valid = completed_at
+                    .map(|completed_at| {
+                        observed_at_unix_ms
+                            .zip(expires_at_unix_ms)
+                            .map(|(observed_at, expires_at)| {
+                                completed_at <= observed_at
+                                    && completed_at <= expires_at
+                                    && observed_at.saturating_sub(completed_at)
+                                        <= MAX_PUBLIC_DEPLOYMENT_FRESHNESS_MS
+                            })
+                            .unwrap_or(true)
+                    })
+                    == Some(true);
+                let expected_phase_root = deployment_run_id
+                    .zip(deployment_preflight_checklist_root)
+                    .zip(expected_id.zip(order).zip(phase_evidence_root.zip(completed_at)))
+                    .map(|((run_id, checklist_root), ((expected_id, order), (evidence_root, completed_at)))| {
+                        root(&[
+                            "public-deployment-preflight-phase-receipt",
+                            CHAIN_ID,
+                            run_id,
+                            checklist_root,
+                            expected_id,
+                            &order.to_string(),
+                            evidence_root,
+                            &completed_at.to_string(),
+                            bool_str(true),
+                        ])
+                    });
+                if let Some(root) = expected_phase_root.clone() {
+                    phase_roots.push(root);
+                }
+                let phase_valid = phase.is_object()
+                    && order == Some((index + 1) as u64)
+                    && expected_id.is_some()
+                    && id == expected_id
+                    && phase.get("required").and_then(Value::as_bool) == Some(true)
+                    && phase.get("completed").and_then(Value::as_bool) == Some(true)
+                    && phase_time_valid
+                    && phase_evidence_root.is_some_and(is_hex_root)
+                    && phase.get("phase_root").and_then(Value::as_str).is_some_and(is_hex_root)
+                    && expected_phase_root
+                        .map(|expected| phase.get("phase_root").and_then(Value::as_str) == Some(expected.as_str()))
+                        .unwrap_or(false);
+                if !phase_valid {
+                    invalid_phase_indexes.push(index);
+                }
+            }
+        }
+        if receipt.get("phase_count").and_then(Value::as_u64)
+            != Some(REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len() as u64)
+        {
+            invalid_binding_fields.push("phase_count".to_string());
+        }
+        roots_valid = false;
+        if phase_roots.len() == REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len() {
+            let phase_set_root =
+                collection_root("public-deployment-preflight-phase-set", phase_roots);
+            let receipt_root = deployment_run_id
+                .zip(deployment_preflight_checklist_root)
+                .zip(capture_contract_root)
+                .zip(public_launch_bundle_root)
+                .zip(public_status_manifest_root)
+                .map(|((((run_id, checklist_root), contract_root), launch_root), status_root)| {
+                    root(&[
+                        "public-deployment-preflight-receipt",
+                        CHAIN_ID,
+                        run_id,
+                        checklist_root,
+                        contract_root,
+                        launch_root,
+                        status_root,
+                        &phase_set_root,
+                        &(REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len() as u64).to_string(),
+                        bool_str(true),
+                    ])
+                });
+            roots_valid = receipt.get("phase_set_root").and_then(Value::as_str)
+                == Some(phase_set_root.as_str())
+                && receipt
+                    .get("receipt_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                && receipt_root
+                    .map(|root| receipt.get("receipt_root").and_then(Value::as_str) == Some(root.as_str()))
+                    .unwrap_or(false);
+        }
+        if receipt_map.is_empty() {
+            invalid_binding_fields.push("deployment_preflight_receipt".to_string());
+        }
+    }
+    let fields_valid = match receipt {
+        Some(Value::Object(_)) => {
+            invalid_binding_fields.is_empty() && invalid_phase_indexes.is_empty() && roots_valid
+        }
+        Some(_) => false,
+        None => true,
+    };
+    PublicPreflightReceiptFieldAudit {
+        invalid_binding_fields,
+        invalid_phase_indexes,
+        roots_valid,
+        fields_valid,
+    }
 }
 
 fn invalid_public_probe_observer_region_indexes(value: &Value) -> Vec<u64> {
@@ -27321,6 +27557,41 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("tls_endpoint_pin_fields_valid")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_invalid_preflight_receipt_fields() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        capture["deployment_preflight_receipt"]["completed"] = json!(false);
+        capture["deployment_preflight_receipt"]["phases"][0]["completed"] = json!(false);
+        capture["deployment_preflight_receipt"]["phases"][0]["id"] =
+            json!("wrong-preflight-phase");
+        capture["deployment_preflight_receipt"]["phases"][0]["completed_at_unix_ms"] = json!(0);
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit invalid preflight receipt capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["preflight_receipt_fields_valid"], false);
+        assert_eq!(audit["preflight_receipt_roots_valid"], false);
+        assert!(audit["invalid_preflight_receipt_binding_fields"]
+            .as_array()
+            .expect("invalid preflight binding fields")
+            .contains(&json!("completed")));
+        assert_eq!(audit["invalid_preflight_receipt_phase_indexes"], json!([0]));
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("preflight_receipt_fields_valid")));
         let _ = fs::remove_file(capture_path);
     }
 

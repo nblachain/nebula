@@ -3354,7 +3354,8 @@ real XMR.
   CI can run `--audit-public-deployment-capture` first to write a non-passing
   capture audit that lists missing required fields, missing or invalid public
   endpoint fields, invalid freshness windows, stale capture times,
-  invalid deployment run ids, missing or extra TLS endpoint pin roles,
+  invalid deployment run ids, malformed preflight receipt fields or phases,
+  missing or extra TLS endpoint pin roles,
   malformed TLS endpoint pin records, missing or extra public-surface probe
   roles, malformed public-surface probe records, insufficient bootstrap node
   counts, missing or extra bootstrap-node
