@@ -3355,7 +3355,8 @@ real XMR.
   capture audit that lists missing required fields, missing or invalid public
   endpoint fields, invalid freshness windows, stale capture times,
   invalid deployment run ids, malformed preflight receipt fields or phases,
-  malformed runbook receipt fields or steps, missing or extra TLS endpoint pin roles,
+  malformed runbook receipt fields or steps, mismatched frozen launch/status
+  roots, missing or extra TLS endpoint pin roles,
   malformed TLS endpoint pin records, missing or extra public-surface probe
   roles, malformed public-surface probe records, insufficient bootstrap node
   counts, missing or extra bootstrap-node
