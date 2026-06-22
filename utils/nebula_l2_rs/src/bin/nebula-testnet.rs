@@ -7755,6 +7755,11 @@ fn public_deployment_capture_audit(
         extra_tls_endpoint_pin_roles,
         duplicate_tls_endpoint_pin_roles,
         tls_endpoint_pin_coverage_valid,
+        public_surface_probe_count,
+        missing_public_surface_probe_roles,
+        extra_public_surface_probe_roles,
+        duplicate_public_surface_probe_roles,
+        public_surface_probe_coverage_valid,
         bootstrap_node_count,
         bootstrap_node_probe_count,
         missing_bootstrap_node_probe_slots,
@@ -7855,6 +7860,7 @@ fn public_deployment_capture_audit(
                     .map(|run_id| validate_public_deployment_run_id(run_id).is_ok())
                     .unwrap_or(true);
                 let tls_pin_coverage = public_tls_endpoint_pin_coverage_audit(&value);
+                let surface_probe_coverage = public_surface_probe_coverage_audit(&value);
                 let bootstrap_coverage =
                     public_bootstrap_node_probe_coverage_audit(&value);
                 let operator_registry_coverage =
@@ -7958,6 +7964,11 @@ fn public_deployment_capture_audit(
                     tls_pin_coverage.extra_pin_roles,
                     tls_pin_coverage.duplicate_pin_roles,
                     tls_pin_coverage.pin_coverage_valid,
+                    surface_probe_coverage.public_surface_probe_count,
+                    surface_probe_coverage.missing_probe_roles,
+                    surface_probe_coverage.extra_probe_roles,
+                    surface_probe_coverage.duplicate_probe_roles,
+                    surface_probe_coverage.probe_coverage_valid,
                     bootstrap_coverage.bootstrap_node_count,
                     bootstrap_coverage.bootstrap_node_probe_count,
                     bootstrap_coverage.missing_probe_slots,
@@ -8028,6 +8039,11 @@ fn public_deployment_capture_audit(
                 Vec::new(),
                 true,
                 0,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                true,
+                0,
                 0,
                 Vec::new(),
                 Vec::new(),
@@ -8084,6 +8100,7 @@ fn public_deployment_capture_audit(
         && capture_time_current
         && deployment_run_id_valid
         && tls_endpoint_pin_coverage_valid
+        && public_surface_probe_coverage_valid
         && bootstrap_node_count_valid
         && bootstrap_node_probe_coverage_valid
         && bootstrap_operator_count_valid
@@ -8140,6 +8157,9 @@ fn public_deployment_capture_audit(
     }
     if !tls_endpoint_pin_coverage_valid {
         structural_failed_checks.push("tls_endpoint_pin_coverage_valid".to_string());
+    }
+    if !public_surface_probe_coverage_valid {
+        structural_failed_checks.push("public_surface_probe_coverage_valid".to_string());
     }
     if !bootstrap_node_count_valid {
         structural_failed_checks.push("bootstrap_node_count_valid".to_string());
@@ -8279,6 +8299,12 @@ fn public_deployment_capture_audit(
     audit["extra_tls_endpoint_pin_roles"] = json!(extra_tls_endpoint_pin_roles);
     audit["duplicate_tls_endpoint_pin_roles"] = json!(duplicate_tls_endpoint_pin_roles);
     audit["tls_endpoint_pin_coverage_valid"] = json!(tls_endpoint_pin_coverage_valid);
+    audit["required_public_surface_probe_roles"] = json!(REQUIRED_PUBLIC_SURFACE_PROBE_ROLES);
+    audit["public_surface_probe_count"] = json!(public_surface_probe_count);
+    audit["missing_public_surface_probe_roles"] = json!(missing_public_surface_probe_roles);
+    audit["extra_public_surface_probe_roles"] = json!(extra_public_surface_probe_roles);
+    audit["duplicate_public_surface_probe_roles"] = json!(duplicate_public_surface_probe_roles);
+    audit["public_surface_probe_coverage_valid"] = json!(public_surface_probe_coverage_valid);
     audit["minimum_bootstrap_node_count"] = json!(DEFAULT_PUBLIC_BOOTSTRAP_NODE_COUNT);
     audit["bootstrap_node_count"] = json!(bootstrap_node_count);
     audit["bootstrap_node_probe_count"] = json!(bootstrap_node_probe_count);
@@ -8384,6 +8410,64 @@ fn public_tls_endpoint_pin_coverage_audit(value: &Value) -> PublicTlsPinCoverage
         extra_pin_roles,
         duplicate_pin_roles: duplicate_roles.into_iter().collect(),
         pin_coverage_valid,
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PublicSurfaceProbeCoverageAudit {
+    public_surface_probe_count: u64,
+    missing_probe_roles: Vec<String>,
+    extra_probe_roles: Vec<String>,
+    duplicate_probe_roles: Vec<String>,
+    probe_coverage_valid: bool,
+}
+
+fn public_surface_probe_coverage_audit(value: &Value) -> PublicSurfaceProbeCoverageAudit {
+    let expected_roles = REQUIRED_PUBLIC_SURFACE_PROBE_ROLES
+        .iter()
+        .map(|role| (*role).to_string())
+        .collect::<BTreeSet<_>>();
+    let public_surface_probes = value.get("public_surface_probes");
+    let mut observed_roles = BTreeSet::new();
+    let mut duplicate_roles = BTreeSet::new();
+    if let Some(probes) = public_surface_probes.and_then(Value::as_array) {
+        for role in probes
+            .iter()
+            .filter_map(|probe| probe.get("probe_role").and_then(Value::as_str))
+        {
+            if !observed_roles.insert(role.to_string()) {
+                duplicate_roles.insert(role.to_string());
+            }
+        }
+    }
+    let missing_probe_roles = expected_roles
+        .difference(&observed_roles)
+        .cloned()
+        .collect::<Vec<_>>();
+    let extra_probe_roles = observed_roles
+        .difference(&expected_roles)
+        .cloned()
+        .collect::<Vec<_>>();
+    let probe_count = public_surface_probes
+        .and_then(Value::as_array)
+        .map(|probes| probes.len() as u64)
+        .unwrap_or_default();
+    let probe_coverage_valid = match public_surface_probes {
+        Some(Value::Array(_)) => {
+            probe_count == REQUIRED_PUBLIC_SURFACE_PROBE_ROLES.len() as u64
+                && missing_probe_roles.is_empty()
+                && extra_probe_roles.is_empty()
+                && duplicate_roles.is_empty()
+        }
+        Some(_) => false,
+        None => true,
+    };
+    PublicSurfaceProbeCoverageAudit {
+        public_surface_probe_count: probe_count,
+        missing_probe_roles,
+        extra_probe_roles,
+        duplicate_probe_roles: duplicate_roles.into_iter().collect(),
+        probe_coverage_valid,
     }
 }
 
@@ -26143,6 +26227,46 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("tls_endpoint_pin_coverage_valid")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_missing_public_surface_probe() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        let missing_role = capture["public_surface_probes"]
+            .as_array_mut()
+            .expect("public surface probes")
+            .pop()
+            .expect("removed public surface probe")["probe_role"]
+            .as_str()
+            .expect("removed public surface probe role")
+            .to_string();
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit missing public surface probe capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(
+            audit["public_surface_probe_count"],
+            REQUIRED_PUBLIC_SURFACE_PROBE_ROLES.len() as u64 - 1
+        );
+        assert_eq!(audit["public_surface_probe_coverage_valid"], false);
+        assert_eq!(
+            audit["missing_public_surface_probe_roles"],
+            json!([missing_role])
+        );
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("public_surface_probe_coverage_valid")));
         let _ = fs::remove_file(capture_path);
     }
 
