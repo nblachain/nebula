@@ -3355,9 +3355,9 @@ real XMR.
   capture audit that lists missing required fields, missing or invalid public
   endpoint fields, invalid freshness windows, stale capture times,
   invalid deployment run ids, unreachable observer quorums, insufficient
-  observer region coverage, placeholders, sensitive markers, public-forbidden
-  keys, current capture-plan and package file-set root mismatches, structural
-  readiness, machine-readable
+  observer region coverage, duplicate observer ids or keys, placeholders,
+  sensitive markers, public-forbidden keys, current capture-plan and package
+  file-set root mismatches, structural readiness, machine-readable
   structural and full failed-check lists, strict verifier status, and the first
   nested verifier error, then run
   `--verify-public-deployment-capture` to dry-run the same assembler/verifier
@@ -3429,11 +3429,12 @@ real XMR.
   The local verifier rejects stale self-consistent captures by requiring the
   status manifest and launch bundle roots to match the current run's generated
   public artifacts and by enforcing an observed/expires freshness window,
-  multi-observer/multi-region probe roots, unique bootstrap endpoint roots, an
-  attestor registry root, and a PQ signature root. Live reachability checks and
-  raw PQ signature verification remain deployment-system evidence outside the
-  local runner, but duplicate bootstrap endpoints and unsigned or unverified
-  observer captures are rejected by the assembler and verifier.
+  multi-observer/multi-region probe roots, unique observer ids/keys, unique
+  bootstrap endpoint roots, an attestor registry root, and a PQ signature root.
+  Live reachability checks and raw PQ signature verification remain
+  deployment-system evidence outside the local runner, but duplicate bootstrap
+  endpoints and duplicate, unsigned, or unverified observer captures are
+  rejected by the audit, assembler, and verifier.
 - A dedicated public launch gate fails until local public-alpha surfaces,
   bounded bootstrap policies, redacted launch artifacts, and schema v5
   deployment evidence all pass. This gate is separate from the mainnet evidence
