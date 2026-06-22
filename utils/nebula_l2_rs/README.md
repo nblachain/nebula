@@ -681,8 +681,9 @@ testnet launch gate, not a mainnet value gate. The full local `--json` summary
 includes `public_launch_readiness` with check roots, blocker ids, machine-actionable
 `remediations`, a `remediation_root`, and a `public-launch-ready` or
 `public-launch-blocked` level. Each remediation names the expected artifact,
-relevant command, expected evidence root, privacy classification, and whether
-external deployment capture is required. Deployment-attestation remediations
+relevant command, expected evidence root, granular failed subchecks, privacy
+classification, and whether external deployment capture is required.
+Deployment-attestation remediations
 also list failed subchecks, including capture-plan, launch-bundle, package
 file-set, preflight, runbook, endpoint, probe, privacy-denial, and custody
 bindings; the redacted public status manifest does not include that local

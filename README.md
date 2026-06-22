@@ -3342,7 +3342,8 @@ real XMR.
   the public launch gate. The public deployment report compares the embedded
   `capture_plan_root`, `capture_contract_root`, and
   `deployment_preflight_checklist_root` against the current generated capture
-  plan, requires the embedded `public_launch_package_file_set_root` to match
+  plan, exposes individual root-binding booleans plus expected repair roots,
+  requires the embedded `public_launch_package_file_set_root` to match
   the current rooted package file set, and requires the embedded
   `deployment_preflight_receipt_root`, `deployment_preflight_phase_set_root`,
   and phase count to match the completed receipt body. It also requires the
@@ -3453,8 +3454,8 @@ real XMR.
   `public_launch_readiness` report with blocker ids, check roots,
   machine-actionable remediation entries, and a remediation root. Each
   remediation names the expected artifact, relevant command, expected evidence
-  root, privacy classification, and whether external deployment capture is
-  required. That private operator report is intentionally absent from the public status
+  root, granular failed subchecks, privacy classification, and whether external
+  deployment capture is required. That private operator report is intentionally absent from the public status
   manifest and launch bundle.
 - External review evidence must bind the release-candidate manifest id, latest
   height, and local run-profile, Wasm runtime, crypto-inventory,

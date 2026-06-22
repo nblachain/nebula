@@ -1109,6 +1109,9 @@ struct PublicDeploymentReport {
     evidence_root: Option<String>,
     evidence_shape_verified: bool,
     capture_plan_bound: bool,
+    capture_plan_root_bound: bool,
+    capture_contract_root_bound: bool,
+    deployment_preflight_checklist_root_bound: bool,
     matches_current_manifest: bool,
     public_launch_bundle_root_bound: bool,
     public_launch_package_file_set_root_bound: bool,
@@ -1125,6 +1128,11 @@ struct PublicDeploymentReport {
     public_launch_package_file_set_root: Option<String>,
     public_status_manifest_root: Option<String>,
     capture_plan_root: Option<String>,
+    capture_contract_root: Option<String>,
+    deployment_preflight_checklist_root: Option<String>,
+    expected_capture_plan_root: Option<String>,
+    expected_capture_contract_root: Option<String>,
+    expected_deployment_preflight_checklist_root: Option<String>,
     preflight_receipt_bound: bool,
     deployment_preflight_receipt_root: Option<String>,
     deployment_preflight_phase_set_root: Option<String>,
@@ -5475,9 +5483,14 @@ impl Testnet {
                 .unwrap_or_default()
                 .to_string();
         let matches_current_manifest = evidence.testnet_manifest_id == summary.manifest_id;
-        let capture_plan_bound = evidence.capture_plan_root == expected_capture_plan_root
-            && evidence.capture_contract_root == expected_capture_contract_root
-            && evidence.deployment_preflight_checklist_root == expected_preflight_checklist_root;
+        let capture_plan_root_bound = evidence.capture_plan_root == expected_capture_plan_root;
+        let capture_contract_root_bound =
+            evidence.capture_contract_root == expected_capture_contract_root;
+        let deployment_preflight_checklist_root_bound =
+            evidence.deployment_preflight_checklist_root == expected_preflight_checklist_root;
+        let capture_plan_bound = capture_plan_root_bound
+            && capture_contract_root_bound
+            && deployment_preflight_checklist_root_bound;
         let preflight_receipt_bound = is_hex_root(&evidence.deployment_preflight_receipt_root)
             && is_hex_root(&evidence.deployment_preflight_phase_set_root)
             && evidence.deployment_preflight_phase_count
@@ -5643,6 +5656,9 @@ impl Testnet {
             evidence_root: Some(evidence.evidence_root.clone()),
             evidence_shape_verified: evidence.schema_version == PUBLIC_DEPLOYMENT_EVIDENCE_SCHEMA_VERSION,
             capture_plan_bound,
+            capture_plan_root_bound,
+            capture_contract_root_bound,
+            deployment_preflight_checklist_root_bound,
             matches_current_manifest,
             public_launch_bundle_root_bound,
             public_launch_package_file_set_root_bound,
@@ -5661,6 +5677,15 @@ impl Testnet {
             ),
             public_status_manifest_root: Some(evidence.public_status_manifest_root.clone()),
             capture_plan_root: Some(evidence.capture_plan_root.clone()),
+            capture_contract_root: Some(evidence.capture_contract_root.clone()),
+            deployment_preflight_checklist_root: Some(
+                evidence.deployment_preflight_checklist_root.clone(),
+            ),
+            expected_capture_plan_root: Some(expected_capture_plan_root),
+            expected_capture_contract_root: Some(expected_capture_contract_root),
+            expected_deployment_preflight_checklist_root: Some(
+                expected_preflight_checklist_root,
+            ),
             preflight_receipt_bound,
             deployment_preflight_receipt_root: Some(
                 evidence.deployment_preflight_receipt_root.clone(),
@@ -6564,6 +6589,9 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         evidence_root: None,
         evidence_shape_verified: false,
         capture_plan_bound: false,
+        capture_plan_root_bound: false,
+        capture_contract_root_bound: false,
+        deployment_preflight_checklist_root_bound: false,
         matches_current_manifest: false,
         public_launch_bundle_root_bound: false,
         public_launch_package_file_set_root_bound: false,
@@ -6580,6 +6608,11 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         public_launch_package_file_set_root: None,
         public_status_manifest_root: None,
         capture_plan_root: None,
+        capture_contract_root: None,
+        deployment_preflight_checklist_root: None,
+        expected_capture_plan_root: None,
+        expected_capture_contract_root: None,
+        expected_deployment_preflight_checklist_root: None,
         preflight_receipt_bound: false,
         deployment_preflight_receipt_root: None,
         deployment_preflight_phase_set_root: None,
@@ -6812,6 +6845,12 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
             report.evidence_shape_verified,
         ),
         ("capture_plan_bound", report.capture_plan_bound),
+        ("capture_plan_root_bound", report.capture_plan_root_bound),
+        ("capture_contract_root_bound", report.capture_contract_root_bound),
+        (
+            "deployment_preflight_checklist_root_bound",
+            report.deployment_preflight_checklist_root_bound,
+        ),
         ("matches_current_manifest", report.matches_current_manifest),
         (
             "public_launch_bundle_root_bound",
@@ -27435,6 +27474,11 @@ mod tests {
         assert!(summary.public_deployment.passed);
         assert!(summary.acceptance.public_deployment_attestation_available);
         assert!(summary.public_deployment.capture_plan_bound);
+        assert!(summary.public_deployment.capture_plan_root_bound);
+        assert!(summary.public_deployment.capture_contract_root_bound);
+        assert!(summary
+            .public_deployment
+            .deployment_preflight_checklist_root_bound);
         assert!(summary.public_deployment.matches_current_manifest);
         assert!(summary.public_deployment.public_launch_bundle_root_bound);
         assert!(summary.public_deployment.bootstrap_profile_bound);
@@ -27443,6 +27487,27 @@ mod tests {
         assert!(summary.public_deployment.proxy_policy_verified);
         assert!(summary.public_deployment.preflight_receipt_bound);
         assert!(summary.public_deployment.runbook_receipt_bound);
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_capture_plan_root
+                .as_deref()
+                .expect("expected capture plan root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_capture_contract_root
+                .as_deref()
+                .expect("expected capture contract root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_deployment_preflight_checklist_root
+                .as_deref()
+                .expect("expected preflight checklist root")
+        ));
         assert_eq!(
             summary.public_deployment.deployment_preflight_phase_count,
             REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len() as u64
@@ -29815,36 +29880,74 @@ mod tests {
     }
 
     #[test]
-    fn public_deployment_report_rejects_self_consistent_wrong_capture_plan_root() {
+    fn public_deployment_report_rejects_stale_capture_roots() {
         let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
             .expect("mainnet readiness should parse");
         let mut base_testnet = Testnet::new(base_cli);
         base_testnet.run().expect("base testnet run");
         let base_summary = base_testnet.summary(Vec::new());
-        let mut value: Value =
-            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
-                .expect("deployment evidence json");
-        value["capture_plan_root"] =
-            json!(root(&["test-public-deployment", "wrong-capture-plan"]));
-        value["provenance_root"] =
-            json!(public_deployment_provenance_root_from_value(&value)
-                .expect("provenance root"));
-        value["evidence_root"] =
-            json!(public_deployment_attestation_root_from_value(&value)
-                .expect("evidence root"));
-        let path = write_public_deployment_evidence(
-            &serde_json::to_string_pretty(&value).expect("deployment evidence json"),
-        );
-        let evidence = load_public_deployment_evidence(&path)
-            .expect("self-consistent wrong capture plan evidence loads");
+        let path = write_public_deployment_evidence(&valid_public_deployment_evidence(
+            &base_summary,
+        ));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        evidence.capture_plan_root = root(&["test-public-deployment", "wrong-capture-plan"]);
+        evidence.capture_contract_root =
+            root(&["test-public-deployment", "wrong-capture-contract"]);
+        evidence.deployment_preflight_checklist_root =
+            root(&["test-public-deployment", "wrong-preflight-checklist"]);
         base_testnet.cli.public_deployment_evidence = Some(evidence);
         let summary = base_testnet.summary(Vec::new());
         assert!(!summary.public_deployment.passed);
         assert!(!summary.public_deployment.capture_plan_bound);
+        assert!(!summary.public_deployment.capture_plan_root_bound);
+        assert!(!summary.public_deployment.capture_contract_root_bound);
+        assert!(!summary
+            .public_deployment
+            .deployment_preflight_checklist_root_bound);
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_capture_plan_root
+                .as_deref()
+                .expect("expected capture plan root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_capture_contract_root
+                .as_deref()
+                .expect("expected capture contract root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_deployment_preflight_checklist_root
+                .as_deref()
+                .expect("expected preflight checklist root")
+        ));
         assert_eq!(
             summary.public_launch_readiness.blocking_gaps,
             vec!["public-launch-deployment-attestation"]
         );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"capture_plan_bound".to_string()));
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"capture_plan_root_bound".to_string()));
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"capture_contract_root_bound".to_string()));
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"deployment_preflight_checklist_root_bound".to_string()));
         let _ = fs::remove_file(path);
     }
 
