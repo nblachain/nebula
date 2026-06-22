@@ -685,8 +685,9 @@ relevant command, expected evidence root, granular failed subchecks, privacy
 classification, and whether external deployment capture is required.
 Deployment-attestation remediations
 also list failed subchecks, including capture-plan, launch-bundle, package
-file-set, status-manifest root/payload, preflight, runbook, endpoint, probe,
-privacy-denial, and custody bindings; the redacted public status manifest does not include that local
+file-set, bootstrap profile/report/rate-limit policy roots, status-manifest
+root/payload, preflight, runbook, endpoint, probe, privacy-denial, and custody
+bindings; the redacted public status manifest does not include that local
 operator report.
 
 `--fail-on-readiness-gaps` also requires `--mainnet-readiness` and turns the

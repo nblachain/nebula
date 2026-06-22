@@ -1116,6 +1116,9 @@ struct PublicDeploymentReport {
     public_launch_bundle_root_bound: bool,
     public_launch_package_file_set_root_bound: bool,
     bootstrap_profile_bound: bool,
+    public_bootstrap_profile_root_bound: bool,
+    public_bootstrap_profile_report_root_bound: bool,
+    rate_limit_policy_root_bound: bool,
     status_manifest_root_bound: bool,
     public_status_manifest_root_bound: bool,
     public_status_manifest_payload_bound: bool,
@@ -1130,6 +1133,12 @@ struct PublicDeploymentReport {
     public_launch_package_file_set_root: Option<String>,
     public_status_manifest_root: Option<String>,
     expected_public_status_manifest_root: Option<String>,
+    public_bootstrap_profile_root: Option<String>,
+    expected_public_bootstrap_profile_root: Option<String>,
+    public_bootstrap_profile_report_root: Option<String>,
+    expected_public_bootstrap_profile_report_root: Option<String>,
+    rate_limit_policy_root: Option<String>,
+    expected_rate_limit_policy_root: Option<String>,
     capture_plan_root: Option<String>,
     capture_contract_root: Option<String>,
     deployment_preflight_checklist_root: Option<String>,
@@ -5548,11 +5557,16 @@ impl Testnet {
             evidence.public_launch_bundle_root == expected_public_launch_bundle_root;
         let public_launch_package_file_set_root_bound =
             evidence.public_launch_package_file_set_root == expected_public_launch_package_file_set_root;
-        let bootstrap_profile_bound = evidence.public_bootstrap_profile_root
-            == summary.public_bootstrap_profile.profile_root
-            && evidence.public_bootstrap_profile_report_root
-                == summary.public_bootstrap_profile.report_root
-            && evidence.rate_limit_policy_root == summary.public_bootstrap_profile.rate_limit_policy_root;
+        let public_bootstrap_profile_root_bound =
+            evidence.public_bootstrap_profile_root == summary.public_bootstrap_profile.profile_root;
+        let public_bootstrap_profile_report_root_bound = evidence
+            .public_bootstrap_profile_report_root
+            == summary.public_bootstrap_profile.report_root;
+        let rate_limit_policy_root_bound =
+            evidence.rate_limit_policy_root == summary.public_bootstrap_profile.rate_limit_policy_root;
+        let bootstrap_profile_bound = public_bootstrap_profile_root_bound
+            && public_bootstrap_profile_report_root_bound
+            && rate_limit_policy_root_bound;
         let public_status_manifest_root_bound =
             evidence.public_status_manifest_root == expected_public_status_manifest_root;
         let public_status_manifest_payload_bound =
@@ -5669,6 +5683,9 @@ impl Testnet {
             public_launch_bundle_root_bound,
             public_launch_package_file_set_root_bound,
             bootstrap_profile_bound,
+            public_bootstrap_profile_root_bound,
+            public_bootstrap_profile_report_root_bound,
+            rate_limit_policy_root_bound,
             status_manifest_root_bound,
             public_status_manifest_root_bound,
             public_status_manifest_payload_bound,
@@ -5685,6 +5702,20 @@ impl Testnet {
             ),
             public_status_manifest_root: Some(evidence.public_status_manifest_root.clone()),
             expected_public_status_manifest_root: Some(expected_public_status_manifest_root),
+            public_bootstrap_profile_root: Some(evidence.public_bootstrap_profile_root.clone()),
+            expected_public_bootstrap_profile_root: Some(
+                summary.public_bootstrap_profile.profile_root.clone(),
+            ),
+            public_bootstrap_profile_report_root: Some(
+                evidence.public_bootstrap_profile_report_root.clone(),
+            ),
+            expected_public_bootstrap_profile_report_root: Some(
+                summary.public_bootstrap_profile.report_root.clone(),
+            ),
+            rate_limit_policy_root: Some(evidence.rate_limit_policy_root.clone()),
+            expected_rate_limit_policy_root: Some(
+                summary.public_bootstrap_profile.rate_limit_policy_root.clone(),
+            ),
             capture_plan_root: Some(evidence.capture_plan_root.clone()),
             capture_contract_root: Some(evidence.capture_contract_root.clone()),
             deployment_preflight_checklist_root: Some(
@@ -6605,6 +6636,9 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         public_launch_bundle_root_bound: false,
         public_launch_package_file_set_root_bound: false,
         bootstrap_profile_bound: false,
+        public_bootstrap_profile_root_bound: false,
+        public_bootstrap_profile_report_root_bound: false,
+        rate_limit_policy_root_bound: false,
         status_manifest_root_bound: false,
         public_status_manifest_root_bound: false,
         public_status_manifest_payload_bound: false,
@@ -6619,6 +6653,12 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         public_launch_package_file_set_root: None,
         public_status_manifest_root: None,
         expected_public_status_manifest_root: None,
+        public_bootstrap_profile_root: None,
+        expected_public_bootstrap_profile_root: None,
+        public_bootstrap_profile_report_root: None,
+        expected_public_bootstrap_profile_report_root: None,
+        rate_limit_policy_root: None,
+        expected_rate_limit_policy_root: None,
         capture_plan_root: None,
         capture_contract_root: None,
         deployment_preflight_checklist_root: None,
@@ -6873,6 +6913,18 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
             report.public_launch_package_file_set_root_bound,
         ),
         ("bootstrap_profile_bound", report.bootstrap_profile_bound),
+        (
+            "public_bootstrap_profile_root_bound",
+            report.public_bootstrap_profile_root_bound,
+        ),
+        (
+            "public_bootstrap_profile_report_root_bound",
+            report.public_bootstrap_profile_report_root_bound,
+        ),
+        (
+            "rate_limit_policy_root_bound",
+            report.rate_limit_policy_root_bound,
+        ),
         ("status_manifest_root_bound", report.status_manifest_root_bound),
         (
             "public_status_manifest_root_bound",
@@ -27502,6 +27554,13 @@ mod tests {
         assert!(summary.public_deployment.matches_current_manifest);
         assert!(summary.public_deployment.public_launch_bundle_root_bound);
         assert!(summary.public_deployment.bootstrap_profile_bound);
+        assert!(summary
+            .public_deployment
+            .public_bootstrap_profile_root_bound);
+        assert!(summary
+            .public_deployment
+            .public_bootstrap_profile_report_root_bound);
+        assert!(summary.public_deployment.rate_limit_policy_root_bound);
         assert!(summary.public_deployment.status_manifest_root_bound);
         assert!(summary.public_deployment.public_status_manifest_root_bound);
         assert!(summary
@@ -27511,6 +27570,27 @@ mod tests {
         assert!(summary.public_deployment.proxy_policy_verified);
         assert!(summary.public_deployment.preflight_receipt_bound);
         assert!(summary.public_deployment.runbook_receipt_bound);
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_public_bootstrap_profile_root
+                .as_deref()
+                .expect("expected bootstrap profile root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_public_bootstrap_profile_report_root
+                .as_deref()
+                .expect("expected bootstrap profile report root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_rate_limit_policy_root
+                .as_deref()
+                .expect("expected rate limit policy root")
+        ));
         assert!(is_hex_root(
             summary
                 .public_deployment
@@ -27550,6 +27630,77 @@ mod tests {
             PUBLIC_DEPLOYMENT_RUNBOOK_STEPS.len() as u64
         );
         let _ = fs::remove_file(evidence_path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_stale_bootstrap_profile_roots() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path = write_public_deployment_evidence(&valid_public_deployment_evidence(
+            &base_summary,
+        ));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        evidence.public_bootstrap_profile_root =
+            root(&["test-public-deployment", "wrong-bootstrap-profile"]);
+        evidence.public_bootstrap_profile_report_root =
+            root(&["test-public-deployment", "wrong-bootstrap-profile-report"]);
+        evidence.rate_limit_policy_root =
+            root(&["test-public-deployment", "wrong-rate-limit-policy"]);
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.bootstrap_profile_bound);
+        assert!(!summary
+            .public_deployment
+            .public_bootstrap_profile_root_bound);
+        assert!(!summary
+            .public_deployment
+            .public_bootstrap_profile_report_root_bound);
+        assert!(!summary.public_deployment.rate_limit_policy_root_bound);
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_public_bootstrap_profile_root
+                .as_deref()
+                .expect("expected bootstrap profile root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_public_bootstrap_profile_report_root
+                .as_deref()
+                .expect("expected bootstrap profile report root")
+        ));
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_rate_limit_policy_root
+                .as_deref()
+                .expect("expected rate limit policy root")
+        ));
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"bootstrap_profile_bound".to_string()));
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"public_bootstrap_profile_root_bound".to_string()));
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"public_bootstrap_profile_report_root_bound".to_string()));
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"rate_limit_policy_root_bound".to_string()));
+        let _ = fs::remove_file(path);
     }
 
     #[test]

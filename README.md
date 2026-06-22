@@ -3454,8 +3454,9 @@ real XMR.
   `public_launch_readiness` report with blocker ids, check roots,
   machine-actionable remediation entries, and a remediation root. Each
   remediation names the expected artifact, relevant command, expected evidence
-  root, granular failed subchecks, privacy classification, and whether external
-  deployment capture is required. That private operator report is intentionally absent from the public status
+  root, granular failed subchecks for capture roots, bootstrap profile/report/
+  rate-limit roots, status-manifest root/payload, and probe bindings, privacy
+  classification, and whether external deployment capture is required. That private operator report is intentionally absent from the public status
   manifest and launch bundle.
 - External review evidence must bind the release-candidate manifest id, latest
   height, and local run-profile, Wasm runtime, crypto-inventory,
