@@ -7741,6 +7741,13 @@ fn public_deployment_capture_audit(
         capture_time_window_valid,
         capture_time_current,
         deployment_run_id_valid,
+        bootstrap_node_count,
+        bootstrap_node_probe_count,
+        missing_bootstrap_node_probe_slots,
+        extra_bootstrap_node_probe_slots,
+        duplicate_bootstrap_node_probe_slots,
+        bootstrap_node_count_valid,
+        bootstrap_node_probe_coverage_valid,
         probe_observer_count,
         probe_observer_region_count,
         invalid_probe_observer_region_indexes,
@@ -7826,6 +7833,8 @@ fn public_deployment_capture_audit(
                     .and_then(Value::as_str)
                     .map(|run_id| validate_public_deployment_run_id(run_id).is_ok())
                     .unwrap_or(true);
+                let bootstrap_coverage =
+                    public_bootstrap_node_probe_coverage_audit(&value);
                 let observer_count = value
                     .get("probe_observers")
                     .and_then(Value::as_array)
@@ -7920,6 +7929,13 @@ fn public_deployment_capture_audit(
                     window_valid,
                     time_current,
                     run_id_valid,
+                    bootstrap_coverage.bootstrap_node_count,
+                    bootstrap_coverage.bootstrap_node_probe_count,
+                    bootstrap_coverage.missing_probe_slots,
+                    bootstrap_coverage.extra_probe_slots,
+                    bootstrap_coverage.duplicate_probe_slots,
+                    bootstrap_coverage.node_count_valid,
+                    bootstrap_coverage.probe_coverage_valid,
                     observer_count,
                     observer_region_count,
                     invalid_observer_region_indexes,
@@ -7975,6 +7991,13 @@ fn public_deployment_capture_audit(
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
+                true,
+                true,
+                0,
+                0,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
@@ -8012,6 +8035,8 @@ fn public_deployment_capture_audit(
         && capture_time_window_valid
         && capture_time_current
         && deployment_run_id_valid
+        && bootstrap_node_count_valid
+        && bootstrap_node_probe_coverage_valid
         && probe_observer_signatures_present
         && probe_observer_signatures_verified
         && probe_observer_signature_verifications_valid
@@ -8061,6 +8086,12 @@ fn public_deployment_capture_audit(
     }
     if !deployment_run_id_valid {
         structural_failed_checks.push("deployment_run_id_valid".to_string());
+    }
+    if !bootstrap_node_count_valid {
+        structural_failed_checks.push("bootstrap_node_count_valid".to_string());
+    }
+    if !bootstrap_node_probe_coverage_valid {
+        structural_failed_checks.push("bootstrap_node_probe_coverage_valid".to_string());
     }
     if !probe_observer_signatures_present {
         structural_failed_checks.push("probe_observer_signatures_present".to_string());
@@ -8182,6 +8213,14 @@ fn public_deployment_capture_audit(
     audit["capture_time_window_valid"] = json!(capture_time_window_valid);
     audit["capture_time_current"] = json!(capture_time_current);
     audit["deployment_run_id_valid"] = json!(deployment_run_id_valid);
+    audit["minimum_bootstrap_node_count"] = json!(DEFAULT_PUBLIC_BOOTSTRAP_NODE_COUNT);
+    audit["bootstrap_node_count"] = json!(bootstrap_node_count);
+    audit["bootstrap_node_probe_count"] = json!(bootstrap_node_probe_count);
+    audit["missing_bootstrap_node_probe_slots"] = json!(missing_bootstrap_node_probe_slots);
+    audit["extra_bootstrap_node_probe_slots"] = json!(extra_bootstrap_node_probe_slots);
+    audit["duplicate_bootstrap_node_probe_slots"] = json!(duplicate_bootstrap_node_probe_slots);
+    audit["bootstrap_node_count_valid"] = json!(bootstrap_node_count_valid);
+    audit["bootstrap_node_probe_coverage_valid"] = json!(bootstrap_node_probe_coverage_valid);
     audit["minimum_probe_observer_count"] = json!(MIN_PUBLIC_DEPLOYMENT_OBSERVER_COUNT);
     audit["minimum_observer_region_count"] = json!(MIN_PUBLIC_DEPLOYMENT_REGION_COUNT);
     audit["probe_observer_count"] = json!(probe_observer_count);
@@ -8210,6 +8249,85 @@ fn public_deployment_capture_audit(
 
 fn public_probe_observer_region_valid(region: &str) -> bool {
     !region.trim().is_empty() && region.len() <= 64 && !region.contains('<') && !region.contains('>')
+}
+
+#[derive(Clone, Debug)]
+struct PublicBootstrapProbeCoverageAudit {
+    bootstrap_node_count: u64,
+    bootstrap_node_probe_count: u64,
+    missing_probe_slots: Vec<String>,
+    extra_probe_slots: Vec<String>,
+    duplicate_probe_slots: Vec<String>,
+    node_count_valid: bool,
+    probe_coverage_valid: bool,
+}
+
+fn public_bootstrap_node_probe_coverage_audit(value: &Value) -> PublicBootstrapProbeCoverageAudit {
+    let bootstrap_nodes = value.get("bootstrap_nodes");
+    let bootstrap_node_probes = value.get("bootstrap_node_probes");
+    let node_slots = bootstrap_nodes
+        .and_then(Value::as_array)
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(|node| node.get("node_slot_root").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    let mut probe_slots = BTreeSet::new();
+    let mut duplicate_probe_slots = BTreeSet::new();
+    if let Some(probes) = bootstrap_node_probes.and_then(Value::as_array) {
+        for slot in probes
+            .iter()
+            .filter_map(|probe| probe.get("node_slot_root").and_then(Value::as_str))
+        {
+            if !probe_slots.insert(slot.to_string()) {
+                duplicate_probe_slots.insert(slot.to_string());
+            }
+        }
+    }
+    let missing_probe_slots = node_slots
+        .difference(&probe_slots)
+        .cloned()
+        .collect::<Vec<_>>();
+    let extra_probe_slots = probe_slots
+        .difference(&node_slots)
+        .cloned()
+        .collect::<Vec<_>>();
+    let node_count = bootstrap_nodes
+        .and_then(Value::as_array)
+        .map(|nodes| nodes.len() as u64)
+        .unwrap_or_default();
+    let probe_count = bootstrap_node_probes
+        .and_then(Value::as_array)
+        .map(|probes| probes.len() as u64)
+        .unwrap_or_default();
+    let node_count_valid = match bootstrap_nodes {
+        Some(Value::Array(_)) => node_count >= DEFAULT_PUBLIC_BOOTSTRAP_NODE_COUNT,
+        Some(_) => false,
+        None => true,
+    };
+    let probe_coverage_valid = match (bootstrap_nodes, bootstrap_node_probes) {
+        (Some(Value::Array(_)), Some(Value::Array(_))) => {
+            probe_count == node_count
+                && probe_count >= DEFAULT_PUBLIC_BOOTSTRAP_NODE_COUNT
+                && missing_probe_slots.is_empty()
+                && extra_probe_slots.is_empty()
+                && duplicate_probe_slots.is_empty()
+        }
+        (Some(Value::Array(_)), None) | (None, None) | (None, Some(Value::Array(_))) => true,
+        _ => false,
+    };
+    PublicBootstrapProbeCoverageAudit {
+        bootstrap_node_count: node_count,
+        bootstrap_node_probe_count: probe_count,
+        missing_probe_slots,
+        extra_probe_slots,
+        duplicate_probe_slots: duplicate_probe_slots.into_iter().collect(),
+        node_count_valid,
+        probe_coverage_valid,
+    }
 }
 
 fn invalid_public_probe_observer_region_indexes(value: &Value) -> Vec<u64> {
@@ -25774,6 +25892,48 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("observer_quorum_reachable")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_missing_bootstrap_node_probe() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        let missing_slot = capture["bootstrap_node_probes"]
+            .as_array_mut()
+            .expect("bootstrap node probes")
+            .pop()
+            .expect("removed bootstrap node probe")["node_slot_root"]
+            .as_str()
+            .expect("removed node slot root")
+            .to_string();
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit missing bootstrap node probe capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(
+            audit["bootstrap_node_count"],
+            base_summary.public_bootstrap_profile.bootstrap_node_count
+        );
+        assert_eq!(
+            audit["bootstrap_node_probe_count"],
+            base_summary.public_bootstrap_profile.bootstrap_node_count - 1
+        );
+        assert_eq!(audit["bootstrap_node_count_valid"], true);
+        assert_eq!(audit["bootstrap_node_probe_coverage_valid"], false);
+        assert_eq!(audit["missing_bootstrap_node_probe_slots"], json!([missing_slot]));
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("bootstrap_node_probe_coverage_valid")));
         let _ = fs::remove_file(capture_path);
     }
 

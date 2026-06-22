@@ -487,7 +487,8 @@ requires `--mainnet-readiness` and writes a non-passing
 `nebula-public-deployment-capture-audit` report. The audit lists missing
 required capture fields, missing and invalid public endpoint fields, invalid
 timestamp types, freshness-window bounds, current capture-time validity,
-deployment-run-id validity, observer count and quorum reachability, placeholder
+deployment-run-id validity, bootstrap node/probe counts, missing/extra/duplicate
+bootstrap-node probe slots, observer count and quorum reachability, placeholder
 presence, observer region coverage, malformed observer region indexes,
 duplicate observer ids or keys, unsigned/unverified observer signature indexes,
 invalid observer signature-verification transcript indexes, sensitive key
