@@ -7742,8 +7742,10 @@ fn public_deployment_capture_audit(
         capture_time_current,
         deployment_run_id_valid,
         probe_observer_count,
+        probe_observer_region_count,
         observer_quorum_threshold_valid,
         observer_quorum_reachable,
+        observer_region_coverage_valid,
         placeholder_present,
         sensitive_markers_present,
         forbidden_keys_present,
@@ -7817,6 +7819,24 @@ fn public_deployment_capture_audit(
                     .and_then(Value::as_array)
                     .map(|observers| observers.len() as u64)
                     .unwrap_or_default();
+                let observer_region_count = value
+                    .get("probe_observers")
+                    .and_then(Value::as_array)
+                    .map(|observers| {
+                        observers
+                            .iter()
+                            .filter_map(|observer| observer.get("region").and_then(Value::as_str))
+                            .filter(|region| {
+                                !region.trim().is_empty()
+                                    && region.len() <= 64
+                                    && !region.contains('<')
+                                    && !region.contains('>')
+                            })
+                            .map(str::to_string)
+                            .collect::<BTreeSet<_>>()
+                            .len() as u64
+                    })
+                    .unwrap_or_default();
                 let observer_quorum_threshold =
                     value.get("observer_quorum_threshold").and_then(Value::as_u64);
                 let quorum_threshold_valid = match value.get("observer_quorum_threshold") {
@@ -7834,6 +7854,13 @@ fn public_deployment_capture_audit(
                     }
                     (None, None) | (None, Some(_)) => true,
                     _ => false,
+                };
+                let region_coverage_valid = match value.get("probe_observers") {
+                    Some(Value::Array(_)) => {
+                        observer_region_count >= MIN_PUBLIC_DEPLOYMENT_REGION_COUNT
+                    }
+                    Some(_) => false,
+                    None => true,
                 };
                 let sensitive_markers = SENSITIVE_FIELD_MARKERS
                     .iter()
@@ -7870,8 +7897,10 @@ fn public_deployment_capture_audit(
                     time_current,
                     run_id_valid,
                     observer_count,
+                    observer_region_count,
                     quorum_threshold_valid,
                     quorum_reachable,
+                    region_coverage_valid,
                     value_contains_placeholder(&value),
                     sensitive_markers,
                     forbidden_keys,
@@ -7906,6 +7935,8 @@ fn public_deployment_capture_audit(
                 true,
                 true,
                 0,
+                0,
+                true,
                 true,
                 true,
                 false,
@@ -7935,6 +7966,7 @@ fn public_deployment_capture_audit(
         && deployment_run_id_valid
         && observer_quorum_threshold_valid
         && observer_quorum_reachable
+        && observer_region_coverage_valid
         && !placeholder_present
         && sensitive_markers_present.is_empty()
         && forbidden_keys_present.is_empty()
@@ -7981,6 +8013,9 @@ fn public_deployment_capture_audit(
     }
     if !observer_quorum_reachable {
         structural_failed_checks.push("observer_quorum_reachable".to_string());
+    }
+    if !observer_region_coverage_valid {
+        structural_failed_checks.push("observer_region_coverage_valid".to_string());
     }
     if placeholder_present {
         structural_failed_checks.push("placeholders_absent".to_string());
@@ -8076,9 +8111,12 @@ fn public_deployment_capture_audit(
     audit["capture_time_current"] = json!(capture_time_current);
     audit["deployment_run_id_valid"] = json!(deployment_run_id_valid);
     audit["minimum_probe_observer_count"] = json!(MIN_PUBLIC_DEPLOYMENT_OBSERVER_COUNT);
+    audit["minimum_observer_region_count"] = json!(MIN_PUBLIC_DEPLOYMENT_REGION_COUNT);
     audit["probe_observer_count"] = json!(probe_observer_count);
+    audit["probe_observer_region_count"] = json!(probe_observer_region_count);
     audit["observer_quorum_threshold_valid"] = json!(observer_quorum_threshold_valid);
     audit["observer_quorum_reachable"] = json!(observer_quorum_reachable);
+    audit["observer_region_coverage_valid"] = json!(observer_region_coverage_valid);
     let audit_root = value_root("public-deployment-capture-audit", &audit);
     audit["capture_audit_root"] = json!(audit_root);
     Ok(audit)
@@ -25580,6 +25618,37 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("observer_quorum_reachable")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_insufficient_observer_regions() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        for observer in capture["probe_observers"]
+            .as_array_mut()
+            .expect("probe observers")
+        {
+            observer["region"] = json!("single-region");
+        }
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit single-region observer capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["probe_observer_region_count"], 1);
+        assert_eq!(audit["observer_region_coverage_valid"], false);
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("observer_region_coverage_valid")));
         let _ = fs::remove_file(capture_path);
     }
 
