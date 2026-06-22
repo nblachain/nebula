@@ -3358,7 +3358,8 @@ real XMR.
   missing or extra public-surface probe roles, malformed public-surface probe
   records, insufficient bootstrap node counts, missing or extra bootstrap-node
   probe slots, malformed bootstrap-node probe records, missing or extra
-  bootstrap-operator registry commitments, unreachable
+  bootstrap-operator registry commitments, malformed bootstrap-operator
+  registry records, unreachable
   observer quorums, insufficient observer region coverage, malformed observer
   regions, duplicate observer ids or keys, unsigned or unverified observer
   signatures/transcripts, placeholders, sensitive markers, public-forbidden

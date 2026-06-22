@@ -7791,6 +7791,14 @@ fn public_deployment_capture_audit(
         duplicate_bootstrap_operator_registry_commitments,
         bootstrap_operator_count_valid,
         bootstrap_operator_registry_coverage_valid,
+        invalid_bootstrap_operator_registry_record_indexes,
+        invalid_bootstrap_operator_registry_binding_indexes,
+        invalid_bootstrap_operator_registry_commitment_indexes,
+        duplicate_bootstrap_operator_registry_identity_indexes,
+        invalid_bootstrap_operator_registry_signature_indexes,
+        invalid_bootstrap_operator_registry_root_indexes,
+        invalid_bootstrap_operator_registry_observation_time_indexes,
+        bootstrap_operator_registry_fields_valid,
         probe_observer_count,
         probe_observer_region_count,
         invalid_probe_observer_region_indexes,
@@ -7884,6 +7892,8 @@ fn public_deployment_capture_audit(
                 let bootstrap_probe_fields = public_bootstrap_node_probe_field_audit(&value);
                 let operator_registry_coverage =
                     public_bootstrap_operator_registry_coverage_audit(&value);
+                let operator_registry_fields =
+                    public_bootstrap_operator_registry_field_audit(&value);
                 let observer_count = value
                     .get("probe_observers")
                     .and_then(Value::as_array)
@@ -8019,6 +8029,14 @@ fn public_deployment_capture_audit(
                     operator_registry_coverage.duplicate_registry_commitments,
                     operator_registry_coverage.operator_count_valid,
                     operator_registry_coverage.registry_coverage_valid,
+                    operator_registry_fields.invalid_record_indexes,
+                    operator_registry_fields.invalid_binding_indexes,
+                    operator_registry_fields.invalid_commitment_indexes,
+                    operator_registry_fields.duplicate_identity_indexes,
+                    operator_registry_fields.invalid_signature_indexes,
+                    operator_registry_fields.invalid_root_indexes,
+                    operator_registry_fields.invalid_observation_time_indexes,
+                    operator_registry_fields.fields_valid,
                     observer_count,
                     observer_region_count,
                     invalid_observer_region_indexes,
@@ -8110,6 +8128,14 @@ fn public_deployment_capture_audit(
                 Vec::new(),
                 true,
                 true,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                true,
                 0,
                 0,
                 Vec::new(),
@@ -8160,6 +8186,7 @@ fn public_deployment_capture_audit(
         && bootstrap_node_probe_fields_valid
         && bootstrap_operator_count_valid
         && bootstrap_operator_registry_coverage_valid
+        && bootstrap_operator_registry_fields_valid
         && probe_observer_signatures_present
         && probe_observer_signatures_verified
         && probe_observer_signature_verifications_valid
@@ -8233,6 +8260,9 @@ fn public_deployment_capture_audit(
     }
     if !bootstrap_operator_registry_coverage_valid {
         structural_failed_checks.push("bootstrap_operator_registry_coverage_valid".to_string());
+    }
+    if !bootstrap_operator_registry_fields_valid {
+        structural_failed_checks.push("bootstrap_operator_registry_fields_valid".to_string());
     }
     if !probe_observer_signatures_present {
         structural_failed_checks.push("probe_observer_signatures_present".to_string());
@@ -8418,6 +8448,22 @@ fn public_deployment_capture_audit(
     audit["bootstrap_operator_count_valid"] = json!(bootstrap_operator_count_valid);
     audit["bootstrap_operator_registry_coverage_valid"] =
         json!(bootstrap_operator_registry_coverage_valid);
+    audit["invalid_bootstrap_operator_registry_record_indexes"] =
+        json!(invalid_bootstrap_operator_registry_record_indexes);
+    audit["invalid_bootstrap_operator_registry_binding_indexes"] =
+        json!(invalid_bootstrap_operator_registry_binding_indexes);
+    audit["invalid_bootstrap_operator_registry_commitment_indexes"] =
+        json!(invalid_bootstrap_operator_registry_commitment_indexes);
+    audit["duplicate_bootstrap_operator_registry_identity_indexes"] =
+        json!(duplicate_bootstrap_operator_registry_identity_indexes);
+    audit["invalid_bootstrap_operator_registry_signature_indexes"] =
+        json!(invalid_bootstrap_operator_registry_signature_indexes);
+    audit["invalid_bootstrap_operator_registry_root_indexes"] =
+        json!(invalid_bootstrap_operator_registry_root_indexes);
+    audit["invalid_bootstrap_operator_registry_observation_time_indexes"] =
+        json!(invalid_bootstrap_operator_registry_observation_time_indexes);
+    audit["bootstrap_operator_registry_fields_valid"] =
+        json!(bootstrap_operator_registry_fields_valid);
     audit["minimum_probe_observer_count"] = json!(MIN_PUBLIC_DEPLOYMENT_OBSERVER_COUNT);
     audit["minimum_observer_region_count"] = json!(MIN_PUBLIC_DEPLOYMENT_REGION_COUNT);
     audit["probe_observer_count"] = json!(probe_observer_count);
@@ -9138,6 +9184,293 @@ fn public_bootstrap_operator_registry_coverage_audit(
         operator_count_valid,
         registry_coverage_valid,
     }
+}
+
+#[derive(Clone, Debug)]
+struct PublicBootstrapOperatorRegistryFieldAudit {
+    invalid_record_indexes: Vec<usize>,
+    invalid_binding_indexes: Vec<usize>,
+    invalid_commitment_indexes: Vec<usize>,
+    duplicate_identity_indexes: Vec<usize>,
+    invalid_signature_indexes: Vec<usize>,
+    invalid_root_indexes: Vec<usize>,
+    invalid_observation_time_indexes: Vec<usize>,
+    fields_valid: bool,
+}
+
+fn public_bootstrap_operator_registry_field_audit(
+    value: &Value,
+) -> PublicBootstrapOperatorRegistryFieldAudit {
+    let operator_registry = value.get("bootstrap_operator_registry");
+    let expected_operator_commitments = value
+        .get("bootstrap_nodes")
+        .and_then(Value::as_array)
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(|node| node.get("operator_commitment").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    let deployment_run_id = value.get("deployment_run_id").and_then(Value::as_str);
+    let observed_at_unix_ms = value.get("observed_at_unix_ms").and_then(Value::as_u64);
+    let expires_at_unix_ms = value.get("expires_at_unix_ms").and_then(Value::as_u64);
+    let public_launch_bundle_root = value
+        .get("public_launch_bundle_root")
+        .and_then(Value::as_str);
+    let mut invalid_record_indexes = Vec::new();
+    let mut invalid_binding_indexes = Vec::new();
+    let mut invalid_commitment_indexes = Vec::new();
+    let mut duplicate_identity_indexes = Vec::new();
+    let mut invalid_signature_indexes = Vec::new();
+    let mut invalid_root_indexes = Vec::new();
+    let mut invalid_observation_time_indexes = Vec::new();
+    if let Some(records) = operator_registry.and_then(Value::as_array) {
+        for field in [
+            "operator_entity_commitment",
+            "control_plane_commitment",
+            "infrastructure_account_commitment",
+            "contact_commitment",
+            "operator_key_root",
+        ] {
+            let mut seen = BTreeSet::new();
+            for (index, record) in records.iter().enumerate() {
+                if let Some(value) = record.get(field).and_then(Value::as_str) {
+                    if !seen.insert(value.to_string())
+                        && !duplicate_identity_indexes.contains(&index)
+                    {
+                        duplicate_identity_indexes.push(index);
+                    }
+                }
+            }
+        }
+        duplicate_identity_indexes.sort_unstable();
+        for (index, record) in records.iter().enumerate() {
+            if !record.is_object() {
+                invalid_record_indexes.push(index);
+                continue;
+            }
+            if record.get("status").and_then(Value::as_str) != Some("ok")
+                || record.get("chain_id").and_then(Value::as_str) != Some(CHAIN_ID)
+                || deployment_run_id
+                    .map(|run_id| {
+                        record.get("deployment_run_id").and_then(Value::as_str) == Some(run_id)
+                    })
+                    .unwrap_or(false)
+                    == false
+                || record
+                    .get("public_launch_bundle_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                    == false
+                || public_launch_bundle_root
+                    .map(|root| {
+                        record
+                            .get("public_launch_bundle_root")
+                            .and_then(Value::as_str)
+                            == Some(root)
+                    })
+                    .unwrap_or(true)
+                    == false
+            {
+                invalid_binding_indexes.push(index);
+            }
+            let operator_commitment = record.get("operator_commitment").and_then(Value::as_str);
+            let commitment_fields_valid = operator_commitment.is_some_and(is_hex_root)
+                && (expected_operator_commitments.is_empty()
+                    || operator_commitment
+                        .map(|commitment| expected_operator_commitments.contains(commitment))
+                        == Some(true))
+                && [
+                    "operator_entity_commitment",
+                    "control_plane_commitment",
+                    "infrastructure_account_commitment",
+                    "contact_commitment",
+                    "independence_proof_root",
+                    "operator_key_root",
+                ]
+                .iter()
+                .all(|field| {
+                    record
+                        .get(*field)
+                        .and_then(Value::as_str)
+                        .is_some_and(is_hex_root)
+                })
+                && record.get("independence_verified").and_then(Value::as_bool) == Some(true);
+            if !commitment_fields_valid {
+                invalid_commitment_indexes.push(index);
+            }
+            let observed_at = record.get("observed_at_unix_ms").and_then(Value::as_u64);
+            if observed_at
+                .map(|observed_at| {
+                    observed_at_unix_ms
+                        .zip(expires_at_unix_ms)
+                        .map(|(window_start, window_end)| {
+                            observed_at >= window_start && observed_at <= window_end
+                        })
+                        .unwrap_or(true)
+                })
+                != Some(true)
+            {
+                invalid_observation_time_indexes.push(index);
+            }
+            let signature_valid = record.get("signature_scheme").and_then(Value::as_str)
+                == Some("ML-DSA-65")
+                && record.get("pq_signature_root").and_then(Value::as_str).is_some_and(is_hex_root)
+                && record.get("signature_verified").and_then(Value::as_bool) == Some(true)
+                && public_bootstrap_operator_signature_verification_field_valid(
+                    record,
+                    observed_at,
+                    expires_at_unix_ms,
+                );
+            if !signature_valid {
+                invalid_signature_indexes.push(index);
+            }
+            let roots_valid = record
+                .get("operator_attestation_root")
+                .and_then(Value::as_str)
+                .is_some_and(is_hex_root)
+                && public_bootstrap_operator_attestation_root(record)
+                    .map(|root| {
+                        record
+                            .get("operator_attestation_root")
+                            .and_then(Value::as_str)
+                            == Some(root.as_str())
+                    })
+                    .unwrap_or(false)
+                && record
+                    .get("signature_payload_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                && public_bootstrap_operator_signature_payload_root(record)
+                    .map(|root| {
+                        record
+                            .get("signature_payload_root")
+                            .and_then(Value::as_str)
+                            == Some(root.as_str())
+                    })
+                    .unwrap_or(false)
+                && record
+                    .get("operator_registry_record_root")
+                    .and_then(Value::as_str)
+                    .is_some_and(is_hex_root)
+                && public_bootstrap_operator_registry_record_root(record)
+                    .map(|root| {
+                        record
+                            .get("operator_registry_record_root")
+                            .and_then(Value::as_str)
+                            == Some(root.as_str())
+                    })
+                    .unwrap_or(false);
+            if !roots_valid {
+                invalid_root_indexes.push(index);
+            }
+        }
+    }
+    let fields_valid = match operator_registry {
+        Some(Value::Array(_)) => {
+            invalid_record_indexes.is_empty()
+                && invalid_binding_indexes.is_empty()
+                && invalid_commitment_indexes.is_empty()
+                && duplicate_identity_indexes.is_empty()
+                && invalid_signature_indexes.is_empty()
+                && invalid_root_indexes.is_empty()
+                && invalid_observation_time_indexes.is_empty()
+        }
+        Some(_) => false,
+        None => true,
+    };
+    PublicBootstrapOperatorRegistryFieldAudit {
+        invalid_record_indexes,
+        invalid_binding_indexes,
+        invalid_commitment_indexes,
+        duplicate_identity_indexes,
+        invalid_signature_indexes,
+        invalid_root_indexes,
+        invalid_observation_time_indexes,
+        fields_valid,
+    }
+}
+
+fn public_bootstrap_operator_signature_verification_field_valid(
+    record: &Value,
+    record_observed_at: Option<u64>,
+    expires_at_unix_ms: Option<u64>,
+) -> bool {
+    let Some(verification) = record.get("signature_verification") else {
+        return false;
+    };
+    if !verification.is_object()
+        || verification.get("status").and_then(Value::as_str) != Some("valid")
+        || verification.get("verification_scope").and_then(Value::as_str)
+            != Some("public-bootstrap-operator-registry-attestation")
+        || verification.get("chain_id").and_then(Value::as_str) != Some(CHAIN_ID)
+        || verification.get("signature_scheme").and_then(Value::as_str) != Some("ML-DSA-65")
+        || verification.get("signature_verified").and_then(Value::as_bool) != Some(true)
+    {
+        return false;
+    }
+    for key in [
+        "public_launch_bundle_root",
+        "operator_commitment",
+        "operator_entity_commitment",
+        "control_plane_commitment",
+        "infrastructure_account_commitment",
+        "contact_commitment",
+        "independence_proof_root",
+        "operator_key_root",
+        "operator_attestation_root",
+        "signature_payload_root",
+        "pq_signature_root",
+    ] {
+        if verification.get(key).and_then(Value::as_str)
+            != record.get(key).and_then(Value::as_str)
+            || !verification
+                .get(key)
+                .and_then(Value::as_str)
+                .is_some_and(is_hex_root)
+        {
+            return false;
+        }
+    }
+    if verification.get("deployment_run_id").and_then(Value::as_str)
+        != record.get("deployment_run_id").and_then(Value::as_str)
+        || verification.get("independence_verified").and_then(Value::as_bool)
+            != record.get("independence_verified").and_then(Value::as_bool)
+        || !verification
+            .get("verifier_id_root")
+            .and_then(Value::as_str)
+            .is_some_and(is_hex_root)
+        || !verification
+            .get("verification_tool_root")
+            .and_then(Value::as_str)
+            .is_some_and(is_hex_root)
+    {
+        return false;
+    }
+    let verified_at = verification.get("verified_at_unix_ms").and_then(Value::as_u64);
+    if verified_at
+        .map(|verified_at| {
+            record_observed_at
+                .zip(expires_at_unix_ms)
+                .map(|(window_start, window_end)| {
+                    verified_at >= window_start && verified_at <= window_end
+                })
+                .unwrap_or(true)
+        })
+        != Some(true)
+    {
+        return false;
+    }
+    public_bootstrap_operator_signature_verification_root(verification)
+        .map(|root| {
+            record
+                .get("signature_verification_root")
+                .and_then(Value::as_str)
+                == Some(root.as_str())
+        })
+        .unwrap_or(false)
 }
 
 fn invalid_public_probe_observer_region_indexes(value: &Value) -> Vec<u64> {
@@ -26950,6 +27283,67 @@ mod tests {
             .as_array()
             .expect("structural failed checks")
             .contains(&json!("bootstrap_operator_registry_coverage_valid")));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_invalid_bootstrap_operator_registry_fields() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        let first_entity = capture["bootstrap_operator_registry"][0]["operator_entity_commitment"]
+            .as_str()
+            .expect("operator entity")
+            .to_string();
+        capture["bootstrap_operator_registry"][0]["chain_id"] = json!("wrong-chain");
+        capture["bootstrap_operator_registry"][0]["operator_commitment"] =
+            json!(root(&["unexpected-bootstrap-operator"]));
+        capture["bootstrap_operator_registry"][0]["independence_verified"] = json!(false);
+        capture["bootstrap_operator_registry"][0]["signature_scheme"] = json!("ed25519");
+        capture["bootstrap_operator_registry"][0]["signature_verified"] = json!(false);
+        capture["bootstrap_operator_registry"][0]["observed_at_unix_ms"] = json!(0);
+        capture["bootstrap_operator_registry"][1]["operator_entity_commitment"] =
+            json!(first_entity);
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit invalid bootstrap operator registry capture");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["bootstrap_operator_registry_fields_valid"], false);
+        assert_eq!(
+            audit["invalid_bootstrap_operator_registry_binding_indexes"],
+            json!([0])
+        );
+        assert_eq!(
+            audit["invalid_bootstrap_operator_registry_commitment_indexes"],
+            json!([0])
+        );
+        assert_eq!(
+            audit["duplicate_bootstrap_operator_registry_identity_indexes"],
+            json!([1])
+        );
+        assert_eq!(
+            audit["invalid_bootstrap_operator_registry_signature_indexes"],
+            json!([0, 1])
+        );
+        assert_eq!(
+            audit["invalid_bootstrap_operator_registry_observation_time_indexes"],
+            json!([0])
+        );
+        assert!(audit["invalid_bootstrap_operator_registry_root_indexes"]
+            .as_array()
+            .expect("invalid registry root indexes")
+            .contains(&json!(0)));
+        assert!(audit["structural_failed_checks"]
+            .as_array()
+            .expect("structural failed checks")
+            .contains(&json!("bootstrap_operator_registry_fields_valid")));
         let _ = fs::remove_file(capture_path);
     }
 
