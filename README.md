@@ -3266,8 +3266,8 @@ real XMR.
   gate.
 - Public deployment evidence templates give deployment automation a schema v5
   worksheet with the canonical public status manifest, launch bundle root,
-  launch artifact manifest roots, typed public deployment runbook roots, a
-  public deployment runbook receipt template,
+  launch artifact manifest roots, package file-set root, typed public
+  deployment runbook roots, a public deployment runbook receipt template,
   typed bootstrap node commitments, typed proxy/firewall/rate-limit policy claims,
   health/status-page/metrics/deployed-finality/incident-contact/faucet/reset body shapes,
   private-summary denial probe shape, typed bootstrap-node reachability probes,
@@ -3287,10 +3287,10 @@ real XMR.
   plan publishes `capture_contract_root` and `capture_plan_root`; filled public
   deployment attestations must carry those roots so they prove they followed the
   exact rooted capture work order for the current run. The capture contract also
-  freezes the public launch artifact manifest root, artifact-set root, typed
-  public deployment runbook root, and step-set root, keeping the operator
-  handoff aligned with the same status, bootstrap, launch, and
-  evidence-template roots, and requires a completed
+  freezes the public launch artifact manifest root, artifact-set root, package
+  file-set root, typed public deployment runbook root, and step-set root,
+  keeping the operator handoff aligned with the same status, bootstrap, launch,
+  package, and evidence-template roots, and requires a completed
   `deployment_preflight_receipt` covering every required preflight phase in
   order plus a completed `public_deployment_runbook_receipt` covering every
   ordered public deployment runbook step. This keeps the remaining

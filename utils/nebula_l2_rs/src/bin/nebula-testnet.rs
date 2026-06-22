@@ -9473,6 +9473,7 @@ fn public_deployment_preflight_checklist(
     public_launch_bundle_root: &str,
     public_launch_artifact_manifest_root: &str,
     public_launch_artifact_set_root: &str,
+    public_launch_package_file_set_root: &str,
     public_status_manifest_root: &str,
     evidence_template_root: &str,
     public_deployment_runbook_root: &str,
@@ -9488,6 +9489,7 @@ fn public_deployment_preflight_checklist(
             "root_fields": [
                 "public_launch_artifact_manifest_root",
                 "public_launch_artifact_set_root",
+                "public_launch_package_file_set_root",
                 "public_launch_bundle_root",
                 "public_status_manifest_root",
                 "public_bootstrap_profile_root",
@@ -9652,6 +9654,7 @@ fn public_deployment_preflight_checklist(
             "public_launch_bundle_root": public_launch_bundle_root,
             "public_launch_artifact_manifest_root": public_launch_artifact_manifest_root,
             "public_launch_artifact_set_root": public_launch_artifact_set_root,
+            "public_launch_package_file_set_root": public_launch_package_file_set_root,
             "public_status_manifest_root": public_status_manifest_root,
             "public_bootstrap_profile_root": &summary.public_bootstrap_profile.profile_root,
             "public_bootstrap_profile_report_root": &summary.public_bootstrap_profile.report_root,
@@ -9688,6 +9691,8 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
     let public_launch_artifact_set_root = launch_artifact_manifest["artifact_set_root"]
         .as_str()
         .unwrap_or_default();
+    let public_launch_package_file_set_root =
+        public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
     let evidence_template_root = evidence_template["template_root"]
         .as_str()
         .unwrap_or_default();
@@ -9703,6 +9708,7 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
         public_launch_bundle_root,
         public_launch_artifact_manifest_root,
         public_launch_artifact_set_root,
+        &public_launch_package_file_set_root,
         public_status_manifest_root,
         evidence_template_root,
         public_deployment_runbook_root,
@@ -9963,11 +9969,15 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
     });
     plan["public_launch_artifact_manifest_root"] = json!(public_launch_artifact_manifest_root);
     plan["public_launch_artifact_set_root"] = json!(public_launch_artifact_set_root);
+    plan["public_launch_package_file_set_root"] = json!(public_launch_package_file_set_root);
     plan["capture_contract"]["public_launch_artifact_manifest_root"] =
         json!(public_launch_artifact_manifest_root);
     plan["capture_contract"]["public_launch_artifact_set_root"] =
         json!(public_launch_artifact_set_root);
+    plan["capture_contract"]["public_launch_package_file_set_root"] =
+        json!(public_launch_package_file_set_root);
     plan["capture_contract"]["public_launch_artifact_manifest_required"] = json!(true);
+    plan["capture_contract"]["public_launch_package_file_set_required"] = json!(true);
     let capture_contract_root = value_root(
         "public-deployment-capture-contract",
         plan.get("capture_contract")
@@ -10023,6 +10033,8 @@ fn public_deployment_evidence_template(summary: &TestnetSummary) -> Value {
         .as_str()
         .unwrap_or_default()
         .to_string();
+    let public_launch_package_file_set_root =
+        public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
     let public_deployment_runbook_root = deployment_runbook["public_deployment_runbook_root"]
         .as_str()
         .unwrap_or_default()
@@ -10120,6 +10132,10 @@ fn public_deployment_evidence_template(summary: &TestnetSummary) -> Value {
     template.insert(
         "public_launch_artifact_set_root".to_string(),
         json!(public_launch_artifact_set_root),
+    );
+    template.insert(
+        "public_launch_package_file_set_root".to_string(),
+        json!(public_launch_package_file_set_root),
     );
     template.insert(
         "testnet_manifest_id".to_string(),
@@ -23833,6 +23849,10 @@ mod tests {
             value["public_launch_artifact_set_root"],
             expected_artifact_manifest["artifact_set_root"]
         );
+        assert_eq!(
+            value["public_launch_package_file_set_root"],
+            public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id)
+        );
         assert_eq!(value["capture_plan_root"], ROOT_PLACEHOLDER);
         assert_eq!(value["capture_contract_root"], ROOT_PLACEHOLDER);
         assert_eq!(
@@ -24063,6 +24083,8 @@ mod tests {
         let expected_artifact_set_root = expected_artifact_manifest["artifact_set_root"]
             .as_str()
             .expect("expected artifact set root");
+        let expected_package_file_set_root =
+            public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
         assert_eq!(value["kind"], "nebula-public-deployment-capture-plan");
         assert_eq!(value["schema_version"], 1);
         assert_eq!(value["operator_fill_required"], true);
@@ -24078,6 +24100,10 @@ mod tests {
             expected_artifact_manifest_root
         );
         assert_eq!(value["public_launch_artifact_set_root"], expected_artifact_set_root);
+        assert_eq!(
+            value["public_launch_package_file_set_root"],
+            expected_package_file_set_root
+        );
         assert_eq!(
             value["public_deployment_runbook_root"],
             expected_runbook_root
@@ -24119,7 +24145,15 @@ mod tests {
             expected_artifact_set_root
         );
         assert_eq!(
+            value["capture_contract"]["public_launch_package_file_set_root"],
+            expected_package_file_set_root
+        );
+        assert_eq!(
             value["capture_contract"]["public_launch_artifact_manifest_required"],
+            true
+        );
+        assert_eq!(
+            value["capture_contract"]["public_launch_package_file_set_required"],
             true
         );
         assert_eq!(
@@ -24155,6 +24189,10 @@ mod tests {
         assert_eq!(
             value["deployment_preflight"]["source_roots"]["public_launch_artifact_set_root"],
             expected_artifact_set_root
+        );
+        assert_eq!(
+            value["deployment_preflight"]["source_roots"]["public_launch_package_file_set_root"],
+            expected_package_file_set_root
         );
         assert_eq!(
             value["deployment_preflight"]["source_roots"]["public_status_manifest_root"],
@@ -24224,6 +24262,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(freeze_root_fields.contains(&"public_launch_artifact_manifest_root"));
         assert!(freeze_root_fields.contains(&"public_launch_artifact_set_root"));
+        assert!(freeze_root_fields.contains(&"public_launch_package_file_set_root"));
         assert!(freeze_root_fields.contains(&"public_deployment_runbook_root"));
         assert!(freeze_root_fields.contains(&"public_deployment_runbook_step_set_root"));
         assert!(is_hex_root(

@@ -425,8 +425,8 @@ handoff files.
 also requires `--mainnet-readiness` and writes the schema v5 worksheet that a
 deployment system fills before using `--public-deployment-evidence`. The
 template embeds the canonical redacted public status manifest, launch bundle
-root, launch artifact manifest roots, typed public deployment runbook roots,
-the public deployment runbook receipt template, typed bootstrap node commitments, expected health/status-page/metrics/deployed-finality/
+root, launch artifact manifest roots, the package file-set root, typed public
+deployment runbook roots, the public deployment runbook receipt template, typed bootstrap node commitments, expected health/status-page/metrics/deployed-finality/
 incident-contact/faucet/reset body shapes, typed proxy/firewall/rate-limit policy claims,
 private-summary denial probe shape, typed `bootstrap_node_probes` reachability
 records, typed `public_surface_probes` records for the status manifest, aggregate
@@ -448,12 +448,13 @@ requires `--mainnet-readiness` and writes a
 does not contain captured evidence and is not loadable as deployment evidence;
 instead it binds the launch bundle, public status manifest, bootstrap profile,
 typed public deployment runbook, launch artifact manifest, artifact-set, and
-evidence-template roots while listing the exact required capture fields,
-public surfaces, probe-root fields, freshness window, bootstrap node slots,
-operator commitments, TLS pin roles, the required typed public surface probe
-roles, observer quorum, a rooted ordered deployment preflight checklist, and
-`deployment_run_id` propagation rule that the assembler will enforce. The plan
-publishes both `capture_contract_root` and `capture_plan_root`; a later filled
+package file-set roots plus the evidence-template root while listing the exact
+required capture fields, public surfaces, probe-root fields, freshness window,
+bootstrap node slots, operator commitments, TLS pin roles, the required typed
+public surface probe roles, observer quorum, a rooted ordered deployment
+preflight checklist, and `deployment_run_id` propagation rule that the assembler
+will enforce. The plan publishes both `capture_contract_root` and
+`capture_plan_root`; a later filled
 deployment attestation must carry those roots, proving it followed the exact
 rooted work order for this run. This
 turns the remaining public-launch blocker into a deterministic capture
@@ -468,7 +469,7 @@ bootstrap-node probes, capture observer attestations, verify private-summary
 denial, assemble the public deployment attestation, and confirm no mainnet
 custody. Its `checklist_root` is copied into the capture contract so deployment
 CI can fail fast when a capture skipped a phase or was assembled against the
-wrong launch/status/template roots. The capture contract also requires a
+wrong launch/package/status/template roots. The capture contract also requires a
 completed `deployment_preflight_receipt` covering the same twelve phases in
 order. The assembler derives `deployment_preflight_phase_set_root`,
 `deployment_preflight_receipt_root`, and `deployment_preflight_phase_count`
