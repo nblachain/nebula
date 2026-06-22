@@ -209,6 +209,19 @@ and schema v5 deployment evidence worksheet:
 cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-bootstrap-profile .\nebula-public-bootstrap.json --write-public-status-manifest .\nebula-public-status.json --write-public-deployment-runbook .\nebula-public-deployment-runbook.json --write-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --write-public-launch-bundle .\nebula-public-launch-bundle.json --write-public-deployment-evidence-template .\nebula-public-deployment-template.json --json
 ```
 
+The same public-alpha handoff can be exported as one rooted package directory:
+
+```powershell
+cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-launch-package .\nebula-public-launch-package --json
+```
+
+Deployment CI can verify that package in the same release-candidate invocation
+before any public endpoint evidence is filled:
+
+```powershell
+cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-launch-package .\nebula-public-launch-package --verify-public-launch-package .\nebula-public-launch-package --json
+```
+
 The runner uses the Monero `stagenet` bridge profile by default, produces local
 L2 blocks, exercises deposit observation and withdrawal release accounting,
 publishes reserve coverage roots, prepares epoch checkpoint/anchor, DA,
@@ -378,6 +391,21 @@ evidence can pass. The bundle is
 `template_only`, keeps public runner listeners disabled, requires deployment
 proxies to publish only the public status manifest, and is not a mainnet
 custody approval.
+
+`--write-public-launch-package path\to\package-dir` also requires
+`--mainnet-readiness` and writes the full redacted public-alpha handoff set into
+one directory: public status manifest, bootstrap profile template, typed
+deployment runbook, launch artifact manifest, launch bundle, schema v5
+deployment evidence template, deployment capture plan, and a
+`nebula-public-launch-package` manifest. The package manifest records each
+filename, root field, artifact root, and record root under an
+`artifact_set_root`, so deployment automation can detect stale, swapped, or
+cross-run files before filling public probe evidence.
+`--verify-public-launch-package path\to\package-dir` reruns those checks against
+the current release-candidate summary, so CI should combine it with the export
+step for the same runner invocation. It recomputes every artifact and package
+root, and fails if the directory contains stale, tampered, swapped, or cross-run
+handoff files.
 
 `--write-public-deployment-evidence-template path\to\deployment-template.json`
 also requires `--mainnet-readiness` and writes the schema v5 worksheet that a
