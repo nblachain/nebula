@@ -1222,9 +1222,15 @@ struct PublicDeploymentReport {
     rate_limit_policy_claims_root: Option<String>,
     private_summary_probe_root: Option<String>,
     preflight_receipt_bound: bool,
+    preflight_receipt_root_bound: bool,
+    deployment_preflight_phase_set_root_bound: bool,
+    deployment_preflight_phase_count_bound: bool,
     deployment_preflight_receipt_root: Option<String>,
+    expected_deployment_preflight_receipt_root: Option<String>,
     deployment_preflight_phase_set_root: Option<String>,
+    expected_deployment_preflight_phase_set_root: Option<String>,
     deployment_preflight_phase_count: u64,
+    expected_deployment_preflight_phase_count: Option<u64>,
     runbook_receipt_bound: bool,
     public_deployment_runbook_root_bound: bool,
     public_deployment_runbook_step_set_root_bound: bool,
@@ -5616,25 +5622,35 @@ impl Testnet {
         let capture_plan_bound = capture_plan_root_bound
             && capture_contract_root_bound
             && deployment_preflight_checklist_root_bound;
-        let preflight_receipt_bound = is_hex_root(&evidence.deployment_preflight_receipt_root)
-            && is_hex_root(&evidence.deployment_preflight_phase_set_root)
-            && evidence.deployment_preflight_phase_count
-                == REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len() as u64
-            && evidence
-                .deployment_preflight_receipt
-                .get("receipt_root")
-                .and_then(Value::as_str)
-                == Some(evidence.deployment_preflight_receipt_root.as_str())
-            && evidence
-                .deployment_preflight_receipt
-                .get("phase_set_root")
-                .and_then(Value::as_str)
-                == Some(evidence.deployment_preflight_phase_set_root.as_str())
-            && evidence
-                .deployment_preflight_receipt
-                .get("phase_count")
-                .and_then(Value::as_u64)
+        let expected_deployment_preflight_receipt_root = evidence
+            .deployment_preflight_receipt
+            .get("receipt_root")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let expected_deployment_preflight_phase_set_root = evidence
+            .deployment_preflight_receipt
+            .get("phase_set_root")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let expected_deployment_preflight_phase_count = evidence
+            .deployment_preflight_receipt
+            .get("phase_count")
+            .and_then(Value::as_u64);
+        let preflight_receipt_root_bound = is_hex_root(&evidence.deployment_preflight_receipt_root)
+            && expected_deployment_preflight_receipt_root.as_deref()
+                == Some(evidence.deployment_preflight_receipt_root.as_str());
+        let deployment_preflight_phase_set_root_bound =
+            is_hex_root(&evidence.deployment_preflight_phase_set_root)
+                && expected_deployment_preflight_phase_set_root.as_deref()
+                    == Some(evidence.deployment_preflight_phase_set_root.as_str());
+        let deployment_preflight_phase_count_bound =
+            expected_deployment_preflight_phase_count
                 == Some(evidence.deployment_preflight_phase_count);
+        let preflight_receipt_bound = preflight_receipt_root_bound
+            && deployment_preflight_phase_set_root_bound
+            && deployment_preflight_phase_count_bound
+            && evidence.deployment_preflight_phase_count
+                == REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len() as u64;
         let public_deployment_runbook_root_bound =
             evidence.public_deployment_runbook_root == expected_deployment_runbook_root;
         let public_deployment_runbook_step_set_root_bound =
@@ -5838,6 +5854,10 @@ impl Testnet {
             && mainnet_custody_disabled
             && public_bootstrap_profile_passed
             && finality_latency_profile_passed;
+        let expected_deployment_preflight_phase_count_string =
+            expected_deployment_preflight_phase_count
+                .map(|count| count.to_string())
+                .unwrap_or_else(|| "missing-deployment-preflight-phase-count".to_string());
         let report_root = root(&[
             "public-deployment-report",
             CHAIN_ID,
@@ -5846,8 +5866,15 @@ impl Testnet {
             &evidence.capture_plan_root,
             &expected_capture_plan_root,
             &evidence.deployment_preflight_receipt_root,
+            expected_deployment_preflight_receipt_root
+                .as_deref()
+                .unwrap_or("missing-deployment-preflight-receipt-root"),
             &evidence.deployment_preflight_phase_set_root,
+            expected_deployment_preflight_phase_set_root
+                .as_deref()
+                .unwrap_or("missing-deployment-preflight-phase-set-root"),
             &evidence.deployment_preflight_phase_count.to_string(),
+            &expected_deployment_preflight_phase_count_string,
             &evidence.public_deployment_runbook_root,
             &expected_deployment_runbook_root,
             &evidence.public_deployment_runbook_step_set_root,
@@ -6014,13 +6041,19 @@ impl Testnet {
             ),
             private_summary_probe_root: Some(evidence.private_summary_probe_root.clone()),
             preflight_receipt_bound,
+            preflight_receipt_root_bound,
+            deployment_preflight_phase_set_root_bound,
+            deployment_preflight_phase_count_bound,
             deployment_preflight_receipt_root: Some(
                 evidence.deployment_preflight_receipt_root.clone(),
             ),
+            expected_deployment_preflight_receipt_root,
             deployment_preflight_phase_set_root: Some(
                 evidence.deployment_preflight_phase_set_root.clone(),
             ),
+            expected_deployment_preflight_phase_set_root,
             deployment_preflight_phase_count: evidence.deployment_preflight_phase_count,
+            expected_deployment_preflight_phase_count,
             runbook_receipt_bound,
             public_deployment_runbook_root_bound,
             public_deployment_runbook_step_set_root_bound,
@@ -7064,9 +7097,15 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         rate_limit_policy_claims_root: None,
         private_summary_probe_root: None,
         preflight_receipt_bound: false,
+        preflight_receipt_root_bound: false,
+        deployment_preflight_phase_set_root_bound: false,
+        deployment_preflight_phase_count_bound: false,
         deployment_preflight_receipt_root: None,
+        expected_deployment_preflight_receipt_root: None,
         deployment_preflight_phase_set_root: None,
+        expected_deployment_preflight_phase_set_root: None,
         deployment_preflight_phase_count: 0,
+        expected_deployment_preflight_phase_count: None,
         runbook_receipt_bound: false,
         public_deployment_runbook_root_bound: false,
         public_deployment_runbook_step_set_root_bound: false,
@@ -7436,6 +7475,14 @@ fn public_deployment_repair_roots(
             report.expected_deployment_preflight_checklist_root.as_deref(),
         ),
         (
+            "preflight_receipt_root_bound",
+            report.expected_deployment_preflight_receipt_root.as_deref(),
+        ),
+        (
+            "deployment_preflight_phase_set_root_bound",
+            report.expected_deployment_preflight_phase_set_root.as_deref(),
+        ),
+        (
             "public_launch_package_file_set_root_bound",
             report.expected_public_launch_package_file_set_root.as_deref(),
         ),
@@ -7705,6 +7752,18 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
         ),
         ("mainnet_custody_disabled", report.mainnet_custody_disabled),
         ("preflight_receipt_bound", report.preflight_receipt_bound),
+        (
+            "preflight_receipt_root_bound",
+            report.preflight_receipt_root_bound,
+        ),
+        (
+            "deployment_preflight_phase_set_root_bound",
+            report.deployment_preflight_phase_set_root_bound,
+        ),
+        (
+            "deployment_preflight_phase_count_bound",
+            report.deployment_preflight_phase_count_bound,
+        ),
         ("runbook_receipt_bound", report.runbook_receipt_bound),
         (
             "public_deployment_runbook_root_bound",
@@ -29068,6 +29127,39 @@ mod tests {
             REQUIRED_PUBLIC_DEPLOYMENT_PROBE_ROOT_FIELDS.len() as u64
         );
         assert!(summary.public_deployment.preflight_receipt_bound);
+        assert!(summary.public_deployment.preflight_receipt_root_bound);
+        assert!(summary
+            .public_deployment
+            .deployment_preflight_phase_set_root_bound);
+        assert!(summary
+            .public_deployment
+            .deployment_preflight_phase_count_bound);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_deployment_preflight_receipt_root
+                .as_deref(),
+            summary
+                .public_deployment
+                .deployment_preflight_receipt_root
+                .as_deref()
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_deployment_preflight_phase_set_root
+                .as_deref(),
+            summary
+                .public_deployment
+                .deployment_preflight_phase_set_root
+                .as_deref()
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_deployment_preflight_phase_count,
+            Some(REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len() as u64)
+        );
         assert!(summary.public_deployment.runbook_receipt_bound);
         assert!(summary
             .public_deployment
@@ -31775,6 +31867,97 @@ mod tests {
         );
         assert!(!remediation.repair_roots.contains_key("capture_plan_bound"));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_exposes_expected_preflight_receipt_roots() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path = write_public_deployment_evidence(&valid_public_deployment_evidence(
+            &base_summary,
+        ));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let _ = fs::remove_file(path);
+        let expected_receipt_root = evidence.deployment_preflight_receipt_root.clone();
+        let expected_phase_set_root = evidence.deployment_preflight_phase_set_root.clone();
+        let expected_phase_count = evidence.deployment_preflight_phase_count;
+        evidence.deployment_preflight_receipt_root =
+            root(&["test-public-deployment", "wrong-preflight-receipt"]);
+        evidence.deployment_preflight_phase_set_root =
+            root(&["test-public-deployment", "wrong-preflight-phase-set"]);
+        evidence.deployment_preflight_phase_count =
+            evidence.deployment_preflight_phase_count.saturating_add(1);
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.preflight_receipt_bound);
+        assert!(!summary.public_deployment.preflight_receipt_root_bound);
+        assert!(!summary
+            .public_deployment
+            .deployment_preflight_phase_set_root_bound);
+        assert!(!summary
+            .public_deployment
+            .deployment_preflight_phase_count_bound);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_deployment_preflight_receipt_root
+                .as_deref(),
+            Some(expected_receipt_root.as_str())
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_deployment_preflight_phase_set_root
+                .as_deref(),
+            Some(expected_phase_set_root.as_str())
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_deployment_preflight_phase_count,
+            Some(expected_phase_count)
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        for failed_subcheck in [
+            "preflight_receipt_bound",
+            "preflight_receipt_root_bound",
+            "deployment_preflight_phase_set_root_bound",
+            "deployment_preflight_phase_count_bound",
+        ] {
+            assert!(
+                remediation
+                    .failed_subchecks
+                    .contains(&failed_subcheck.to_string()),
+                "missing failed subcheck {failed_subcheck}"
+            );
+        }
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("preflight_receipt_root_bound")
+                .map(String::as_str),
+            Some(expected_receipt_root.as_str())
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("deployment_preflight_phase_set_root_bound")
+                .map(String::as_str),
+            Some(expected_phase_set_root.as_str())
+        );
+        assert!(!remediation
+            .repair_roots
+            .contains_key("deployment_preflight_phase_count_bound"));
     }
 
     #[test]
