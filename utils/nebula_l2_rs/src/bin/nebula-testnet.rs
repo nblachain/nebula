@@ -9176,7 +9176,8 @@ fn public_capture_todo_artifact(summary: &TestnetSummary) -> Value {
     todo["deployment_preflight"] = capture_plan["deployment_preflight"].clone();
     todo["commands"] = json!({
         "audit_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json",
-        "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --json",
+        "verify_capture_audit": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json",
+        "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json",
         "assemble_public_deployment": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json",
         "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --json"
     });
@@ -9418,6 +9419,9 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
         "package_manifest_root": package_manifest_root,
         "next_steps": {
             "capture_public_deployment": "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+            "audit_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json",
+            "verify_capture_audit": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json",
+            "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json",
             "assemble_public_deployment": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence <capture.json> --write-public-deployment-evidence nebula-public-deployment.json --json",
             "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --json"
         }
@@ -9834,6 +9838,8 @@ fn public_testnet_certification_artifact(
         "next_steps": {
             "capture_public_deployment": "Fill nebula-public-launch-package/nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
             "collect_release_authority_handoff": "Fill nebula-release-approval-template.json and nebula-release-authority-registry-template.json only after public deployment evidence and external authority signoff are complete.",
+            "audit_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json",
+            "verify_capture_audit": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json",
             "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json",
             "assemble_public_deployment": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json",
             "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --json"
@@ -32284,6 +32290,18 @@ mod tests {
             capture_todo["blocking_gaps"][0],
             "public-launch-deployment-attestation"
         );
+        assert!(capture_todo["commands"]["audit_capture"]
+            .as_str()
+            .expect("capture todo audit command")
+            .contains("--write-public-deployment-capture-audit"));
+        assert!(capture_todo["commands"]["verify_capture_audit"]
+            .as_str()
+            .expect("capture todo audit verify command")
+            .contains("--verify-public-deployment-capture-audit"));
+        assert!(capture_todo["commands"]["verify_capture"]
+            .as_str()
+            .expect("capture todo verify command")
+            .contains("--fail-on-public-launch-gaps"));
         assert!(is_hex_root(
             capture_todo["public_capture_todo_root"]
                 .as_str()
@@ -32302,6 +32320,18 @@ mod tests {
             manifest["public_launch_readiness_artifact_root"],
             readiness_report["public_launch_readiness_artifact_root"]
         );
+        assert!(manifest["next_steps"]["audit_capture"]
+            .as_str()
+            .expect("package audit command")
+            .contains("--write-public-deployment-capture-audit"));
+        assert!(manifest["next_steps"]["verify_capture_audit"]
+            .as_str()
+            .expect("package audit verify command")
+            .contains("--verify-public-deployment-capture-audit"));
+        assert!(manifest["next_steps"]["verify_capture"]
+            .as_str()
+            .expect("package verify command")
+            .contains("--fail-on-public-launch-gaps"));
         assert_eq!(
             readiness_report["kind"],
             "nebula-public-launch-readiness-report"
@@ -32379,6 +32409,18 @@ mod tests {
             certification["public_deployment_evidence_root_bound_to_report"],
             true
         );
+        assert!(certification["next_steps"]["audit_capture"]
+            .as_str()
+            .expect("certification audit command")
+            .contains("--write-public-deployment-capture-audit"));
+        assert!(certification["next_steps"]["verify_capture_audit"]
+            .as_str()
+            .expect("certification audit verify command")
+            .contains("--verify-public-deployment-capture-audit"));
+        assert!(certification["next_steps"]["verify_capture"]
+            .as_str()
+            .expect("certification verify command")
+            .contains("--fail-on-public-launch-gaps"));
         assert_eq!(certification["package_verified"], true);
         assert_eq!(certification["external_capture_required"], true);
         assert_eq!(

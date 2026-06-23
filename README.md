@@ -3278,7 +3278,9 @@ real XMR.
   `local_testnet_ready`, `public_launch_ready`, package/report/template roots,
   the public deployment evidence root, its readiness-report binding boolean,
   package-bound release-template roots, package-binding booleans for both
-  release handoff templates, blocking gaps, remediation commands, and whether external capture is still
+  release handoff templates, blocking gaps, remediation commands for capture
+  audit, audit verification, strict capture verification, assembly, and launch
+  verification, and whether external capture is still
   required in `nebula-public-testnet-certification.json`. It is deliberately
   operator-local and remains blocked until the filled schema v5 deployment
   attestation passes.
