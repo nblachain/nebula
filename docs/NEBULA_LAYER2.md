@@ -3243,16 +3243,17 @@ real XMR.
   manifest. The package manifest binds each filename, root field, artifact
   root, record root, required-before-capture flag, operator-fill flag,
   non-evidence/non-custody flags, package `artifact_set_root`, package
-  `package_file_set_root`, release-candidate manifest id, and
-  no-mainnet-custody boundary so deployment automation can reject stale,
-  swapped, cross-run, extra, or metadata-tampered handoff files before public
-  endpoint evidence is assembled.
+  `package_file_set_root`, release-candidate manifest id, launch level,
+  ready/blocker counts, readiness report/artifact roots, and no-mainnet-custody
+  boundary so deployment automation can reject stale, swapped, cross-run,
+  extra, or metadata-tampered handoff files before public endpoint evidence is
+  assembled.
   When combined with the export step in the same runner invocation,
   `--verify-public-launch-package` recomputes each package artifact and the
   package manifest root against the current release-candidate summary, enforces
-  the exact top-level package file set, and fails on stale, tampered, swapped,
-  cross-run, shape-tampered, or extra-file package directories before public
-  evidence capture begins.
+  the exact top-level package file set and package-level readiness summary, and
+  fails on stale, tampered, swapped, cross-run, shape-tampered, or extra-file
+  package directories before public evidence capture begins.
 - A local operator-only public launch readiness report export gives CI a
   standalone `nebula-public-launch-readiness-report` with the launch level,
   blocker ids, remediation commands, public status/bundle/capture-plan roots,

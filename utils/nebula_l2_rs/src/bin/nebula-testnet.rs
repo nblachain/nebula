@@ -8034,6 +8034,16 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
             })
             .collect(),
     );
+    let public_launch_readiness_artifact_root = package_records
+        .iter()
+        .find(|record| record["artifact_id"].as_str() == Some("public-launch-readiness-report"))
+        .and_then(|record| record["root"].as_str())
+        .unwrap_or("missing-public-launch-readiness-artifact-root")
+        .to_string();
+    let public_launch_level = summary.public_launch_readiness.level.clone();
+    let public_launch_ready = summary.public_launch_readiness.public_launch_ready;
+    let blocking_gap_count = summary.public_launch_readiness.blocking_gaps.len() as u64;
+    let remediation_count = summary.public_launch_readiness.remediations.len() as u64;
     let package_file_set_root =
         public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
     let package_manifest_root = root(&[
@@ -8043,6 +8053,12 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
         &summary.testnet_id,
         &artifact_set_root,
         &package_file_set_root,
+        &public_launch_level,
+        bool_str(public_launch_ready),
+        &blocking_gap_count.to_string(),
+        &remediation_count.to_string(),
+        &summary.public_launch_readiness.report_root,
+        &public_launch_readiness_artifact_root,
         bool_str(summary.acceptance.no_mainnet_custody),
     ]);
     let manifest = json!({
@@ -8057,6 +8073,12 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
         "usable_as_public_deployment_evidence": false,
         "usable_as_mainnet_custody_approval": false,
         "custody_mode": "no-mainnet-custody",
+        "public_launch_level": public_launch_level,
+        "public_launch_ready": public_launch_ready,
+        "blocking_gap_count": blocking_gap_count,
+        "remediation_count": remediation_count,
+        "public_launch_readiness_report_root": &summary.public_launch_readiness.report_root,
+        "public_launch_readiness_artifact_root": public_launch_readiness_artifact_root,
         "artifact_count": package_records.len(),
         "artifacts": package_records,
         "artifact_set_root": artifact_set_root,
@@ -8125,6 +8147,38 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
     ensure(
         required_str(&manifest, "custody_mode")? == "no-mainnet-custody",
         "public launch package custody_mode mismatch",
+    )?;
+    ensure(
+        required_str(&manifest, "public_launch_level")? == summary.public_launch_readiness.level,
+        "public launch package launch level mismatch",
+    )?;
+    ensure(
+        required_bool(&manifest, "public_launch_ready")?
+            == summary.public_launch_readiness.public_launch_ready,
+        "public launch package launch readiness mismatch",
+    )?;
+    ensure(
+        required_u64(&manifest, "blocking_gap_count")?
+            == summary.public_launch_readiness.blocking_gaps.len() as u64,
+        "public launch package blocking gap count mismatch",
+    )?;
+    ensure(
+        required_u64(&manifest, "remediation_count")?
+            == summary.public_launch_readiness.remediations.len() as u64,
+        "public launch package remediation count mismatch",
+    )?;
+    ensure(
+        required_root(&manifest, "public_launch_readiness_report_root")?
+            == summary.public_launch_readiness.report_root,
+        "public launch package readiness report root mismatch",
+    )?;
+    let expected_readiness_report = public_launch_readiness_report_artifact(summary);
+    let expected_readiness_artifact_root =
+        required_root(&expected_readiness_report, "public_launch_readiness_artifact_root")?;
+    ensure(
+        required_root(&manifest, "public_launch_readiness_artifact_root")?
+            == expected_readiness_artifact_root,
+        "public launch package readiness artifact root mismatch",
     )?;
     let records = manifest["artifacts"]
         .as_array()
@@ -8236,6 +8290,12 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
         &summary.testnet_id,
         &expected_artifact_set_root,
         &expected_package_file_set_root,
+        &summary.public_launch_readiness.level,
+        bool_str(summary.public_launch_readiness.public_launch_ready),
+        &summary.public_launch_readiness.blocking_gaps.len().to_string(),
+        &summary.public_launch_readiness.remediations.len().to_string(),
+        &summary.public_launch_readiness.report_root,
+        &expected_readiness_artifact_root,
         bool_str(summary.acceptance.no_mainnet_custody),
     ]);
     ensure(
@@ -27290,6 +27350,26 @@ mod tests {
         assert_eq!(manifest["usable_as_public_deployment_evidence"], false);
         assert_eq!(manifest["usable_as_mainnet_custody_approval"], false);
         assert_eq!(manifest["custody_mode"], "no-mainnet-custody");
+        assert_eq!(
+            manifest["public_launch_level"],
+            summary.public_launch_readiness.level
+        );
+        assert_eq!(
+            manifest["public_launch_ready"],
+            summary.public_launch_readiness.public_launch_ready
+        );
+        assert_eq!(
+            manifest["blocking_gap_count"],
+            json!(summary.public_launch_readiness.blocking_gaps.len())
+        );
+        assert_eq!(
+            manifest["remediation_count"],
+            json!(summary.public_launch_readiness.remediations.len())
+        );
+        assert_eq!(
+            manifest["public_launch_readiness_report_root"],
+            summary.public_launch_readiness.report_root
+        );
 
         let expected = [
             ("public-status-manifest", "nebula-public-status.json"),
@@ -27416,6 +27496,10 @@ mod tests {
             readiness_report["public_launch_readiness_artifact_root"]
         );
         assert_eq!(
+            manifest["public_launch_readiness_artifact_root"],
+            readiness_report["public_launch_readiness_artifact_root"]
+        );
+        assert_eq!(
             readiness_report["kind"],
             "nebula-public-launch-readiness-report"
         );
@@ -27426,6 +27510,40 @@ mod tests {
         );
         verify_public_launch_package(&package_dir_string, &summary)
             .expect("package should verify against its source run");
+        let _ = fs::remove_dir_all(package_dir);
+    }
+
+    #[test]
+    fn public_launch_package_verifier_rejects_launch_summary_tampering() {
+        let counter = TEST_FILE_COUNTER.fetch_add(1, AtomicOrdering::SeqCst);
+        let package_dir = env::temp_dir().join(format!(
+            "nebula-public-launch-package-summary-{}",
+            root(&["test-public-launch-package-summary", &counter.to_string()])
+        ));
+        let package_dir_string = package_dir.to_string_lossy().into_owned();
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness cli should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_launch_package(&package_dir_string, &summary)
+            .expect("write public launch package");
+
+        let manifest_path = package_dir.join("nebula-public-launch-package.json");
+        let mut manifest: Value =
+            serde_json::from_slice(&fs::read(&manifest_path).expect("read package manifest"))
+                .expect("package manifest json");
+        manifest["public_launch_ready"] =
+            json!(!summary.public_launch_readiness.public_launch_ready);
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).expect("manifest json"),
+        )
+        .expect("write tampered package manifest");
+
+        let error = verify_public_launch_package(&package_dir_string, &summary)
+            .expect_err("tampered package launch summary should fail verification");
+        assert!(error.contains("launch readiness mismatch"));
         let _ = fs::remove_dir_all(package_dir);
     }
 

@@ -413,16 +413,18 @@ plan, and a `nebula-public-launch-package` manifest. The package manifest
 records each filename, root field, artifact root, record root,
 required-before-capture flag, operator-fill flag, and
 non-evidence/non-custody flags under an `artifact_set_root`, plus a
-`package_file_set_root` over the exact ordered top-level file list, so
-deployment automation can detect stale, swapped, cross-run, extra, or
-metadata-tampered files before filling public probe evidence.
+`package_file_set_root` over the exact ordered top-level file list. It also
+binds the package-level launch status, blocker/remediation counts, and
+readiness report/artifact roots so deployment automation can detect stale,
+swapped, cross-run, extra, or metadata-tampered files before filling public
+probe evidence.
 `--verify-public-launch-package path\to\package-dir` reruns those checks against
 the current release-candidate summary, so CI should combine it with the export
 step for the same runner invocation. It recomputes every artifact and package
 root, verifies package-only/public-alpha boundaries and per-artifact
-capture/operator-fill flags, enforces the exact top-level package file set, and
-fails if the directory contains stale, tampered, swapped, cross-run, or extra
-handoff files.
+capture/operator-fill flags, enforces the exact top-level package file set and
+package-level readiness summary, and fails if the directory contains stale,
+tampered, swapped, cross-run, or extra handoff files.
 
 `--write-public-deployment-evidence-template path\to\deployment-template.json`
 also requires `--mainnet-readiness` and writes the schema v5 worksheet that a
