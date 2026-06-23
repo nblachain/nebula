@@ -3348,7 +3348,9 @@ real XMR.
   and unusable as public deployment evidence; live endpoints, TLS pins, public
   probes, bootstrap/operator records, observer signatures, freshness, and the
   final evidence root must still be captured before the public launch gate can
-  pass.
+  pass. The paired scaffold verifier recomputes the worksheet against the
+  verified package and current release-candidate summary, rejecting stale,
+  tampered, cross-run, or package-mismatched scaffolds before capture starts.
 - A public deployment evidence assembler lets deployment automation feed
   captured endpoint, TLS, typed policy, probe, observer, runbook receipt,
   capture-plan, and freshness transcripts into the runner and receive a rooted schema v5

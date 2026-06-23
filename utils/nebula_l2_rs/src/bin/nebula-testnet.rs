@@ -389,6 +389,7 @@ struct Cli {
     public_deployment_evidence_template_path: Option<String>,
     public_deployment_capture_plan_path: Option<String>,
     public_deployment_capture_scaffold_path: Option<String>,
+    public_deployment_capture_scaffold_verify_path: Option<String>,
     public_deployment_capture_scaffold_package_dir: Option<String>,
     public_deployment_capture_verify_path: Option<String>,
     public_deployment_capture_audit_path: Option<String>,
@@ -461,6 +462,7 @@ impl Default for Cli {
             public_deployment_evidence_template_path: None,
             public_deployment_capture_plan_path: None,
             public_deployment_capture_scaffold_path: None,
+            public_deployment_capture_scaffold_verify_path: None,
             public_deployment_capture_scaffold_package_dir: None,
             public_deployment_capture_verify_path: None,
             public_deployment_capture_audit_path: None,
@@ -7126,6 +7128,14 @@ fn run() -> Result<(), String> {
     ) {
         write_public_deployment_capture_scaffold(path, package_dir, &summary)?;
     }
+    if let (Some(path), Some(package_dir)) = (
+        cli.public_deployment_capture_scaffold_verify_path
+            .as_deref(),
+        cli.public_deployment_capture_scaffold_package_dir
+            .as_deref(),
+    ) {
+        verify_public_deployment_capture_scaffold(path, package_dir, &summary)?;
+    }
     if let (Some(capture_path), Some(output_path)) = (
         cli.public_deployment_capture_audit_path.as_deref(),
         cli.public_deployment_capture_audit_output_path.as_deref(),
@@ -9532,6 +9542,49 @@ fn write_public_deployment_capture_scaffold(
         &PathBuf::from(path),
         &scaffold,
         "public-deployment-capture-scaffold",
+    )
+}
+
+fn verify_public_deployment_capture_scaffold(
+    path: &str,
+    package_dir: &str,
+    summary: &TestnetSummary,
+) -> Result<(), String> {
+    ensure_local_json_path(path, "--verify-public-deployment-capture-scaffold")?;
+    ensure_local_output_dir_path(package_dir, "--public-deployment-capture-scaffold-package")?;
+    verify_public_launch_package(package_dir, summary)?;
+    let package_dir = PathBuf::from(package_dir);
+    let package_manifest = read_json_file(
+        &package_dir.join("nebula-public-launch-package.json"),
+        "public launch package manifest",
+    )?;
+    let launch_report = read_json_file(
+        &package_dir.join("nebula-public-launch-readiness-report.json"),
+        "public launch readiness report",
+    )?;
+    let actual = read_json_file(
+        &PathBuf::from(path),
+        "public deployment capture scaffold",
+    )?;
+    ensure(
+        actual["kind"] == "nebula-public-deployment-capture-scaffold",
+        "public deployment capture scaffold has the wrong kind",
+    )?;
+    ensure(
+        actual["operator_fill_required"] == true
+            && actual["template_only"] == true
+            && actual["usable_as_public_deployment_evidence"] == false,
+        "public deployment capture scaffold must remain non-evidence operator-fill scaffolding",
+    )?;
+    ensure(
+        value_contains_placeholder(&actual),
+        "public deployment capture scaffold must retain fill-in placeholders",
+    )?;
+    let expected =
+        public_deployment_capture_scaffold(summary, &package_manifest, &launch_report)?;
+    ensure(
+        actual == expected,
+        "public deployment capture scaffold does not match this run and package",
     )
 }
 
@@ -18260,6 +18313,14 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
                     "--write-public-deployment-capture-scaffold",
                 )?);
             }
+            "--verify-public-deployment-capture-scaffold" => {
+                index += 1;
+                cli.public_deployment_capture_scaffold_verify_path = Some(parse_string(
+                    &args,
+                    index,
+                    "--verify-public-deployment-capture-scaffold",
+                )?);
+            }
             "--public-deployment-capture-scaffold-package" => {
                 index += 1;
                 cli.public_deployment_capture_scaffold_package_dir = Some(parse_string(
@@ -18503,6 +18564,9 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
     }
     if cli.public_deployment_capture_scaffold_path.is_some()
         || cli
+            .public_deployment_capture_scaffold_verify_path
+            .is_some()
+        || cli
             .public_deployment_capture_scaffold_package_dir
             .is_some()
     {
@@ -18513,16 +18577,22 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
         let scaffold_path = cli
             .public_deployment_capture_scaffold_path
             .as_deref()
+            .or(cli
+                .public_deployment_capture_scaffold_verify_path
+                .as_deref())
             .ok_or_else(|| {
-                "--public-deployment-capture-scaffold-package requires --write-public-deployment-capture-scaffold".to_string()
+                "--public-deployment-capture-scaffold-package requires --write-public-deployment-capture-scaffold or --verify-public-deployment-capture-scaffold".to_string()
             })?;
         let package_dir = cli
             .public_deployment_capture_scaffold_package_dir
             .as_deref()
             .ok_or_else(|| {
-                "--write-public-deployment-capture-scaffold requires --public-deployment-capture-scaffold-package".to_string()
+                "--write-public-deployment-capture-scaffold or --verify-public-deployment-capture-scaffold requires --public-deployment-capture-scaffold-package".to_string()
             })?;
         ensure_local_json_path(scaffold_path, "--write-public-deployment-capture-scaffold")?;
+        if let Some(path) = cli.public_deployment_capture_scaffold_verify_path.as_deref() {
+            ensure_local_json_path(path, "--verify-public-deployment-capture-scaffold")?;
+        }
         ensure_local_output_dir_path(package_dir, "--public-deployment-capture-scaffold-package")?;
     }
     if let Some(path) = cli.public_deployment_capture_verify_path.as_deref() {
@@ -25914,6 +25984,8 @@ OPTIONS:
                               Write a redacted deployment CI capture plan listing required public evidence and probe coverage
         --write-public-deployment-capture-scaffold PATH
                               Write a package-bound public deployment capture scaffold with provable roots filled
+        --verify-public-deployment-capture-scaffold PATH
+                              Verify a package-bound public deployment capture scaffold against this run
         --public-deployment-capture-scaffold-package DIR
                               Verified public launch package directory used as the capture scaffold root source
         --verify-public-deployment-capture PATH
@@ -28254,11 +28326,28 @@ mod tests {
         assert!(error.contains("requires --mainnet-readiness"));
 
         let error = parse_cli(vec![
+            "--verify-public-deployment-capture-scaffold".to_string(),
+            path.clone(),
+            "--public-deployment-capture-scaffold-package".to_string(),
+            temp_json_path("nebula-public-launch-package-scaffold-verify-rejected"),
+        ])
+        .expect_err("public deployment capture scaffold verify should require mainnet-readiness mode");
+        assert!(error.contains("requires --mainnet-readiness"));
+
+        let error = parse_cli(vec![
             "--mainnet-readiness".to_string(),
             "--write-public-deployment-capture-scaffold".to_string(),
-            path,
+            path.clone(),
         ])
         .expect_err("public deployment capture scaffold should require a package source");
+        assert!(error.contains("--public-deployment-capture-scaffold-package"));
+
+        let error = parse_cli(vec![
+            "--mainnet-readiness".to_string(),
+            "--verify-public-deployment-capture-scaffold".to_string(),
+            path,
+        ])
+        .expect_err("public deployment capture scaffold verify should require a package source");
         assert!(error.contains("--public-deployment-capture-scaffold-package"));
     }
 
@@ -30321,6 +30410,8 @@ mod tests {
             package_dir_string.clone(),
             "--write-public-deployment-capture-scaffold".to_string(),
             scaffold_path.clone(),
+            "--verify-public-deployment-capture-scaffold".to_string(),
+            scaffold_path.clone(),
             "--public-deployment-capture-scaffold-package".to_string(),
             package_dir_string.clone(),
         ])
@@ -30336,6 +30427,12 @@ mod tests {
             &summary,
         )
         .expect("write public deployment capture scaffold");
+        verify_public_deployment_capture_scaffold(
+            &scaffold_path,
+            &package_dir_string,
+            &summary,
+        )
+        .expect("verify public deployment capture scaffold");
 
         let scaffold: Value =
             serde_json::from_slice(&fs::read(&scaffold_path).expect("read scaffold"))
@@ -30410,6 +30507,85 @@ mod tests {
         let error = load_public_deployment_evidence(&scaffold_path)
             .expect_err("scaffold must not be accepted as public deployment evidence");
         assert!(error.contains("placeholders"));
+
+        let _ = fs::remove_file(scaffold_path);
+        let _ = fs::remove_dir_all(package_dir);
+    }
+
+    #[test]
+    fn public_deployment_capture_scaffold_verifier_rejects_tampered_scaffold_or_package() {
+        let counter = TEST_FILE_COUNTER.fetch_add(1, AtomicOrdering::SeqCst);
+        let package_dir = env::temp_dir().join(format!(
+            "nebula-public-launch-package-scaffold-verify-{}",
+            root(&[
+                "test-public-capture-scaffold-verify-package",
+                &counter.to_string()
+            ])
+        ));
+        let package_dir_string = package_dir.to_string_lossy().into_owned();
+        let scaffold_path = temp_json_path("nebula-public-deployment-capture-scaffold-verify");
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness cli should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_launch_package(&package_dir_string, &summary)
+            .expect("write public launch package");
+        write_public_deployment_capture_scaffold(
+            &scaffold_path,
+            &package_dir_string,
+            &summary,
+        )
+        .expect("write public deployment capture scaffold");
+        verify_public_deployment_capture_scaffold(
+            &scaffold_path,
+            &package_dir_string,
+            &summary,
+        )
+        .expect("verify public deployment capture scaffold");
+
+        let mut scaffold: Value =
+            serde_json::from_slice(&fs::read(&scaffold_path).expect("read scaffold"))
+                .expect("scaffold json");
+        scaffold["public_launch_package_manifest_root"] =
+            json!(root(&["tampered-public-launch-package-manifest-root"]));
+        fs::write(
+            &scaffold_path,
+            serde_json::to_string_pretty(&scaffold).expect("scaffold json"),
+        )
+        .expect("write tampered scaffold");
+        let error = verify_public_deployment_capture_scaffold(
+            &scaffold_path,
+            &package_dir_string,
+            &summary,
+        )
+        .expect_err("tampered scaffold should fail verification");
+        assert!(error.contains("does not match this run and package"));
+
+        write_public_deployment_capture_scaffold(
+            &scaffold_path,
+            &package_dir_string,
+            &summary,
+        )
+        .expect("rewrite public deployment capture scaffold");
+        let package_manifest_path = package_dir.join("nebula-public-launch-package.json");
+        let mut package_manifest: Value =
+            serde_json::from_slice(&fs::read(&package_manifest_path).expect("read package manifest"))
+                .expect("package manifest json");
+        package_manifest["package_file_set_root"] =
+            json!(root(&["tampered-public-launch-package-file-set-root"]));
+        fs::write(
+            &package_manifest_path,
+            serde_json::to_string_pretty(&package_manifest).expect("package manifest json"),
+        )
+        .expect("write tampered package manifest");
+        let error = verify_public_deployment_capture_scaffold(
+            &scaffold_path,
+            &package_dir_string,
+            &summary,
+        )
+        .expect_err("tampered package should fail scaffold verification");
+        assert!(error.contains("file_set_root mismatch"));
 
         let _ = fs::remove_file(scaffold_path);
         let _ = fs::remove_dir_all(package_dir);

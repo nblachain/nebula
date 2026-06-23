@@ -226,7 +226,7 @@ To turn that verified package into a filled-root capture worksheet before the
 deployment system adds live endpoint, TLS, probe, and observer evidence:
 
 ```powershell
-cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --verify-public-launch-package .\nebula-public-launch-package --write-public-deployment-capture-scaffold .\nebula-public-deployment-capture.json --public-deployment-capture-scaffold-package .\nebula-public-launch-package --json
+cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --verify-public-launch-package .\nebula-public-launch-package --write-public-deployment-capture-scaffold .\nebula-public-deployment-capture.json --verify-public-deployment-capture-scaffold .\nebula-public-deployment-capture.json --public-deployment-capture-scaffold-package .\nebula-public-launch-package --json
 ```
 
 To produce a one-command local certification directory with the verified
@@ -551,6 +551,11 @@ pins, probe transcripts, bootstrap/operator records, observer signatures,
 freshness window, and evidence root, so `--audit-public-deployment-capture`
 continues to report it as incomplete until deployment CI captures real external
 evidence.
+`--verify-public-deployment-capture-scaffold path\to\capture.json` uses the
+same `--public-deployment-capture-scaffold-package path\to\package-dir` source,
+recomputes the expected scaffold against the verified package and current
+release-candidate summary, and rejects stale, tampered, cross-run, or
+package-mismatched scaffolds before deployment CI fills live evidence.
 
 `--audit-public-deployment-capture path\to\capture.json
 --write-public-deployment-capture-audit path\to\capture-audit.json` also
