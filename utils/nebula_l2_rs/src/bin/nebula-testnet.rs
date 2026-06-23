@@ -1108,6 +1108,9 @@ struct PublicDeploymentReport {
     report_root: String,
     evidence_root: Option<String>,
     evidence_shape_verified: bool,
+    placeholders_absent: bool,
+    public_bootstrap_profile_passed: bool,
+    finality_latency_profile_passed: bool,
     capture_plan_bound: bool,
     capture_plan_root_bound: bool,
     capture_contract_root_bound: bool,
@@ -1183,6 +1186,7 @@ struct PublicDeploymentReport {
     expected_public_bootstrap_profile_root: Option<String>,
     public_bootstrap_profile_report_root: Option<String>,
     expected_public_bootstrap_profile_report_root: Option<String>,
+    finality_latency_profile_report_root: Option<String>,
     rate_limit_policy_root: Option<String>,
     expected_rate_limit_policy_root: Option<String>,
     capture_plan_root: Option<String>,
@@ -5780,8 +5784,11 @@ impl Testnet {
             && public_surface_probe_count_bound
             && public_probe_set_root_bound
             && public_probe_count_bound;
+        let placeholders_absent = evidence.placeholders_absent;
+        let public_bootstrap_profile_passed = summary.public_bootstrap_profile.passed;
+        let finality_latency_profile_passed = summary.finality_latency_profile.passed;
         let mainnet_custody_disabled = evidence.mainnet_custody_disabled;
-        let passed = evidence.placeholders_absent
+        let passed = placeholders_absent
             && capture_plan_bound
             && matches_current_manifest
             && public_launch_bundle_root_bound
@@ -5796,8 +5803,8 @@ impl Testnet {
             && bootstrap_nodes_bound
             && live_probe_roots_bound
             && mainnet_custody_disabled
-            && summary.public_bootstrap_profile.passed
-            && summary.finality_latency_profile.passed;
+            && public_bootstrap_profile_passed
+            && finality_latency_profile_passed;
         let report_root = root(&[
             "public-deployment-report",
             CHAIN_ID,
@@ -5830,6 +5837,9 @@ impl Testnet {
             report_root,
             evidence_root: Some(evidence.evidence_root.clone()),
             evidence_shape_verified: evidence.schema_version == PUBLIC_DEPLOYMENT_EVIDENCE_SCHEMA_VERSION,
+            placeholders_absent,
+            public_bootstrap_profile_passed,
+            finality_latency_profile_passed,
             capture_plan_bound,
             capture_plan_root_bound,
             capture_contract_root_bound,
@@ -5912,6 +5922,9 @@ impl Testnet {
             ),
             expected_public_bootstrap_profile_report_root: Some(
                 summary.public_bootstrap_profile.report_root.clone(),
+            ),
+            finality_latency_profile_report_root: Some(
+                summary.finality_latency_profile.report_root.clone(),
             ),
             rate_limit_policy_root: Some(evidence.rate_limit_policy_root.clone()),
             expected_rate_limit_policy_root: Some(
@@ -6879,6 +6892,9 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         ]),
         evidence_root: None,
         evidence_shape_verified: false,
+        placeholders_absent: false,
+        public_bootstrap_profile_passed: false,
+        finality_latency_profile_passed: false,
         capture_plan_bound: false,
         capture_plan_root_bound: false,
         capture_contract_root_bound: false,
@@ -6954,6 +6970,7 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         expected_public_bootstrap_profile_root: None,
         public_bootstrap_profile_report_root: None,
         expected_public_bootstrap_profile_report_root: None,
+        finality_latency_profile_report_root: None,
         rate_limit_policy_root: None,
         expected_rate_limit_policy_root: None,
         capture_plan_root: None,
@@ -7232,6 +7249,15 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
         (
             "public_deployment_evidence_shape_verified",
             report.evidence_shape_verified,
+        ),
+        ("placeholders_absent", report.placeholders_absent),
+        (
+            "public_bootstrap_profile_passed",
+            report.public_bootstrap_profile_passed,
+        ),
+        (
+            "finality_latency_profile_passed",
+            report.finality_latency_profile_passed,
         ),
         ("capture_plan_bound", report.capture_plan_bound),
         ("capture_plan_root_bound", report.capture_plan_root_bound),
@@ -28027,6 +28053,17 @@ mod tests {
         let summary = base_testnet.summary(Vec::new());
         assert!(summary.public_deployment.passed);
         assert!(summary.acceptance.public_deployment_attestation_available);
+        assert!(summary.public_deployment.placeholders_absent);
+        assert!(summary.public_deployment.public_bootstrap_profile_passed);
+        assert!(summary.public_deployment.finality_latency_profile_passed);
+        assert_eq!(
+            summary
+                .public_deployment
+                .finality_latency_profile_report_root
+                .as_deref()
+                .expect("finality latency profile report root"),
+            summary.finality_latency_profile.report_root.as_str()
+        );
         assert!(summary.public_deployment.capture_plan_bound);
         assert!(summary.public_deployment.capture_plan_root_bound);
         assert!(summary.public_deployment.capture_contract_root_bound);
@@ -30846,6 +30883,80 @@ mod tests {
         assert!(remediation
             .failed_subchecks
             .contains(&"deployment_preflight_checklist_root_bound".to_string()));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_placeholder_marked_evidence() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path = write_public_deployment_evidence(&valid_public_deployment_evidence(
+            &base_summary,
+        ));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        evidence.placeholders_absent = false;
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.placeholders_absent);
+        assert!(summary.public_deployment.public_bootstrap_profile_passed);
+        assert!(summary.public_deployment.finality_latency_profile_passed);
+        assert_eq!(
+            summary.public_launch_readiness.blocking_gaps,
+            vec!["public-launch-deployment-attestation"]
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"placeholders_absent".to_string()));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_failed_bootstrap_profile_dependency() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        assert!(base_summary.public_bootstrap_profile.passed);
+        let path = write_public_deployment_evidence(&valid_public_deployment_evidence(
+            &base_summary,
+        ));
+        let evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        base_testnet.cli.public_bootstrap_node_count = 1;
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.public_bootstrap_profile_passed);
+        assert!(summary.public_deployment.finality_latency_profile_passed);
+        assert_eq!(
+            summary
+                .public_deployment
+                .finality_latency_profile_report_root
+                .as_deref()
+                .expect("finality latency profile report root"),
+            summary.finality_latency_profile.report_root.as_str()
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"public_bootstrap_profile_passed".to_string()));
         let _ = fs::remove_file(path);
     }
 
