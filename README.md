@@ -3345,7 +3345,10 @@ real XMR.
   `deployment_preflight_checklist_root` against the current generated capture
   plan, exposes individual root-binding booleans plus expected repair roots,
   requires the embedded `public_launch_package_file_set_root` to match
-  the current rooted package file set, and requires the embedded
+  the current rooted package file set, requires the embedded
+  `public_launch_package_manifest_root` and
+  `public_launch_readiness_artifact_root` to match the pre-capture launch
+  package handoff, and requires the embedded
   `deployment_preflight_receipt_root`, `deployment_preflight_phase_set_root`,
   and phase count to match the completed receipt body. It also requires the
   embedded public deployment runbook root, step-set root, `public_deployment_runbook_receipt_root`,
@@ -3358,7 +3361,8 @@ real XMR.
   endpoint fields, invalid freshness windows, stale capture times,
   invalid deployment run ids, malformed preflight receipt fields or phases,
   malformed runbook receipt fields or steps, expected capture-plan,
-  capture-contract, and preflight roots, mismatched frozen launch/status roots,
+  capture-contract, preflight, package-manifest, and readiness-artifact roots,
+  mismatched frozen launch/status roots,
   missing or extra TLS endpoint pin roles,
   malformed TLS endpoint pin records, missing or extra public-surface probe
   roles, malformed public-surface probe records, insufficient bootstrap node

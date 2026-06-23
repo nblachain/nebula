@@ -575,7 +575,10 @@ The verifier and public deployment report also compare the embedded
 `capture_plan_root`, `capture_contract_root`, and
 `deployment_preflight_checklist_root` against the current generated capture plan,
 require the embedded `public_launch_package_file_set_root` to match the current
-rooted package file set, and require the embedded preflight receipt root,
+rooted package file set, require the embedded
+`public_launch_package_manifest_root` and
+`public_launch_readiness_artifact_root` to match the pre-capture launch package
+handoff, and require the embedded preflight receipt root,
 phase-set root, and phase count to match the completed receipt body. Schema v5 also requires the embedded
 public deployment runbook root, step-set root, runbook receipt root,
 step-receipt-set root, and step receipt count to match the completed runbook
@@ -596,6 +599,8 @@ RPC/status/health/metrics/incident-contact/faucet/reset endpoints, and requires 
 routable P2P endpoint. It must bind the capture plan root, capture contract
 root, and deployment preflight checklist root generated for the same run.
 It also must bind the current `public_launch_package_file_set_root`,
+the pre-capture `public_launch_package_manifest_root`, the pre-capture
+`public_launch_readiness_artifact_root`,
 `deployment_preflight_receipt`,
 `deployment_preflight_receipt_root`, `deployment_preflight_phase_set_root`, and
 `deployment_preflight_phase_count`, proving every required preflight phase was
