@@ -206,7 +206,7 @@ public status manifest, typed deployment runbook, combined launch handoff bundle
 schema v5 deployment evidence worksheet, and standalone capture todo:
 
 ```powershell
-cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-bootstrap-profile .\nebula-public-bootstrap.json --write-public-status-manifest .\nebula-public-status.json --write-public-deployment-runbook .\nebula-public-deployment-runbook.json --write-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --write-public-launch-bundle .\nebula-public-launch-bundle.json --write-public-capture-todo .\nebula-public-capture-todo.json --write-public-deployment-evidence-template .\nebula-public-deployment-template.json --json
+cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-bootstrap-profile .\nebula-public-bootstrap.json --write-public-status-manifest .\nebula-public-status.json --write-public-deployment-runbook .\nebula-public-deployment-runbook.json --write-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --write-public-launch-bundle .\nebula-public-launch-bundle.json --write-public-capture-todo .\nebula-public-capture-todo.json --verify-public-capture-todo .\nebula-public-capture-todo.json --write-public-deployment-evidence-template .\nebula-public-deployment-template.json --json
 ```
 
 The same public-alpha handoff can be exported as one rooted package directory:
@@ -444,6 +444,10 @@ approval.
 JSON artifact for deployment CI that wants the remaining external-capture
 contract without unpacking the full launch package. Its root guard recomputes
 `public_capture_todo_root` before writing.
+`--verify-public-capture-todo path\to\todo.json` also requires
+`--mainnet-readiness`, recomputes the expected todo for the current
+release-candidate summary, and fails on stale, tampered, or cross-run work
+orders before public evidence capture starts.
 
 `--write-public-testnet-certification path\to\cert-dir` also requires
 `--mainnet-readiness` and writes a one-command public-testnet certification

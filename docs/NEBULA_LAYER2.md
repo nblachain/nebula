@@ -3271,8 +3271,10 @@ real XMR.
   operator-fill-required, and explicitly not deployment evidence or custody
   approval; it avoids embedding the package manifest root to keep package roots
   acyclic. The same rooted todo can be written standalone with
-  `--write-public-capture-todo` for deployment CI that does not need the full
-  package directory.
+  `--write-public-capture-todo` and verified with
+  `--verify-public-capture-todo` for deployment CI that does not need the full
+  package directory. The verifier recomputes the current run's todo and rejects
+  stale, tampered, or cross-run work orders.
 - A local operator-only public launch readiness report export gives CI a
   standalone `nebula-public-launch-readiness-report` with the launch level,
   blocker ids, remediation commands, public status/bundle/capture-plan roots,
