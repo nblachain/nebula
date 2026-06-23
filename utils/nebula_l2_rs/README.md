@@ -564,9 +564,11 @@ It also includes a `package_handoff_capture` section that names
 `public_launch_readiness_artifact_root`, plus
 `nebula-release-approval-template.json` and
 `nebula-release-authority-registry-template.json` as the sources of the
-release-template roots; those values must be copied into the deployment capture
+release-template roots; those values and the derived
+`public_launch_package_handoff_root` must be copied into the deployment capture
 from the pre-capture package, but the plan does not embed the actual package
-manifest or readiness roots so the package manifest root stays non-circular.
+manifest, readiness, or handoff roots so the package manifest root stays
+non-circular.
 This turns the remaining public-launch blocker into a deterministic capture
 checklist without letting the local runner invent external reachability, TLS,
 or observer-signature evidence.
@@ -595,8 +597,8 @@ endpoint evidence is filled.
 `--mainnet-readiness`. It first verifies the supplied public launch package,
 then writes a non-evidence schema v5 capture scaffold with the current
 `capture_plan_root`, `capture_contract_root`,
-`deployment_preflight_checklist_root`, package file-set root, package manifest
-root, readiness artifact root, release-template roots, and matching
+`deployment_preflight_checklist_root`, package file-set root, package handoff
+root, package manifest root, readiness artifact root, release-template roots, and matching
 preflight/runbook receipt bindings already filled from the verified package and
 current release-candidate summary. The release-template roots are copied from
 the verified package's release approval and release-authority registry template
@@ -635,7 +637,8 @@ observer signature indexes, invalid observer signature-verification transcript
 indexes, sensitive key markers, public-forbidden key names, size/parseability
 checks, current capture-plan/contract/preflight root matches, expected
 capture-plan, capture-contract, and preflight roots, the expected package
-file-set root, package file-set root matches, and
+file-set root, expected package handoff root, package file-set/handoff root
+matches, and
 `structural_failed_checks`/`failed_checks` arrays with counts for CI routing,
 plus an `assembler_ready` boolean. It is diagnostic only:
 `usable_as_public_deployment_evidence` is false, so it helps deployment CI
@@ -686,8 +689,8 @@ bootstrap operator registry records, observer records, and observer/operator
 signature verification transcripts must all bind the same `deployment_run_id`
 so deployment CI cannot stitch together independently valid fragments from
 different captures. The runner binds the current run's public status manifest,
-launch bundle, package file-set root, release approval template root,
-release-authority registry template root, bootstrap profile, node set, and policy
+launch bundle, package file-set root, package handoff root, release approval
+template root, release-authority registry template root, bootstrap profile, node set, and policy
 roots, derives TLS endpoint-pin set roots and the aggregate SPKI root from
 `tls_endpoint_pins`, derives bootstrap node/operator/region roots plus public
 endpoint-set roots and the bootstrap operator count from `bootstrap_nodes`,
@@ -711,6 +714,8 @@ The verifier and public deployment report also compare the embedded
 `deployment_preflight_checklist_root` against the current generated capture plan,
 require the embedded `public_launch_package_file_set_root` to match the current
 rooted package file set, require the embedded
+`public_launch_package_handoff_root` to match both the expected package handoff
+and the roots carried in the capture, require the embedded
 `public_launch_package_manifest_root` and
 `public_launch_readiness_artifact_root` to match the pre-capture launch package
 handoff, require the embedded `release_approval_template_root` and
@@ -736,7 +741,8 @@ RPC/status/health/metrics/incident-contact/faucet/reset endpoints, and requires 
 routable P2P endpoint. It must bind the capture plan root, capture contract
 root, and deployment preflight checklist root generated for the same run.
 It also must bind the current `public_launch_package_file_set_root`,
-the pre-capture `public_launch_package_manifest_root`, the pre-capture
+the aggregate `public_launch_package_handoff_root`, the pre-capture
+`public_launch_package_manifest_root`, the pre-capture
 `public_launch_readiness_artifact_root`, the package-derived
 `release_approval_template_root`, the package-derived
 `release_authority_registry_template_root`,
@@ -745,8 +751,8 @@ the pre-capture `public_launch_package_manifest_root`, the pre-capture
 `deployment_preflight_phase_count`, proving every required preflight phase was
 completed in order before the public deployment evidence was assembled.
 When either package handoff or release-template root is stale, the deployment
-report exposes the expected package file-set, package manifest, readiness
-artifact, release approval template, and release-authority registry roots
+report exposes the expected package file-set, package handoff, package manifest,
+readiness artifact, release approval template, and release-authority registry roots
 alongside the failed subchecks so the capture can be repaired from the
 pre-capture package files.
 It must also bind `public_deployment_runbook_receipt`,

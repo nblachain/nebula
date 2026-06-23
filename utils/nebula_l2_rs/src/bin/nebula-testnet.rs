@@ -198,6 +198,7 @@ const REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS: &[&str] = &[
     "capture_contract_root",
     "deployment_preflight_checklist_root",
     "public_launch_package_file_set_root",
+    "public_launch_package_handoff_root",
     "public_launch_package_manifest_root",
     "public_launch_readiness_artifact_root",
     "release_approval_template_root",
@@ -1070,6 +1071,7 @@ struct PublicDeploymentEvidence {
     public_deployment_runbook_step_receipt_count: u64,
     public_launch_bundle_root: String,
     public_launch_package_file_set_root: String,
+    public_launch_package_handoff_root: String,
     public_launch_package_manifest_root: String,
     public_launch_readiness_artifact_root: String,
     release_approval_template_root: String,
@@ -10339,6 +10341,24 @@ fn public_launch_package_file_set_root(manifest_id: &str, testnet_id: &str) -> S
     )
 }
 
+fn public_launch_package_handoff_root_from_roots(
+    public_launch_package_file_set_root: &str,
+    public_launch_package_manifest_root: &str,
+    public_launch_readiness_artifact_root: &str,
+    release_approval_template_root: &str,
+    release_authority_registry_template_root: &str,
+) -> String {
+    root(&[
+        "public-launch-package-handoff",
+        CHAIN_ID,
+        public_launch_package_file_set_root,
+        public_launch_package_manifest_root,
+        public_launch_readiness_artifact_root,
+        release_approval_template_root,
+        release_authority_registry_template_root,
+    ])
+}
+
 fn public_launch_readiness_artifact_root_for_summary(summary: &TestnetSummary) -> String {
     let handoff_summary = public_launch_precapture_handoff_summary(summary);
     let readiness_report = public_launch_readiness_report_artifact(&handoff_summary);
@@ -10672,6 +10692,13 @@ fn public_deployment_capture_scaffold(
         "release-authority-registry-template",
         release_authority_registry_template,
     );
+    let public_launch_package_handoff_root = public_launch_package_handoff_root_from_roots(
+        &public_launch_package_file_set_root,
+        &public_launch_package_manifest_root,
+        &public_launch_readiness_artifact_root,
+        &release_approval_template_root,
+        &release_authority_registry_template_root,
+    );
     let public_status = public_status_manifest(summary);
     let public_launch_bundle = public_launch_bundle(summary);
     let deployment_runbook = public_deployment_runbook(summary);
@@ -10686,6 +10713,7 @@ fn public_deployment_capture_scaffold(
     scaffold["capture_contract_root"] = json!(capture_contract_root);
     scaffold["deployment_preflight_checklist_root"] = json!(deployment_preflight_checklist_root);
     scaffold["public_launch_package_file_set_root"] = json!(public_launch_package_file_set_root);
+    scaffold["public_launch_package_handoff_root"] = json!(public_launch_package_handoff_root);
     scaffold["public_launch_package_manifest_root"] = json!(public_launch_package_manifest_root);
     scaffold["public_launch_readiness_artifact_root"] =
         json!(public_launch_readiness_artifact_root);
@@ -10883,6 +10911,8 @@ fn public_deployment_capture_audit(
         runbook_receipt_fields_valid,
         public_launch_package_file_set_root_matches,
         expected_public_launch_package_file_set_root,
+        public_launch_package_handoff_root_matches,
+        expected_public_launch_package_handoff_root,
         public_launch_package_manifest_root_matches,
         expected_public_launch_package_manifest_root,
         public_launch_readiness_artifact_root_matches,
@@ -11064,6 +11094,37 @@ fn public_deployment_capture_audit(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
+            let expected_package_handoff_root = public_launch_package_handoff_root_from_roots(
+                &expected_package_file_set_root,
+                &expected_package_manifest_root,
+                &expected_readiness_artifact_root,
+                &expected_release_approval_template_root,
+                &expected_release_authority_registry_template_root,
+            );
+            let observed_package_handoff_root = match (
+                value
+                    .get("public_launch_package_file_set_root")
+                    .and_then(Value::as_str),
+                value
+                    .get("public_launch_package_manifest_root")
+                    .and_then(Value::as_str),
+                value
+                    .get("public_launch_readiness_artifact_root")
+                    .and_then(Value::as_str),
+                value
+                    .get("release_approval_template_root")
+                    .and_then(Value::as_str),
+                value
+                    .get("release_authority_registry_template_root")
+                    .and_then(Value::as_str),
+            ) {
+                (Some(file_set), Some(manifest), Some(readiness), Some(approval), Some(authority)) => {
+                    public_launch_package_handoff_root_from_roots(
+                        file_set, manifest, readiness, approval, authority,
+                    )
+                }
+                _ => String::new(),
+            };
             let receipt_root_values_match = |field: &str, expected_root: &str| {
                 [
                     "deployment_preflight_receipt",
@@ -11197,6 +11258,15 @@ fn public_deployment_capture_audit(
                     .and_then(Value::as_str)
                     == Some(expected_package_file_set_root.as_str()),
                 expected_package_file_set_root,
+                value
+                    .get("public_launch_package_handoff_root")
+                    .and_then(Value::as_str)
+                    == Some(expected_package_handoff_root.as_str())
+                    && value
+                        .get("public_launch_package_handoff_root")
+                        .and_then(Value::as_str)
+                        == Some(observed_package_handoff_root.as_str()),
+                expected_package_handoff_root,
                 value
                     .get("public_launch_package_manifest_root")
                     .and_then(Value::as_str)
@@ -11334,6 +11404,20 @@ fn public_deployment_capture_audit(
             false,
             public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id),
             false,
+            public_launch_package_handoff_root_from_roots(
+                &public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id),
+                &public_launch_package_manifest_root_for_summary(summary),
+                &public_launch_readiness_artifact_root_for_summary(summary),
+                public_deployment_capture_plan(summary)
+                    .get("release_approval_template_root")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                public_deployment_capture_plan(summary)
+                    .get("release_authority_registry_template_root")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            ),
+            false,
             public_launch_package_manifest_root_for_summary(summary),
             false,
             public_launch_readiness_artifact_root_for_summary(summary),
@@ -11396,6 +11480,7 @@ fn public_deployment_capture_audit(
         && preflight_receipt_fields_valid
         && runbook_receipt_fields_valid
         && public_launch_package_file_set_root_matches
+        && public_launch_package_handoff_root_matches
         && public_launch_package_manifest_root_matches
         && public_launch_readiness_artifact_root_matches
         && release_approval_template_root_matches
@@ -11524,6 +11609,9 @@ fn public_deployment_capture_audit(
     if !public_launch_package_file_set_root_matches {
         structural_failed_checks.push("public_launch_package_file_set_root_matches".to_string());
     }
+    if !public_launch_package_handoff_root_matches {
+        structural_failed_checks.push("public_launch_package_handoff_root_matches".to_string());
+    }
     if !public_launch_package_manifest_root_matches {
         structural_failed_checks.push("public_launch_package_manifest_root_matches".to_string());
     }
@@ -11586,6 +11674,8 @@ fn public_deployment_capture_audit(
         "deployment_preflight_checklist_root_matches": deployment_preflight_checklist_root_matches,
         "expected_public_launch_package_file_set_root": expected_public_launch_package_file_set_root,
         "public_launch_package_file_set_root_matches": public_launch_package_file_set_root_matches,
+        "expected_public_launch_package_handoff_root": expected_public_launch_package_handoff_root,
+        "public_launch_package_handoff_root_matches": public_launch_package_handoff_root_matches,
         "structural_ready": structural_ready,
         "structural_failed_check_count": structural_failed_checks.len(),
         "structural_failed_checks": structural_failed_checks,
@@ -13578,6 +13668,13 @@ fn write_public_deployment_evidence_from_capture(
         .as_str()
         .unwrap_or_default()
         .to_string();
+    let public_launch_package_handoff_root = public_launch_package_handoff_root_from_roots(
+        &public_launch_package_file_set_root,
+        &public_launch_package_manifest_root,
+        &public_launch_readiness_artifact_root,
+        &release_approval_template_root,
+        &release_authority_registry_template_root,
+    );
     let expected_capture_plan_root = capture_plan["capture_plan_root"]
         .as_str()
         .unwrap_or_default()
@@ -13609,6 +13706,8 @@ fn write_public_deployment_evidence_from_capture(
         required_root(&value, "deployment_preflight_checklist_root")?;
     let capture_package_file_set_root =
         required_root(&value, "public_launch_package_file_set_root")?;
+    let capture_package_handoff_root =
+        required_root(&value, "public_launch_package_handoff_root")?;
     let capture_package_manifest_root =
         required_root(&value, "public_launch_package_manifest_root")?;
     let capture_readiness_artifact_root =
@@ -13632,6 +13731,10 @@ fn write_public_deployment_evidence_from_capture(
     ensure(
         capture_package_file_set_root == public_launch_package_file_set_root,
         "public deployment public_launch_package_file_set_root mismatch",
+    )?;
+    ensure(
+        capture_package_handoff_root == public_launch_package_handoff_root,
+        "public deployment public_launch_package_handoff_root mismatch",
     )?;
     ensure(
         capture_package_manifest_root == public_launch_package_manifest_root,
@@ -13805,6 +13908,10 @@ fn write_public_deployment_evidence_from_capture(
         map.insert(
             "public_launch_package_file_set_root".to_string(),
             json!(&public_launch_package_file_set_root),
+        );
+        map.insert(
+            "public_launch_package_handoff_root".to_string(),
+            json!(&public_launch_package_handoff_root),
         );
         map.insert(
             "public_launch_package_manifest_root".to_string(),
@@ -15675,6 +15782,7 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
         "deployment_run_id_required": true,
         "deployment_run_id_must_match_nested_records": true,
         "public_launch_package_manifest_root_required": true,
+        "public_launch_package_handoff_root_required": true,
         "public_launch_readiness_artifact_root_required": true,
         "public_launch_package_manifest_root_source_file": "nebula-public-launch-package.json",
         "public_launch_package_manifest_root_source_field": "public_launch_package_manifest_root",
@@ -15688,6 +15796,7 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
         "release_approval_template_root_source_field": "release_approval_template_root",
         "release_authority_registry_template_root_source_file": "nebula-release-authority-registry-template.json",
         "release_authority_registry_template_root_source_field": "release_authority_registry_template_root",
+        "public_launch_package_handoff_root_derivation": "root(['public-launch-package-handoff', chain_id, public_launch_package_file_set_root, public_launch_package_manifest_root, public_launch_readiness_artifact_root, release_approval_template_root, release_authority_registry_template_root])",
         "assemble_command": "--assemble-public-deployment-evidence <capture.json> --write-public-deployment-evidence <deployment.json> --mainnet-readiness",
     });
     let mut plan = json!({
@@ -19402,6 +19511,26 @@ fn ensure_public_deployment_capture_plan_redacted(value: &Value) -> Result<(), S
                 .and_then(Value::as_str),
         "public deployment package handoff file-set root mismatch",
     )?;
+    ensure(
+        capture_contract
+            .get("public_launch_package_handoff_root_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment capture contract package handoff root requirement mismatch",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_launch_package_handoff_root_derivation")
+            .and_then(Value::as_str)
+            .is_some_and(|derivation| {
+                derivation.contains("public_launch_package_file_set_root")
+                    && derivation.contains("public_launch_package_manifest_root")
+                    && derivation.contains("public_launch_readiness_artifact_root")
+                    && derivation.contains("release_approval_template_root")
+                    && derivation.contains("release_authority_registry_template_root")
+            }),
+        "public deployment capture contract package handoff root derivation mismatch",
+    )?;
     let handoff_sources = package_handoff
         .get("required_source_files")
         .and_then(Value::as_array)
@@ -21568,6 +21697,8 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
     let public_launch_bundle_root = required_root(&value, "public_launch_bundle_root")?;
     let public_launch_package_file_set_root =
         required_root(&value, "public_launch_package_file_set_root")?;
+    let public_launch_package_handoff_root =
+        required_root(&value, "public_launch_package_handoff_root")?;
     let public_launch_package_manifest_root =
         required_root(&value, "public_launch_package_manifest_root")?;
     let public_launch_readiness_artifact_root =
@@ -21575,6 +21706,17 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
     let release_approval_template_root = required_root(&value, "release_approval_template_root")?;
     let release_authority_registry_template_root =
         required_root(&value, "release_authority_registry_template_root")?;
+    ensure(
+        public_launch_package_handoff_root
+            == public_launch_package_handoff_root_from_roots(
+                &public_launch_package_file_set_root,
+                &public_launch_package_manifest_root,
+                &public_launch_readiness_artifact_root,
+                &release_approval_template_root,
+                &release_authority_registry_template_root,
+            ),
+        "public deployment evidence public_launch_package_handoff_root mismatch",
+    )?;
     let testnet_manifest_id = required_root(&value, "testnet_manifest_id")?;
     let public_status_manifest_root = required_root(&value, "public_status_manifest_root")?;
     let public_status_manifest = required_section(&value, "public_status_manifest")?.clone();
@@ -22209,6 +22351,7 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
         public_deployment_runbook_step_receipt_count,
         public_launch_bundle_root,
         public_launch_package_file_set_root,
+        public_launch_package_handoff_root,
         public_launch_package_manifest_root,
         public_launch_readiness_artifact_root,
         release_approval_template_root,
@@ -27833,6 +27976,7 @@ fn public_deployment_provenance_root_from_value(value: &Value) -> Result<String,
         &required_u64(value, "public_deployment_runbook_step_receipt_count")?.to_string(),
         required_root(value, "public_launch_bundle_root")?.as_str(),
         required_root(value, "public_launch_package_file_set_root")?.as_str(),
+        required_root(value, "public_launch_package_handoff_root")?.as_str(),
         required_root(value, "public_launch_package_manifest_root")?.as_str(),
         required_root(value, "public_launch_readiness_artifact_root")?.as_str(),
         required_root(value, "release_approval_template_root")?.as_str(),
@@ -27903,6 +28047,7 @@ fn public_deployment_attestation_root_from_value(value: &Value) -> Result<String
         &required_u64(value, "public_deployment_runbook_step_receipt_count")?.to_string(),
         required_root(value, "public_launch_bundle_root")?.as_str(),
         required_root(value, "public_launch_package_file_set_root")?.as_str(),
+        required_root(value, "public_launch_package_handoff_root")?.as_str(),
         required_root(value, "public_launch_package_manifest_root")?.as_str(),
         required_root(value, "public_launch_readiness_artifact_root")?.as_str(),
         required_root(value, "release_approval_template_root")?.as_str(),
@@ -28044,6 +28189,7 @@ fn public_deployment_provenance_root(evidence: &PublicDeploymentEvidence) -> Str
             .to_string(),
         &evidence.public_launch_bundle_root,
         &evidence.public_launch_package_file_set_root,
+        &evidence.public_launch_package_handoff_root,
         &evidence.public_launch_package_manifest_root,
         &evidence.public_launch_readiness_artifact_root,
         &evidence.release_approval_template_root,
@@ -28107,6 +28253,7 @@ fn public_deployment_attestation_root(evidence: &PublicDeploymentEvidence) -> St
             .to_string(),
         &evidence.public_launch_bundle_root,
         &evidence.public_launch_package_file_set_root,
+        &evidence.public_launch_package_handoff_root,
         &evidence.public_launch_package_manifest_root,
         &evidence.public_launch_readiness_artifact_root,
         &evidence.release_approval_template_root,
@@ -34232,6 +34379,26 @@ mod tests {
             scaffold["public_launch_package_file_set_root"],
             package_manifest["package_file_set_root"]
         );
+        let expected_package_handoff_root = public_launch_package_handoff_root_from_roots(
+            package_manifest["package_file_set_root"]
+                .as_str()
+                .expect("package file-set root"),
+            package_manifest["package_manifest_root"]
+                .as_str()
+                .expect("package manifest root"),
+            launch_report["public_launch_readiness_artifact_root"]
+                .as_str()
+                .expect("launch readiness artifact root"),
+            &value_root("release-approval-template", &release_approval_template),
+            &value_root(
+                "release-authority-registry-template",
+                &release_authority_registry_template,
+            ),
+        );
+        assert_eq!(
+            scaffold["public_launch_package_handoff_root"],
+            expected_package_handoff_root
+        );
         assert_eq!(
             scaffold["public_launch_package_manifest_root"],
             package_manifest["package_manifest_root"]
@@ -34271,6 +34438,11 @@ mod tests {
         assert_eq!(audit["capture_contract_root_matches"], true);
         assert_eq!(audit["deployment_preflight_checklist_root_matches"], true);
         assert_eq!(audit["public_launch_package_file_set_root_matches"], true);
+        assert_eq!(audit["public_launch_package_handoff_root_matches"], true);
+        assert_eq!(
+            audit["expected_public_launch_package_handoff_root"],
+            expected_package_handoff_root
+        );
         assert_eq!(audit["public_launch_package_manifest_root_matches"], true);
         assert_eq!(audit["public_launch_readiness_artifact_root_matches"], true);
         assert_eq!(audit["placeholder_present"], true);
@@ -36214,13 +36386,20 @@ mod tests {
         assert_eq!(audit["capture_contract_root_matches"], true);
         assert_eq!(audit["deployment_preflight_checklist_root_matches"], true);
         assert_eq!(audit["public_launch_package_file_set_root_matches"], false);
+        assert_eq!(audit["public_launch_package_handoff_root_matches"], false);
         assert_eq!(
             audit["structural_failed_checks"],
-            json!(["public_launch_package_file_set_root_matches"])
+            json!([
+                "public_launch_package_file_set_root_matches",
+                "public_launch_package_handoff_root_matches"
+            ])
         );
         assert_eq!(
             audit["failed_checks"],
-            json!(["public_launch_package_file_set_root_matches"])
+            json!([
+                "public_launch_package_file_set_root_matches",
+                "public_launch_package_handoff_root_matches"
+            ])
         );
         assert_eq!(
             audit["expected_public_launch_package_file_set_root"],
@@ -36229,6 +36408,11 @@ mod tests {
                 &base_summary.testnet_id
             )
         );
+        assert!(is_hex_root(
+            audit["expected_public_launch_package_handoff_root"]
+                .as_str()
+                .expect("expected package handoff root")
+        ));
         let _ = fs::remove_file(capture_path);
     }
 
@@ -36269,6 +36453,7 @@ mod tests {
             audit["public_launch_readiness_artifact_root_matches"],
             false
         );
+        assert_eq!(audit["public_launch_package_handoff_root_matches"], false);
         assert_eq!(
             audit["expected_public_launch_package_manifest_root"],
             public_launch_package_manifest_root_for_summary(&base_summary)
@@ -36291,8 +36476,26 @@ mod tests {
             expected_capture_plan["release_authority_registry_template_root"]
         );
         assert_eq!(
+            audit["expected_public_launch_package_handoff_root"],
+            public_launch_package_handoff_root_from_roots(
+                &public_launch_package_file_set_root(
+                    &base_summary.manifest_id,
+                    &base_summary.testnet_id
+                ),
+                &public_launch_package_manifest_root_for_summary(&base_summary),
+                &public_launch_readiness_artifact_root_for_summary(&base_summary),
+                expected_capture_plan["release_approval_template_root"]
+                    .as_str()
+                    .expect("release approval template root"),
+                expected_capture_plan["release_authority_registry_template_root"]
+                    .as_str()
+                    .expect("release authority registry template root"),
+            )
+        );
+        assert_eq!(
             audit["structural_failed_checks"],
             json!([
+                "public_launch_package_handoff_root_matches",
                 "public_launch_package_manifest_root_matches",
                 "public_launch_readiness_artifact_root_matches",
                 "release_approval_template_root_matches",
@@ -36302,6 +36505,7 @@ mod tests {
         assert_eq!(
             audit["failed_checks"],
             json!([
+                "public_launch_package_handoff_root_matches",
                 "public_launch_package_manifest_root_matches",
                 "public_launch_readiness_artifact_root_matches",
                 "release_approval_template_root_matches",
@@ -38756,6 +38960,24 @@ mod tests {
             "test-public-deployment",
             "wrong-release-authority-registry-template"
         ]));
+        value["public_launch_package_handoff_root"] =
+            json!(public_launch_package_handoff_root_from_roots(
+                value["public_launch_package_file_set_root"]
+                    .as_str()
+                    .expect("package file-set root"),
+                value["public_launch_package_manifest_root"]
+                    .as_str()
+                    .expect("package manifest root"),
+                value["public_launch_readiness_artifact_root"]
+                    .as_str()
+                    .expect("readiness artifact root"),
+                value["release_approval_template_root"]
+                    .as_str()
+                    .expect("release approval template root"),
+                value["release_authority_registry_template_root"]
+                    .as_str()
+                    .expect("release authority registry template root"),
+            ));
         value["provenance_root"] =
             json!(public_deployment_provenance_root_from_value(&value).expect("provenance root"));
         value["evidence_root"] =
@@ -38885,6 +39107,24 @@ mod tests {
                 .expect("deployment evidence json");
         value["public_launch_package_file_set_root"] =
             json!(root(&["test-public-deployment", "wrong-package-file-set"]));
+        value["public_launch_package_handoff_root"] =
+            json!(public_launch_package_handoff_root_from_roots(
+                value["public_launch_package_file_set_root"]
+                    .as_str()
+                    .expect("package file-set root"),
+                value["public_launch_package_manifest_root"]
+                    .as_str()
+                    .expect("package manifest root"),
+                value["public_launch_readiness_artifact_root"]
+                    .as_str()
+                    .expect("readiness artifact root"),
+                value["release_approval_template_root"]
+                    .as_str()
+                    .expect("release approval template root"),
+                value["release_authority_registry_template_root"]
+                    .as_str()
+                    .expect("release authority registry template root"),
+            ));
         value["provenance_root"] =
             json!(public_deployment_provenance_root_from_value(&value).expect("provenance root"));
         value["evidence_root"] =
@@ -41670,6 +41910,13 @@ mod tests {
             .and_then(Value::as_str)
             .expect("release authority registry template root")
             .to_string();
+        let public_launch_package_handoff_root = public_launch_package_handoff_root_from_roots(
+            &public_launch_package_file_set_root,
+            &public_launch_package_manifest_root,
+            &public_launch_readiness_artifact_root,
+            &release_approval_template_root,
+            &release_authority_registry_template_root,
+        );
         let deployment_runbook = public_deployment_runbook(summary);
         let public_deployment_runbook_root = deployment_runbook["public_deployment_runbook_root"]
             .as_str()
@@ -42425,6 +42672,7 @@ mod tests {
                     .public_deployment_runbook_step_receipt_count,
             public_launch_bundle_root,
             public_launch_package_file_set_root,
+            public_launch_package_handoff_root,
             public_launch_package_manifest_root,
             public_launch_readiness_artifact_root,
             release_approval_template_root,

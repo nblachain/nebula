@@ -3366,10 +3366,12 @@ real XMR.
   and `public_launch_readiness_artifact_root` from
   `nebula-public-launch-readiness-report.json`, plus the release-template roots
   from `nebula-release-approval-template.json` and
-  `nebula-release-authority-registry-template.json`, into the deployment capture. The
-  plan names those required source files and capture fields without embedding
-  the actual package manifest/readiness roots, avoiding a circular package
-  manifest root while keeping the operator handoff aligned with the same status,
+  `nebula-release-authority-registry-template.json`, into the deployment capture.
+  The plan requires, but does not embed, `public_launch_package_handoff_root` so
+  the filled capture can later bind the package file-set, manifest, readiness,
+  and release-template roots with one aggregate checksum without creating a
+  circular package manifest root. The plan names those required source files and
+  capture fields while keeping the operator handoff aligned with the same status,
   bootstrap, launch, package, and evidence-template roots. It also requires a completed
   `deployment_preflight_receipt` covering every required preflight phase in
   order plus a completed `public_deployment_runbook_receipt` covering every
@@ -3381,8 +3383,8 @@ real XMR.
 - A package-bound capture scaffold export lets deployment CI start from a
   verified `nebula-public-launch-package` directory and write a schema v5
   capture worksheet with the current capture-plan root, capture-contract root,
-  deployment preflight checklist root, package file-set root, package manifest
-  root, readiness artifact root, release-template roots, and matching
+  deployment preflight checklist root, package file-set root, package handoff
+  root, package manifest root, readiness artifact root, release-template roots, and matching
   preflight/runbook receipt bindings already filled. The release-template roots
   are copied from the verified package's release approval and release-authority
   registry template files. The scaffold is still marked operator-fill-required
@@ -3397,8 +3399,9 @@ real XMR.
   capture-plan, and freshness transcripts into the runner and receive a rooted schema v5
   attestation. The
   assembler binds the current run's public status manifest, launch bundle,
-  package file-set root, bootstrap profile, launch artifact manifest roots,
-  release approval template root, release-authority registry template root,
+  package file-set root, package handoff root, bootstrap profile,
+  launch artifact manifest roots, release approval template root,
+  release-authority registry template root,
   capture plan, preflight checklist, completed preflight
   receipt, completed runbook receipt, node set, and policy roots, derives
   preflight phase-set and receipt roots, derives runbook step-receipt-set and
@@ -3432,6 +3435,8 @@ real XMR.
   plan, exposes individual root-binding booleans plus expected repair roots,
   requires the embedded `public_launch_package_file_set_root` to match
   the current rooted package file set, requires the embedded
+  `public_launch_package_handoff_root` to match both the expected package
+  handoff and the roots carried in the capture, requires the embedded
   `public_launch_package_manifest_root` and
   `public_launch_readiness_artifact_root` to match the pre-capture launch
   package handoff, requires the embedded `release_approval_template_root`
