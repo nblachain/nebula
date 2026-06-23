@@ -1186,6 +1186,7 @@ struct PublicDeploymentReport {
     mainnet_custody_disabled: bool,
     public_launch_bundle_root: Option<String>,
     public_launch_package_file_set_root: Option<String>,
+    expected_public_launch_package_file_set_root: Option<String>,
     public_launch_package_manifest_root: Option<String>,
     expected_public_launch_package_manifest_root: Option<String>,
     public_launch_readiness_artifact_root: Option<String>,
@@ -5940,6 +5941,9 @@ impl Testnet {
             public_launch_package_file_set_root: Some(
                 evidence.public_launch_package_file_set_root.clone(),
             ),
+            expected_public_launch_package_file_set_root: Some(
+                expected_public_launch_package_file_set_root,
+            ),
             public_launch_package_manifest_root: Some(
                 evidence.public_launch_package_manifest_root.clone(),
             ),
@@ -7007,6 +7011,7 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         mainnet_custody_disabled: false,
         public_launch_bundle_root: None,
         public_launch_package_file_set_root: None,
+        expected_public_launch_package_file_set_root: None,
         public_launch_package_manifest_root: None,
         expected_public_launch_package_manifest_root: None,
         public_launch_readiness_artifact_root: None,
@@ -28947,6 +28952,21 @@ mod tests {
         assert!(is_hex_root(
             summary
                 .public_deployment
+                .expected_public_launch_package_file_set_root
+                .as_deref()
+                .expect("expected package file-set root")
+        ));
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_package_file_set_root
+                .as_deref()
+                .expect("expected package file-set root"),
+            public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id)
+        );
+        assert!(is_hex_root(
+            summary
+                .public_deployment
                 .expected_public_launch_package_manifest_root
                 .as_deref()
                 .expect("expected package manifest root")
@@ -32175,6 +32195,14 @@ mod tests {
         let summary = base_testnet.summary(Vec::new());
         assert!(!summary.public_deployment.passed);
         assert!(!summary.public_deployment.public_launch_package_file_set_root_bound);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_package_file_set_root
+                .as_deref()
+                .expect("expected package file-set root"),
+            public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id)
+        );
         assert_eq!(
             summary.public_launch_readiness.blocking_gaps,
             vec!["public-launch-deployment-attestation"]

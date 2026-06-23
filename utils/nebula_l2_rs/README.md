@@ -613,8 +613,9 @@ the pre-capture `public_launch_package_manifest_root`, the pre-capture
 `deployment_preflight_phase_count`, proving every required preflight phase was
 completed in order before the public deployment evidence was assembled.
 When either package handoff root is stale, the deployment report exposes the
-expected package manifest and readiness artifact roots alongside the failed
-subchecks so the capture can be repaired from the pre-capture package files.
+expected package file-set, package manifest, and readiness artifact roots
+alongside the failed subchecks so the capture can be repaired from the
+pre-capture package files.
 It must also bind `public_deployment_runbook_receipt`,
 `public_deployment_runbook_receipt_root`,
 `public_deployment_runbook_step_receipt_set_root`, and
