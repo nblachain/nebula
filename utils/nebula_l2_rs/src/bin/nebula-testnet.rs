@@ -9762,6 +9762,19 @@ fn public_testnet_certification_artifact(
     )?;
     let public_launch_readiness_artifact_root =
         required_root(launch_report, "public_launch_readiness_artifact_root")?;
+    let readiness_public_deployment_evidence_root = required_str(
+        launch_report,
+        "public_deployment_evidence_root",
+    )?
+    .to_string();
+    let public_deployment_evidence_root = summary
+        .public_deployment
+        .evidence_root
+        .as_deref()
+        .unwrap_or("missing-public-deployment-evidence")
+        .to_string();
+    let public_deployment_evidence_root_bound_to_report =
+        public_deployment_evidence_root == readiness_public_deployment_evidence_root;
     let release_approval_template = release_approval_template_for_summary(summary);
     let release_approval_template_root =
         value_root("release-approval-template", &release_approval_template);
@@ -9795,6 +9808,9 @@ fn public_testnet_certification_artifact(
         "public_launch_ready": summary.public_launch_readiness.public_launch_ready,
         "public_launch_level": &summary.public_launch_readiness.level,
         "public_deployment_attestation_available": summary.public_deployment.passed,
+        "public_deployment_evidence_root": public_deployment_evidence_root,
+        "readiness_public_deployment_evidence_root": readiness_public_deployment_evidence_root,
+        "public_deployment_evidence_root_bound_to_report": public_deployment_evidence_root_bound_to_report,
         "blocking_gap_count": summary.public_launch_readiness.blocking_gaps.len(),
         "blocking_gaps": &summary.public_launch_readiness.blocking_gaps,
         "remediation_count": summary.public_launch_readiness.remediations.len(),
@@ -32351,6 +32367,18 @@ mod tests {
             certification["public_deployment_attestation_available"],
             summary.public_deployment.passed
         );
+        assert_eq!(
+            certification["public_deployment_evidence_root"],
+            "missing-public-deployment-evidence"
+        );
+        assert_eq!(
+            certification["readiness_public_deployment_evidence_root"],
+            "missing-public-deployment-evidence"
+        );
+        assert_eq!(
+            certification["public_deployment_evidence_root_bound_to_report"],
+            true
+        );
         assert_eq!(certification["package_verified"], true);
         assert_eq!(certification["external_capture_required"], true);
         assert_eq!(
@@ -39717,6 +39745,49 @@ mod tests {
             .iter()
             .any(|check| check.id == "public-launch-deployment-attestation"
                 && check.status == "pass"));
+        let launch_report = public_launch_readiness_report_artifact(&summary);
+        let counter = TEST_FILE_COUNTER.fetch_add(1, AtomicOrdering::SeqCst);
+        let package_dir = env::temp_dir().join(format!(
+            "nebula-ready-public-testnet-package-{}",
+            root(&["ready-public-testnet-package", &counter.to_string()])
+        ));
+        let package_dir_string = package_dir.to_string_lossy().into_owned();
+        write_public_launch_package(&package_dir_string, &summary)
+            .expect("write ready public launch package");
+        verify_public_launch_package(&package_dir_string, &summary)
+            .expect("ready public launch package verifies");
+        let package_manifest: Value = serde_json::from_slice(
+            &fs::read(package_dir.join("nebula-public-launch-package.json"))
+                .expect("read ready package manifest"),
+        )
+        .expect("ready package manifest json");
+        let certification =
+            public_testnet_certification_artifact(&summary, &package_manifest, &launch_report)
+                .expect("ready public testnet certification");
+        let evidence_root = summary
+            .public_deployment
+            .evidence_root
+            .as_deref()
+            .expect("public deployment evidence root");
+        assert_eq!(
+            certification["public_deployment_evidence_root"],
+            evidence_root
+        );
+        assert_eq!(
+            certification["readiness_public_deployment_evidence_root"],
+            evidence_root
+        );
+        assert_eq!(
+            certification["public_deployment_evidence_root_bound_to_report"],
+            true
+        );
+        assert_eq!(certification["public_launch_ready"], true);
+        assert_eq!(
+            certification["public_deployment_attestation_available"],
+            true
+        );
+        assert_eq!(certification["external_capture_required"], false);
+        let _ = fs::remove_dir_all(package_dir);
         let _ = fs::remove_file(evidence_path);
     }
 
