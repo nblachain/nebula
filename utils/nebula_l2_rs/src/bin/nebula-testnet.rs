@@ -1226,8 +1226,12 @@ struct PublicDeploymentReport {
     deployment_preflight_phase_set_root: Option<String>,
     deployment_preflight_phase_count: u64,
     runbook_receipt_bound: bool,
+    public_deployment_runbook_root_bound: bool,
+    public_deployment_runbook_step_set_root_bound: bool,
     public_deployment_runbook_root: Option<String>,
+    expected_public_deployment_runbook_root: Option<String>,
     public_deployment_runbook_step_set_root: Option<String>,
+    expected_public_deployment_runbook_step_set_root: Option<String>,
     public_deployment_runbook_receipt_root: Option<String>,
     public_deployment_runbook_step_receipt_set_root: Option<String>,
     public_deployment_runbook_step_receipt_count: u64,
@@ -5631,10 +5635,14 @@ impl Testnet {
                 .get("phase_count")
                 .and_then(Value::as_u64)
                 == Some(evidence.deployment_preflight_phase_count);
+        let public_deployment_runbook_root_bound =
+            evidence.public_deployment_runbook_root == expected_deployment_runbook_root;
+        let public_deployment_runbook_step_set_root_bound =
+            evidence.public_deployment_runbook_step_set_root
+                == expected_deployment_runbook_step_set_root;
         let runbook_receipt_bound =
-            evidence.public_deployment_runbook_root == expected_deployment_runbook_root
-                && evidence.public_deployment_runbook_step_set_root
-                    == expected_deployment_runbook_step_set_root
+            public_deployment_runbook_root_bound
+                && public_deployment_runbook_step_set_root_bound
                 && is_hex_root(&evidence.public_deployment_runbook_receipt_root)
                 && is_hex_root(&evidence.public_deployment_runbook_step_receipt_set_root)
                 && evidence.public_deployment_runbook_step_receipt_count
@@ -5842,6 +5850,8 @@ impl Testnet {
             &evidence.deployment_preflight_phase_count.to_string(),
             &evidence.public_deployment_runbook_root,
             &expected_deployment_runbook_root,
+            &evidence.public_deployment_runbook_step_set_root,
+            &expected_deployment_runbook_step_set_root,
             &evidence.public_deployment_runbook_receipt_root,
             &evidence.public_deployment_runbook_step_receipt_set_root,
             &evidence
@@ -6012,9 +6022,15 @@ impl Testnet {
             ),
             deployment_preflight_phase_count: evidence.deployment_preflight_phase_count,
             runbook_receipt_bound,
+            public_deployment_runbook_root_bound,
+            public_deployment_runbook_step_set_root_bound,
             public_deployment_runbook_root: Some(evidence.public_deployment_runbook_root.clone()),
+            expected_public_deployment_runbook_root: Some(expected_deployment_runbook_root),
             public_deployment_runbook_step_set_root: Some(
                 evidence.public_deployment_runbook_step_set_root.clone(),
+            ),
+            expected_public_deployment_runbook_step_set_root: Some(
+                expected_deployment_runbook_step_set_root,
             ),
             public_deployment_runbook_receipt_root: Some(
                 evidence.public_deployment_runbook_receipt_root.clone(),
@@ -7052,8 +7068,12 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         deployment_preflight_phase_set_root: None,
         deployment_preflight_phase_count: 0,
         runbook_receipt_bound: false,
+        public_deployment_runbook_root_bound: false,
+        public_deployment_runbook_step_set_root_bound: false,
         public_deployment_runbook_root: None,
+        expected_public_deployment_runbook_root: None,
         public_deployment_runbook_step_set_root: None,
+        expected_public_deployment_runbook_step_set_root: None,
         public_deployment_runbook_receipt_root: None,
         public_deployment_runbook_step_receipt_set_root: None,
         public_deployment_runbook_step_receipt_count: 0,
@@ -7443,6 +7463,16 @@ fn public_deployment_repair_roots(
             "public_status_manifest_root_bound",
             report.expected_public_status_manifest_root.as_deref(),
         ),
+        (
+            "public_deployment_runbook_root_bound",
+            report.expected_public_deployment_runbook_root.as_deref(),
+        ),
+        (
+            "public_deployment_runbook_step_set_root_bound",
+            report
+                .expected_public_deployment_runbook_step_set_root
+                .as_deref(),
+        ),
     ];
     for (subcheck, expected_root) in candidates {
         if failed.contains(subcheck) {
@@ -7676,6 +7706,14 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
         ("mainnet_custody_disabled", report.mainnet_custody_disabled),
         ("preflight_receipt_bound", report.preflight_receipt_bound),
         ("runbook_receipt_bound", report.runbook_receipt_bound),
+        (
+            "public_deployment_runbook_root_bound",
+            report.public_deployment_runbook_root_bound,
+        ),
+        (
+            "public_deployment_runbook_step_set_root_bound",
+            report.public_deployment_runbook_step_set_root_bound,
+        ),
     ] {
         if !passed {
             failed.push(id.to_string());
@@ -29031,6 +29069,33 @@ mod tests {
         );
         assert!(summary.public_deployment.preflight_receipt_bound);
         assert!(summary.public_deployment.runbook_receipt_bound);
+        assert!(summary
+            .public_deployment
+            .public_deployment_runbook_root_bound);
+        assert!(summary
+            .public_deployment
+            .public_deployment_runbook_step_set_root_bound);
+        let expected_runbook = public_deployment_runbook(&summary);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_deployment_runbook_root
+                .as_deref()
+                .expect("expected deployment runbook root"),
+            expected_runbook["public_deployment_runbook_root"]
+                .as_str()
+                .expect("expected runbook root")
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_deployment_runbook_step_set_root
+                .as_deref()
+                .expect("expected deployment runbook step-set root"),
+            expected_runbook["step_set_root"]
+                .as_str()
+                .expect("expected runbook step-set root")
+        );
         assert!(is_hex_root(
             summary
                 .public_deployment
@@ -32355,6 +32420,89 @@ mod tests {
                 .as_deref()
         );
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_exposes_expected_runbook_roots() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path = write_public_deployment_evidence(&valid_public_deployment_evidence(
+            &base_summary,
+        ));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let _ = fs::remove_file(path);
+        evidence.public_deployment_runbook_root =
+            root(&["test-public-deployment", "wrong-runbook-root"]);
+        evidence.public_deployment_runbook_receipt["public_deployment_runbook_root"] =
+            json!(&evidence.public_deployment_runbook_root);
+        refresh_public_deployment_runbook_receipt_fields(&mut evidence);
+        evidence.provenance_root = public_deployment_provenance_root(&evidence);
+        evidence.evidence_root = public_deployment_attestation_root(&evidence);
+        let wrong_path =
+            write_public_deployment_evidence(&public_deployment_evidence_json(&evidence));
+        let loaded = load_public_deployment_evidence(&wrong_path)
+            .expect("self-consistent wrong runbook root evidence loads");
+        base_testnet.cli.public_deployment_evidence = Some(loaded);
+        let summary = base_testnet.summary(Vec::new());
+        let expected_runbook = public_deployment_runbook(&summary);
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.runbook_receipt_bound);
+        assert!(!summary
+            .public_deployment
+            .public_deployment_runbook_root_bound);
+        assert!(summary
+            .public_deployment
+            .public_deployment_runbook_step_set_root_bound);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_deployment_runbook_root
+                .as_deref()
+                .expect("expected deployment runbook root"),
+            expected_runbook["public_deployment_runbook_root"]
+                .as_str()
+                .expect("expected runbook root")
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_deployment_runbook_step_set_root
+                .as_deref()
+                .expect("expected deployment runbook step-set root"),
+            expected_runbook["step_set_root"]
+                .as_str()
+                .expect("expected runbook step-set root")
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"runbook_receipt_bound".to_string()));
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"public_deployment_runbook_root_bound".to_string()));
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("public_deployment_runbook_root_bound")
+                .map(String::as_str),
+            summary
+                .public_deployment
+                .expected_public_deployment_runbook_root
+                .as_deref()
+        );
+        assert!(!remediation
+            .repair_roots
+            .contains_key("public_deployment_runbook_step_set_root_bound"));
+        let _ = fs::remove_file(wrong_path);
     }
 
     #[test]
