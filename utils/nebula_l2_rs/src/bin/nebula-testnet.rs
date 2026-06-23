@@ -9169,6 +9169,33 @@ fn public_deployment_capture_command_sequence_root(sequence: &Value) -> String {
     )
 }
 
+fn ensure_public_deployment_capture_command_sequence(
+    value: &Value,
+    artifact_label: &str,
+    require_command_map: bool,
+) -> Result<(), String> {
+    if require_command_map {
+        ensure(
+            value.get("commands") == Some(&public_deployment_capture_commands()),
+            &format!("{artifact_label} command map mismatch"),
+        )?;
+    }
+    let expected_sequence = public_deployment_capture_command_sequence();
+    ensure(
+        value.get("command_sequence") == Some(&expected_sequence),
+        &format!("{artifact_label} command sequence mismatch"),
+    )?;
+    let expected_sequence_root =
+        public_deployment_capture_command_sequence_root(&expected_sequence);
+    ensure(
+        value
+            .get("command_sequence_root")
+            .and_then(Value::as_str)
+            == Some(expected_sequence_root.as_str()),
+        &format!("{artifact_label} command sequence root mismatch"),
+    )
+}
+
 fn public_capture_todo_artifact(summary: &TestnetSummary) -> Value {
     let capture_plan = public_deployment_capture_plan(summary);
     let readiness_report = public_launch_readiness_report_artifact(summary);
@@ -9318,6 +9345,7 @@ fn ensure_public_capture_todo_artifact(value: &Value) -> Result<(), String> {
         value.get("custody_mode").and_then(Value::as_str) == Some("no-mainnet-custody"),
         "public capture todo custody_mode mismatch",
     )?;
+    ensure_public_deployment_capture_command_sequence(value, "public capture todo", true)?;
     for (field, expected_len) in [
         (
             "required_capture_fields",
@@ -9583,6 +9611,11 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
         required_str(&manifest, "custody_mode")? == "no-mainnet-custody",
         "public launch package custody_mode mismatch",
     )?;
+    ensure_public_deployment_capture_command_sequence(
+        &manifest,
+        "public launch package",
+        false,
+    )?;
     ensure(
         required_str(&manifest, "public_launch_level")? == summary.public_launch_readiness.level,
         "public launch package launch level mismatch",
@@ -9829,6 +9862,11 @@ fn verify_public_testnet_certification(path: &str, summary: &TestnetSummary) -> 
     ensure(
         actual_certification["kind"] == "nebula-public-testnet-certification",
         "public testnet certification has the wrong kind",
+    )?;
+    ensure_public_deployment_capture_command_sequence(
+        &actual_certification,
+        "public testnet certification",
+        false,
     )?;
     let actual_certification_root =
         required_root(&actual_certification, "certification_root")?.to_string();
@@ -32109,6 +32147,11 @@ mod tests {
         let error = ensure_public_capture_todo_artifact(&tampered)
             .expect_err("tampered capture todo should fail");
         assert!(error.contains("required_capture_fields"));
+        let mut command_tampered = value.clone();
+        command_tampered["commands"]["verify_public_launch"] = json!("tampered-command");
+        let error = ensure_public_capture_todo_artifact(&command_tampered)
+            .expect_err("command-tampered capture todo should fail");
+        assert!(error.contains("command map mismatch"));
         let _ = fs::remove_file(path);
     }
 
@@ -32472,6 +32515,16 @@ mod tests {
         );
         verify_public_launch_package(&package_dir_string, &summary)
             .expect("package should verify against its source run");
+        let mut tampered_manifest = manifest.clone();
+        tampered_manifest["command_sequence"][0]["command_key"] = json!("verify_capture");
+        fs::write(
+            &package_manifest_path,
+            serde_json::to_string_pretty(&tampered_manifest).expect("tampered manifest json"),
+        )
+        .expect("write command-sequence tampered package manifest");
+        let error = verify_public_launch_package(&package_dir_string, &summary)
+            .expect_err("command-sequence tampered package should fail");
+        assert!(error.contains("command sequence mismatch"));
         let _ = fs::remove_dir_all(package_dir);
     }
 
@@ -32735,6 +32788,26 @@ mod tests {
         let error = verify_public_testnet_certification(&cert_dir_string, &summary)
             .expect_err("tampered package-bound release root should fail verification");
         assert!(error.contains("public testnet certification does not match this run"));
+
+        write_public_testnet_certification(&cert_dir_string, &summary)
+            .expect("rewrite public testnet certification");
+        let mut certification: Value =
+            serde_json::from_slice(&fs::read(&certification_path).expect("read certification"))
+                .expect("certification json");
+        certification["command_sequence"][4]["command_key"] = json!("assemble_public_deployment");
+        if let Some(object) = certification.as_object_mut() {
+            object.remove("certification_root");
+        }
+        let certification_root = value_root("public-testnet-certification", &certification);
+        certification["certification_root"] = json!(certification_root);
+        fs::write(
+            &certification_path,
+            serde_json::to_string_pretty(&certification).expect("certification json"),
+        )
+        .expect("write command-sequence tampered certification");
+        let error = verify_public_testnet_certification(&cert_dir_string, &summary)
+            .expect_err("command-sequence tampered certification should fail verification");
+        assert!(error.contains("command sequence mismatch"));
 
         write_public_testnet_certification(&cert_dir_string, &summary)
             .expect("rewrite public testnet certification");
