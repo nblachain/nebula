@@ -464,6 +464,13 @@ will enforce. The plan publishes both `capture_contract_root` and
 deployment attestation must carry those roots, proving it followed the exact
 rooted work order for this run. The capture-plan guard recomputes the preflight
 checklist, capture contract, and plan roots before export/package verification.
+It also includes a `package_handoff_capture` section that names
+`nebula-public-launch-package.json` as the source of
+`public_launch_package_manifest_root` and
+`nebula-public-launch-readiness-report.json` as the source of
+`public_launch_readiness_artifact_root`; those values must be copied into the
+deployment capture from the pre-capture package, but the plan does not embed
+the actual roots so the package manifest root stays non-circular.
 This turns the remaining public-launch blocker into a deterministic capture
 checklist without letting the local runner invent external reachability, TLS,
 or observer-signature evidence.

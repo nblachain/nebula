@@ -13295,6 +13295,28 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
         "public_deployment_runbook_step_set_root": public_deployment_runbook_step_set_root,
         "public_deployment_evidence_template_root": evidence_template_root,
         "deployment_preflight": deployment_preflight,
+        "package_handoff_capture": {
+            "kind": "nebula-public-launch-package-handoff-capture",
+            "operator_fill_required": true,
+            "actual_roots_embedded": false,
+            "avoid_circular_manifest_root": true,
+            "public_launch_package_file_set_root": public_launch_package_file_set_root,
+            "required_source_files": [
+                {
+                    "artifact_id": "public-launch-package-manifest",
+                    "file_name": "nebula-public-launch-package.json",
+                    "root_field": "public_launch_package_manifest_root",
+                    "capture_field": "public_launch_package_manifest_root"
+                },
+                {
+                    "artifact_id": "public-launch-readiness-report",
+                    "file_name": "nebula-public-launch-readiness-report.json",
+                    "root_field": "public_launch_readiness_artifact_root",
+                    "capture_field": "public_launch_readiness_artifact_root"
+                }
+            ],
+            "validation_rule": "copy-package-manifest-root-and-readiness-artifact-root-from-the-pre-capture-package-before-assembling-public-deployment-evidence",
+        },
         "capture_contract": {
             "required_capture_fields": REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS,
             "required_endpoint_fields": REQUIRED_PUBLIC_DEPLOYMENT_ENDPOINT_FIELDS,
@@ -13311,6 +13333,12 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
             "freshness_window_ms": MAX_PUBLIC_DEPLOYMENT_FRESHNESS_MS,
             "deployment_run_id_required": true,
             "deployment_run_id_must_match_nested_records": true,
+            "public_launch_package_manifest_root_required": true,
+            "public_launch_readiness_artifact_root_required": true,
+            "public_launch_package_manifest_root_source_file": "nebula-public-launch-package.json",
+            "public_launch_package_manifest_root_source_field": "public_launch_package_manifest_root",
+            "public_launch_readiness_artifact_root_source_file": "nebula-public-launch-readiness-report.json",
+            "public_launch_readiness_artifact_root_source_field": "public_launch_readiness_artifact_root",
             "assemble_command": "--assemble-public-deployment-evidence <capture.json> --write-public-deployment-evidence <deployment.json> --mainnet-readiness",
         },
         "deployment_preflight_receipt_capture": {
@@ -16117,6 +16145,48 @@ fn ensure_public_deployment_capture_plan_redacted(value: &Value) -> Result<(), S
     )?;
     ensure(
         capture_contract
+            .get("public_launch_package_manifest_root_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment capture contract must require package manifest root",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_launch_readiness_artifact_root_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment capture contract must require readiness artifact root",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_launch_package_manifest_root_source_file")
+            .and_then(Value::as_str)
+            == Some("nebula-public-launch-package.json"),
+        "public deployment capture contract package manifest source file mismatch",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_launch_package_manifest_root_source_field")
+            .and_then(Value::as_str)
+            == Some("public_launch_package_manifest_root"),
+        "public deployment capture contract package manifest source field mismatch",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_launch_readiness_artifact_root_source_file")
+            .and_then(Value::as_str)
+            == Some("nebula-public-launch-readiness-report.json"),
+        "public deployment capture contract readiness source file mismatch",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_launch_readiness_artifact_root_source_field")
+            .and_then(Value::as_str)
+            == Some("public_launch_readiness_artifact_root"),
+        "public deployment capture contract readiness source field mismatch",
+    )?;
+    ensure(
+        capture_contract
             .get("required_capture_fields")
             .and_then(Value::as_array)
             .and_then(|fields| fields.iter().map(Value::as_str).collect::<Option<Vec<_>>>())
@@ -16138,6 +16208,90 @@ fn ensure_public_deployment_capture_plan_redacted(value: &Value) -> Result<(), S
             .and_then(|fields| fields.iter().map(Value::as_str).collect::<Option<Vec<_>>>())
             == Some(REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.to_vec()),
         "public deployment capture contract required_preflight_phase_ids mismatch",
+    )?;
+    let package_handoff = value
+        .get("package_handoff_capture")
+        .ok_or_else(|| "public deployment capture plan missing package_handoff_capture".to_string())?;
+    ensure(
+        package_handoff.get("kind").and_then(Value::as_str)
+            == Some("nebula-public-launch-package-handoff-capture"),
+        "public deployment package handoff capture kind mismatch",
+    )?;
+    ensure(
+        package_handoff
+            .get("operator_fill_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment package handoff capture must require operator fill",
+    )?;
+    ensure(
+        package_handoff
+            .get("actual_roots_embedded")
+            .and_then(Value::as_bool)
+            == Some(false),
+        "public deployment package handoff capture must not embed package roots",
+    )?;
+    ensure(
+        package_handoff
+            .get("avoid_circular_manifest_root")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment package handoff capture must avoid circular manifest roots",
+    )?;
+    ensure(
+        package_handoff
+            .get("public_launch_package_file_set_root")
+            .and_then(Value::as_str)
+            == value
+                .get("public_launch_package_file_set_root")
+                .and_then(Value::as_str),
+        "public deployment package handoff file-set root mismatch",
+    )?;
+    let handoff_sources = package_handoff
+        .get("required_source_files")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            "public deployment package handoff capture missing required_source_files".to_string()
+        })?;
+    ensure(
+        handoff_sources.len() == 2,
+        "public deployment package handoff capture source count mismatch",
+    )?;
+    ensure(
+        handoff_sources
+            .first()
+            .and_then(|source| source.get("file_name"))
+            .and_then(Value::as_str)
+            == Some("nebula-public-launch-package.json")
+            && handoff_sources
+                .first()
+                .and_then(|source| source.get("root_field"))
+                .and_then(Value::as_str)
+                == Some("public_launch_package_manifest_root")
+            && handoff_sources
+                .first()
+                .and_then(|source| source.get("capture_field"))
+                .and_then(Value::as_str)
+                == Some("public_launch_package_manifest_root"),
+        "public deployment package handoff manifest source mismatch",
+    )?;
+    ensure(
+        handoff_sources
+            .get(1)
+            .and_then(|source| source.get("file_name"))
+            .and_then(Value::as_str)
+            == Some("nebula-public-launch-readiness-report.json")
+            && handoff_sources
+                .get(1)
+                .and_then(|source| source.get("root_field"))
+                .and_then(Value::as_str)
+                == Some("public_launch_readiness_artifact_root")
+            && handoff_sources
+                .get(1)
+                .and_then(|source| source.get("capture_field"))
+                .and_then(Value::as_str)
+                == Some("public_launch_readiness_artifact_root"),
+        "public deployment package handoff readiness source mismatch",
     )?;
     let expected_contract_root =
         value_root("public-deployment-capture-contract", capture_contract);
@@ -28211,6 +28365,30 @@ mod tests {
             true
         );
         assert_eq!(
+            value["capture_contract"]["public_launch_package_manifest_root_required"],
+            true
+        );
+        assert_eq!(
+            value["capture_contract"]["public_launch_readiness_artifact_root_required"],
+            true
+        );
+        assert_eq!(
+            value["capture_contract"]["public_launch_package_manifest_root_source_file"],
+            "nebula-public-launch-package.json"
+        );
+        assert_eq!(
+            value["capture_contract"]["public_launch_package_manifest_root_source_field"],
+            "public_launch_package_manifest_root"
+        );
+        assert_eq!(
+            value["capture_contract"]["public_launch_readiness_artifact_root_source_file"],
+            "nebula-public-launch-readiness-report.json"
+        );
+        assert_eq!(
+            value["capture_contract"]["public_launch_readiness_artifact_root_source_field"],
+            "public_launch_readiness_artifact_root"
+        );
+        assert_eq!(
             value["capture_contract"]["public_deployment_runbook_root"],
             expected_runbook_root
         );
@@ -28252,6 +28430,50 @@ mod tests {
             value["deployment_preflight"]["source_roots"]["public_status_manifest_root"],
             value["public_status_manifest_root"]
         );
+        assert_eq!(
+            value["package_handoff_capture"]["kind"],
+            "nebula-public-launch-package-handoff-capture"
+        );
+        assert_eq!(value["package_handoff_capture"]["operator_fill_required"], true);
+        assert_eq!(value["package_handoff_capture"]["actual_roots_embedded"], false);
+        assert_eq!(
+            value["package_handoff_capture"]["avoid_circular_manifest_root"],
+            true
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["public_launch_package_file_set_root"],
+            expected_package_file_set_root
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][0]["file_name"],
+            "nebula-public-launch-package.json"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][0]["root_field"],
+            "public_launch_package_manifest_root"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][0]["capture_field"],
+            "public_launch_package_manifest_root"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][1]["file_name"],
+            "nebula-public-launch-readiness-report.json"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][1]["root_field"],
+            "public_launch_readiness_artifact_root"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][1]["capture_field"],
+            "public_launch_readiness_artifact_root"
+        );
+        assert!(value["package_handoff_capture"]
+            .get("public_launch_package_manifest_root")
+            .is_none());
+        assert!(value["package_handoff_capture"]
+            .get("public_launch_readiness_artifact_root")
+            .is_none());
         assert_eq!(
             value["deployment_preflight"]["source_roots"]["public_deployment_runbook_root"],
             expected_runbook_root

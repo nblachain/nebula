@@ -3299,9 +3299,15 @@ real XMR.
   recomputes the preflight checklist, capture contract, and plan roots before
   export or package verification. The capture contract also freezes the public
   launch artifact manifest root, artifact-set root, package file-set root,
-  typed public deployment runbook root, and step-set root, keeping the operator
-  handoff aligned with the same status, bootstrap, launch, package, and
-  evidence-template roots, and requires a completed
+  typed public deployment runbook root, and step-set root, and includes a
+  `package_handoff_capture` section that tells operators to copy
+  `public_launch_package_manifest_root` from `nebula-public-launch-package.json`
+  and `public_launch_readiness_artifact_root` from
+  `nebula-public-launch-readiness-report.json` into the deployment capture. The
+  plan names those required source files and capture fields without embedding
+  the actual package manifest/readiness roots, avoiding a circular package
+  manifest root while keeping the operator handoff aligned with the same status,
+  bootstrap, launch, package, and evidence-template roots. It also requires a completed
   `deployment_preflight_receipt` covering every required preflight phase in
   order plus a completed `public_deployment_runbook_receipt` covering every
   ordered public deployment runbook step. This keeps the remaining
