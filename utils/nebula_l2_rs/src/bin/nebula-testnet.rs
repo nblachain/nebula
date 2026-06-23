@@ -9211,6 +9211,46 @@ fn public_deployment_capture_command_sequence_root(sequence: &Value) -> String {
     )
 }
 
+fn public_launch_package_manifest_root(
+    manifest_id: &str,
+    testnet_id: &str,
+    artifact_set_root: &str,
+    package_file_set_root: &str,
+    public_launch_level: &str,
+    public_launch_ready: bool,
+    blocking_gap_count: u64,
+    remediation_count: u64,
+    public_launch_readiness_report_root: &str,
+    public_launch_readiness_artifact_root: &str,
+    no_mainnet_custody: bool,
+    next_steps_root: &str,
+    command_sequence_root: &str,
+) -> String {
+    root(&[
+        "public-launch-package-manifest",
+        CHAIN_ID,
+        manifest_id,
+        testnet_id,
+        bool_str(true),
+        bool_str(true),
+        bool_str(true),
+        bool_str(false),
+        bool_str(false),
+        "no-mainnet-custody",
+        artifact_set_root,
+        package_file_set_root,
+        public_launch_level,
+        bool_str(public_launch_ready),
+        &blocking_gap_count.to_string(),
+        &remediation_count.to_string(),
+        public_launch_readiness_report_root,
+        public_launch_readiness_artifact_root,
+        bool_str(no_mainnet_custody),
+        next_steps_root,
+        command_sequence_root,
+    ])
+}
+
 fn ensure_public_deployment_capture_next_steps(
     value: &Value,
     artifact_label: &str,
@@ -9573,23 +9613,21 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
     let command_sequence = public_deployment_capture_command_sequence();
     let command_sequence_root =
         public_deployment_capture_command_sequence_root(&command_sequence);
-    let package_manifest_root = root(&[
-        "public-launch-package-manifest",
-        CHAIN_ID,
+    let package_manifest_root = public_launch_package_manifest_root(
         &summary.manifest_id,
         &summary.testnet_id,
         &artifact_set_root,
         &package_file_set_root,
         &public_launch_level,
-        bool_str(public_launch_ready),
-        &blocking_gap_count.to_string(),
-        &remediation_count.to_string(),
+        public_launch_ready,
+        blocking_gap_count,
+        remediation_count,
         &summary.public_launch_readiness.report_root,
         &public_launch_readiness_artifact_root,
-        bool_str(summary.acceptance.no_mainnet_custody),
+        summary.acceptance.no_mainnet_custody,
         &next_steps_root,
         &command_sequence_root,
-    ]);
+    );
     let manifest = json!({
         "kind": "nebula-public-launch-package",
         "schema_version": 1,
@@ -9829,31 +9867,21 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
     let expected_command_sequence = public_deployment_capture_command_sequence();
     let expected_command_sequence_root =
         public_deployment_capture_command_sequence_root(&expected_command_sequence);
-    let expected_package_manifest_root = root(&[
-        "public-launch-package-manifest",
-        CHAIN_ID,
+    let expected_package_manifest_root = public_launch_package_manifest_root(
         &summary.manifest_id,
         &summary.testnet_id,
         &expected_artifact_set_root,
         &expected_package_file_set_root,
         &summary.public_launch_readiness.level,
-        bool_str(summary.public_launch_readiness.public_launch_ready),
-        &summary
-            .public_launch_readiness
-            .blocking_gaps
-            .len()
-            .to_string(),
-        &summary
-            .public_launch_readiness
-            .remediations
-            .len()
-            .to_string(),
+        summary.public_launch_readiness.public_launch_ready,
+        summary.public_launch_readiness.blocking_gaps.len() as u64,
+        summary.public_launch_readiness.remediations.len() as u64,
         &summary.public_launch_readiness.report_root,
         &expected_readiness_artifact_root,
-        bool_str(summary.acceptance.no_mainnet_custody),
+        summary.acceptance.no_mainnet_custody,
         &expected_next_steps_root,
         &expected_command_sequence_root,
-    ]);
+    );
     ensure(
         required_root(&manifest, "package_manifest_root")? == expected_package_manifest_root,
         "public launch package manifest root mismatch",
@@ -10309,31 +10337,21 @@ fn public_launch_package_manifest_root_for_summary(summary: &TestnetSummary) -> 
     let command_sequence = public_deployment_capture_command_sequence();
     let command_sequence_root =
         public_deployment_capture_command_sequence_root(&command_sequence);
-    root(&[
-        "public-launch-package-manifest",
-        CHAIN_ID,
+    public_launch_package_manifest_root(
         &handoff_summary.manifest_id,
         &handoff_summary.testnet_id,
         &artifact_set_root,
         &package_file_set_root,
         &handoff_summary.public_launch_readiness.level,
-        bool_str(handoff_summary.public_launch_readiness.public_launch_ready),
-        &handoff_summary
-            .public_launch_readiness
-            .blocking_gaps
-            .len()
-            .to_string(),
-        &handoff_summary
-            .public_launch_readiness
-            .remediations
-            .len()
-            .to_string(),
+        handoff_summary.public_launch_readiness.public_launch_ready,
+        handoff_summary.public_launch_readiness.blocking_gaps.len() as u64,
+        handoff_summary.public_launch_readiness.remediations.len() as u64,
         &handoff_summary.public_launch_readiness.report_root,
         &public_launch_readiness_artifact_root,
-        bool_str(handoff_summary.acceptance.no_mainnet_custody),
+        handoff_summary.acceptance.no_mainnet_custody,
         &next_steps_root,
         &command_sequence_root,
-    ])
+    )
 }
 
 fn public_launch_precapture_handoff_summary(summary: &TestnetSummary) -> TestnetSummary {
@@ -32621,6 +32639,46 @@ mod tests {
             manifest["package_manifest_root"],
             public_launch_package_manifest_root_for_summary(&summary)
         );
+        let unsafe_package_only_root = root(&[
+            "public-launch-package-manifest",
+            CHAIN_ID,
+            &summary.manifest_id,
+            &summary.testnet_id,
+            bool_str(true),
+            bool_str(false),
+            bool_str(true),
+            bool_str(false),
+            bool_str(false),
+            "no-mainnet-custody",
+            manifest["artifact_set_root"]
+                .as_str()
+                .expect("artifact set root"),
+            manifest["package_file_set_root"]
+                .as_str()
+                .expect("package file-set root"),
+            summary.public_launch_readiness.level.as_str(),
+            bool_str(summary.public_launch_readiness.public_launch_ready),
+            &summary
+                .public_launch_readiness
+                .blocking_gaps
+                .len()
+                .to_string(),
+            &summary
+                .public_launch_readiness
+                .remediations
+                .len()
+                .to_string(),
+            &summary.public_launch_readiness.report_root,
+            manifest["public_launch_readiness_artifact_root"]
+                .as_str()
+                .expect("readiness artifact root"),
+            bool_str(summary.acceptance.no_mainnet_custody),
+            manifest["next_steps_root"].as_str().expect("next steps root"),
+            manifest["command_sequence_root"]
+                .as_str()
+                .expect("command sequence root"),
+        ]);
+        assert_ne!(manifest["package_manifest_root"], unsafe_package_only_root);
         assert_eq!(
             readiness_report["kind"],
             "nebula-public-launch-readiness-report"
