@@ -9081,6 +9081,27 @@ fn public_deployment_capture_commands() -> Value {
     })
 }
 
+fn public_deployment_capture_next_steps(
+    capture_instructions: &str,
+    include_release_authority_handoff: bool,
+) -> Value {
+    let commands = public_deployment_capture_commands();
+    let mut steps = json!({
+        "capture_public_deployment": capture_instructions,
+        "audit_capture": commands["audit_capture"].clone(),
+        "verify_capture_audit": commands["verify_capture_audit"].clone(),
+        "verify_capture": commands["verify_capture"].clone(),
+        "assemble_public_deployment": commands["assemble_public_deployment"].clone(),
+        "verify_public_launch": commands["verify_public_launch"].clone()
+    });
+    if include_release_authority_handoff {
+        steps["collect_release_authority_handoff"] = json!(
+            "Fill nebula-release-approval-template.json and nebula-release-authority-registry-template.json only after public deployment evidence and external authority signoff are complete."
+        );
+    }
+    steps
+}
+
 fn public_deployment_capture_command_sequence() -> Value {
     let commands = public_deployment_capture_commands();
     let steps = [
@@ -9166,6 +9187,17 @@ fn public_deployment_capture_command_sequence_root(sequence: &Value) -> String {
     collection_root(
         "public-deployment-command-sequence",
         step_roots,
+    )
+}
+
+fn ensure_public_deployment_capture_next_steps(
+    value: &Value,
+    artifact_label: &str,
+    expected_next_steps: Value,
+) -> Result<(), String> {
+    ensure(
+        value.get("next_steps") == Some(&expected_next_steps),
+        &format!("{artifact_label} next_steps mismatch"),
     )
 }
 
@@ -9542,14 +9574,10 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
         "artifact_set_root": artifact_set_root,
         "package_file_set_root": package_file_set_root,
         "package_manifest_root": package_manifest_root,
-        "next_steps": {
-            "capture_public_deployment": "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
-            "audit_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json",
-            "verify_capture_audit": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json",
-            "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json",
-            "assemble_public_deployment": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence <capture.json> --write-public-deployment-evidence nebula-public-deployment.json --json",
-            "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --json"
-        },
+        "next_steps": public_deployment_capture_next_steps(
+            "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+            false,
+        ),
         "command_sequence_root": public_deployment_capture_command_sequence_root(&public_deployment_capture_command_sequence()),
         "command_sequence": public_deployment_capture_command_sequence()
     });
@@ -9615,6 +9643,14 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
         &manifest,
         "public launch package",
         false,
+    )?;
+    ensure_public_deployment_capture_next_steps(
+        &manifest,
+        "public launch package",
+        public_deployment_capture_next_steps(
+            "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+            false,
+        ),
     )?;
     ensure(
         required_str(&manifest, "public_launch_level")? == summary.public_launch_readiness.level,
@@ -9868,6 +9904,14 @@ fn verify_public_testnet_certification(path: &str, summary: &TestnetSummary) -> 
         "public testnet certification",
         false,
     )?;
+    ensure_public_deployment_capture_next_steps(
+        &actual_certification,
+        "public testnet certification",
+        public_deployment_capture_next_steps(
+            "Fill nebula-public-launch-package/nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+            true,
+        ),
+    )?;
     let actual_certification_root =
         required_root(&actual_certification, "certification_root")?.to_string();
     let mut rooted_certification = actual_certification.clone();
@@ -9972,15 +10016,10 @@ fn public_testnet_certification_artifact(
         "release_authority_registry_template_root": release_authority_registry_template_root,
         "package_release_authority_registry_template_root": package_release_authority_registry_template_root,
         "release_authority_registry_template_root_bound_to_package": release_authority_registry_template_root_bound_to_package,
-        "next_steps": {
-            "capture_public_deployment": "Fill nebula-public-launch-package/nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
-            "collect_release_authority_handoff": "Fill nebula-release-approval-template.json and nebula-release-authority-registry-template.json only after public deployment evidence and external authority signoff are complete.",
-            "audit_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json",
-            "verify_capture_audit": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json",
-            "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json",
-            "assemble_public_deployment": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json",
-            "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --json"
-        },
+        "next_steps": public_deployment_capture_next_steps(
+            "Fill nebula-public-launch-package/nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+            true,
+        ),
         "command_sequence_root": public_deployment_capture_command_sequence_root(&public_deployment_capture_command_sequence()),
         "command_sequence": public_deployment_capture_command_sequence()
     });
@@ -32495,6 +32534,13 @@ mod tests {
             .expect("package verify command")
             .contains("--fail-on-public-launch-gaps"));
         assert_eq!(
+            manifest["next_steps"],
+            public_deployment_capture_next_steps(
+                "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+                false,
+            )
+        );
+        assert_eq!(
             manifest["command_sequence"],
             public_deployment_capture_command_sequence()
         );
@@ -32515,6 +32561,18 @@ mod tests {
         );
         verify_public_launch_package(&package_dir_string, &summary)
             .expect("package should verify against its source run");
+        let mut next_steps_tampered_manifest = manifest.clone();
+        next_steps_tampered_manifest["next_steps"]["verify_public_launch"] =
+            json!("tampered-command");
+        fs::write(
+            &package_manifest_path,
+            serde_json::to_string_pretty(&next_steps_tampered_manifest)
+                .expect("tampered manifest json"),
+        )
+        .expect("write next-steps tampered package manifest");
+        let error = verify_public_launch_package(&package_dir_string, &summary)
+            .expect_err("next-steps tampered package should fail");
+        assert!(error.contains("next_steps mismatch"));
         let mut tampered_manifest = manifest.clone();
         tampered_manifest["command_sequence"][0]["command_key"] = json!("verify_capture");
         fs::write(
@@ -32603,6 +32661,13 @@ mod tests {
             .as_str()
             .expect("certification verify command")
             .contains("--fail-on-public-launch-gaps"));
+        assert_eq!(
+            certification["next_steps"],
+            public_deployment_capture_next_steps(
+                "Fill nebula-public-launch-package/nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+                true,
+            )
+        );
         assert_eq!(
             certification["command_sequence"],
             public_deployment_capture_command_sequence()
@@ -32788,6 +32853,26 @@ mod tests {
         let error = verify_public_testnet_certification(&cert_dir_string, &summary)
             .expect_err("tampered package-bound release root should fail verification");
         assert!(error.contains("public testnet certification does not match this run"));
+
+        write_public_testnet_certification(&cert_dir_string, &summary)
+            .expect("rewrite public testnet certification");
+        let mut certification: Value =
+            serde_json::from_slice(&fs::read(&certification_path).expect("read certification"))
+                .expect("certification json");
+        certification["next_steps"]["audit_capture"] = json!("tampered-command");
+        if let Some(object) = certification.as_object_mut() {
+            object.remove("certification_root");
+        }
+        let certification_root = value_root("public-testnet-certification", &certification);
+        certification["certification_root"] = json!(certification_root);
+        fs::write(
+            &certification_path,
+            serde_json::to_string_pretty(&certification).expect("certification json"),
+        )
+        .expect("write next-steps tampered certification");
+        let error = verify_public_testnet_certification(&cert_dir_string, &summary)
+            .expect_err("next-steps tampered certification should fail verification");
+        assert!(error.contains("next_steps mismatch"));
 
         write_public_testnet_certification(&cert_dir_string, &summary)
             .expect("rewrite public testnet certification");
