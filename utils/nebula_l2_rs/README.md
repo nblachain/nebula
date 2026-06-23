@@ -692,7 +692,7 @@ a gate-checkable public launch artifact without allowing the runner to invent
 observer signatures.
 
 `--public-deployment-evidence path\to\deployment.json` also requires
-`--mainnet-readiness` and verifies a filled `kind:
+`--mainnet-readiness` and loads a filled `kind:
 nebula-public-deployment-attestation` artifact for a specific launch bundle. It
 requires `schema_version: 5` and `template_only: false`, rejects placeholders
 and sensitive field names, requires HTTPS publicly routable
@@ -782,7 +782,10 @@ requires the embedded status manifest and launch bundle roots to match the
 current run's generated public artifacts. Live Internet reachability and raw PQ
 signature verification remain deployment-system probes outside this local
 runner, but duplicate, unsigned, or unverified observer captures are no longer
-assembled.
+assembled. `--verify-public-deployment-evidence path\to\deployment.json` is
+the standalone final-attestation gate: it loads the same filled artifact,
+recomputes the public deployment report against the current run, and exits
+nonzero unless the attestation clears every public launch gate.
 
 `--fail-on-public-launch-gaps` also requires `--mainnet-readiness` and turns the
 public-alpha package into a CI gate. It exits nonzero until the local public

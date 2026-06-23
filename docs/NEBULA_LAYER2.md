@@ -3507,6 +3507,9 @@ real XMR.
   the current run's generated public artifacts and by enforcing an observed/expires freshness window,
   multi-observer/multi-region probe roots, unique observer ids/keys, unique
   bootstrap endpoint roots, an attestor registry root, and a PQ signature root.
+  The explicit `--verify-public-deployment-evidence` command loads the filled
+  attestation, recomputes the public deployment report for the current run, and
+  exits nonzero unless every public launch gate passes.
   Live reachability checks and raw PQ signature verification remain
   deployment-system evidence outside the local runner, but duplicate bootstrap
   endpoints and duplicate, unsigned, or unverified observer captures are

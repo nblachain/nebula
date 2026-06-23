@@ -372,6 +372,7 @@ struct Cli {
     release_authority_registry_path: Option<String>,
     release_authority_registry: Option<ReleaseAuthorityRegistry>,
     public_deployment_evidence_path: Option<String>,
+    public_deployment_evidence_verify_path: Option<String>,
     public_deployment_evidence: Option<PublicDeploymentEvidence>,
     readiness_template_path: Option<String>,
     public_bootstrap_profile_path: Option<String>,
@@ -454,6 +455,7 @@ impl Default for Cli {
             release_authority_registry_path: None,
             release_authority_registry: None,
             public_deployment_evidence_path: None,
+            public_deployment_evidence_verify_path: None,
             public_deployment_evidence: None,
             readiness_template_path: None,
             public_bootstrap_profile_path: None,
@@ -7080,6 +7082,12 @@ fn run() -> Result<(), String> {
         testnet.cli.public_deployment_evidence = Some(deployment);
         summary = testnet.summary(probes.clone());
     }
+    if let Some(path) = cli.public_deployment_evidence_verify_path.as_deref() {
+        let deployment = load_public_deployment_evidence(path)?;
+        cli.public_deployment_evidence = Some(deployment.clone());
+        testnet.cli.public_deployment_evidence = Some(deployment);
+        summary = testnet.summary(probes.clone());
+    }
     if cli.mainnet_readiness {
         ensure(
             summary.acceptance.no_mainnet_custody
@@ -7198,6 +7206,9 @@ fn run() -> Result<(), String> {
         cli.public_deployment_capture_audit_verify_path.as_deref(),
     ) {
         verify_public_deployment_capture_audit(capture_path, audit_path, &summary)?;
+    }
+    if let Some(path) = cli.public_deployment_evidence_verify_path.as_deref() {
+        verify_public_deployment_evidence(path, &summary)?;
     }
     let readiness_gap_error = if cli.fail_on_readiness_gaps {
         ensure_artifact_readiness_gates(&summary).err()
@@ -8820,7 +8831,7 @@ fn public_capture_todo_artifact(summary: &TestnetSummary) -> Value {
         "audit_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json",
         "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --json",
         "assemble_public_deployment": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json",
-        "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --public-deployment-evidence nebula-public-deployment.json --fail-on-public-launch-gaps --json"
+        "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --json"
     });
     let todo_root = value_root("public-capture-todo", &todo);
     todo["public_capture_todo_root"] = json!(todo_root);
@@ -9058,7 +9069,7 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
         "next_steps": {
             "capture_public_deployment": "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
             "assemble_public_deployment": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence <capture.json> --write-public-deployment-evidence nebula-public-deployment.json --json",
-            "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --public-deployment-evidence nebula-public-deployment.json --fail-on-public-launch-gaps --json"
+            "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --json"
         }
     });
     write_json_artifact(
@@ -9403,7 +9414,7 @@ fn public_testnet_certification_artifact(
             "capture_public_deployment": "Fill nebula-public-launch-package/nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
             "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json",
             "assemble_public_deployment": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json",
-            "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --public-deployment-evidence nebula-public-deployment.json --fail-on-public-launch-gaps --json"
+            "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --json"
         }
     });
     let certification_root = value_root("public-testnet-certification", &certification);
@@ -18855,6 +18866,14 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
                 cli.public_deployment_evidence_path =
                     Some(parse_string(&args, index, "--public-deployment-evidence")?);
             }
+            "--verify-public-deployment-evidence" => {
+                index += 1;
+                cli.public_deployment_evidence_verify_path = Some(parse_string(
+                    &args,
+                    index,
+                    "--verify-public-deployment-evidence",
+                )?);
+            }
             "--write-readiness-template" => {
                 index += 1;
                 cli.readiness_template_path =
@@ -19455,6 +19474,13 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
             cli.mainnet_readiness,
             "--public-deployment-evidence requires --mainnet-readiness",
         )?;
+    }
+    if let Some(path) = cli.public_deployment_evidence_verify_path.as_deref() {
+        ensure(
+            cli.mainnet_readiness,
+            "--verify-public-deployment-evidence requires --mainnet-readiness",
+        )?;
+        ensure_local_json_path(path, "--verify-public-deployment-evidence")?;
     }
     if let Some(path) = cli.readiness_evidence_path.as_deref() {
         let evidence = load_readiness_evidence_bundle(path)?;
@@ -20751,6 +20777,23 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
         "public deployment evidence_root mismatch",
     )?;
     Ok(evidence)
+}
+
+fn verify_public_deployment_evidence(
+    path: &str,
+    summary: &TestnetSummary,
+) -> Result<(), String> {
+    ensure_local_json_path(path, "--verify-public-deployment-evidence")?;
+    let evidence = load_public_deployment_evidence(path)?;
+    ensure(
+        summary.public_deployment.evidence_root.as_deref() == Some(evidence.evidence_root.as_str()),
+        "public deployment evidence is not the attestation loaded for this run",
+    )?;
+    ensure(
+        summary.public_deployment.passed,
+        "public deployment evidence does not satisfy this run",
+    )?;
+    ensure_public_launch_gates(summary)
 }
 
 fn load_release_approval_bundle(path: &str) -> Result<ReleaseApproval, String> {
@@ -26741,6 +26784,8 @@ OPTIONS:
                               Local JSON registry that binds required release roles to signer commitments
         --public-deployment-evidence PATH
                               Local JSON attestation for filled public-alpha proxy, TLS, node, and probe roots
+        --verify-public-deployment-evidence PATH
+                              Verify a filled public-alpha deployment attestation and require public launch gates to pass
         --write-readiness-template PATH
                               Write a redacted operator template/checklist for external evidence collection
         --write-public-bootstrap-profile PATH
@@ -29306,6 +29351,16 @@ mod tests {
         let path = temp_json_path("nebula-public-deployment-rejected");
         let error = parse_cli(vec!["--public-deployment-evidence".to_string(), path])
             .expect_err("public deployment evidence should require mainnet-readiness mode");
+        assert!(error.contains("requires --mainnet-readiness"));
+    }
+
+    #[test]
+    fn public_deployment_evidence_verify_requires_mainnet_readiness_mode() {
+        let path = temp_json_path("nebula-public-deployment-verify-rejected");
+        let error = parse_cli(vec!["--verify-public-deployment-evidence".to_string(), path])
+            .expect_err(
+                "public deployment evidence verification should require mainnet-readiness mode",
+            );
         assert!(error.contains("requires --mainnet-readiness"));
     }
 
@@ -32517,6 +32572,37 @@ mod tests {
                 .public_deployment_runbook_step_receipt_count,
             PUBLIC_DEPLOYMENT_RUNBOOK_STEPS.len() as u64
         );
+        verify_public_deployment_evidence(&evidence_path, &summary)
+            .expect("filled public deployment evidence should verify against this run");
+        let _ = fs::remove_file(evidence_path);
+    }
+
+    #[test]
+    fn public_deployment_evidence_verifier_rejects_stale_run_attestation() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let evidence_path = write_public_deployment_evidence(&valid_public_deployment_evidence(
+            &base_summary,
+        ));
+        let stale_evidence =
+            load_public_deployment_evidence(&evidence_path).expect("public deployment evidence");
+
+        let other_cli = parse_cli(vec![
+            "--mainnet-readiness".to_string(),
+            "--blocks".to_string(),
+            "6".to_string(),
+        ])
+        .expect("alternate mainnet readiness should parse");
+        let mut other_testnet = Testnet::new(other_cli);
+        other_testnet.run().expect("other testnet run");
+        other_testnet.cli.public_deployment_evidence = Some(stale_evidence);
+        let other_summary = other_testnet.summary(Vec::new());
+        let error = verify_public_deployment_evidence(&evidence_path, &other_summary)
+            .expect_err("stale public deployment evidence should fail current-run verification");
+        assert!(error.contains("does not satisfy this run"));
         let _ = fs::remove_file(evidence_path);
     }
 
