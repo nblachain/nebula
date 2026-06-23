@@ -3471,7 +3471,7 @@ real XMR.
   runbook receipt/status/bootstrap topology and policy bindings, and capture roots, bootstrap profile/report/rate-limit roots,
   bootstrap topology/count/registry/probe bindings, aggregate probe repair roots/counts,
   endpoint publicness, TLS pin repair roots/counts,
-  proxy/firewall/rate-limit policy roots, status-manifest root/payload, and
+  proxy/firewall/rate-limit policy repair roots, status-manifest root/payload, and
   per-surface probe roots/counts, placeholder hygiene, and local bootstrap/
   finality dependencies, wallet recovery, mempool accountability, bridge release
   safety, privacy classification, and whether external deployment capture is

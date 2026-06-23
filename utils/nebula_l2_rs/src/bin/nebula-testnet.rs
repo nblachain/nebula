@@ -1221,8 +1221,11 @@ struct PublicDeploymentReport {
     tls_endpoint_pin_count: u64,
     expected_tls_endpoint_pin_count: Option<u64>,
     proxy_policy_claims_root: Option<String>,
+    expected_proxy_policy_claims_root: Option<String>,
     firewall_policy_claims_root: Option<String>,
+    expected_firewall_policy_claims_root: Option<String>,
     rate_limit_policy_claims_root: Option<String>,
+    expected_rate_limit_policy_claims_root: Option<String>,
     private_summary_probe_root: Option<String>,
     preflight_receipt_bound: bool,
     preflight_receipt_root_bound: bool,
@@ -5782,11 +5785,28 @@ impl Testnet {
         let firewall_allows_public_only = evidence.firewall_allows_public_only;
         let public_status_manifest_redacted = evidence.public_status_manifest_redacted;
         let no_private_summary_exposed = evidence.no_private_summary_exposed;
-        let proxy_policy_claims_root_bound = is_hex_root(&evidence.proxy_policy_claims_root);
-        let firewall_policy_claims_root_bound =
-            is_hex_root(&evidence.firewall_policy_claims_root);
+        let expected_proxy_policy_claims_root = Some(value_root(
+            "public-deployment-proxy-policy-claims",
+            &evidence.proxy_policy_claims,
+        ));
+        let expected_firewall_policy_claims_root = Some(value_root(
+            "public-deployment-firewall-policy-claims",
+            &evidence.firewall_policy_claims,
+        ));
+        let expected_rate_limit_policy_claims_root = Some(value_root(
+            "public-deployment-rate-limit-policy-claims",
+            &evidence.rate_limit_policy_claims,
+        ));
+        let proxy_policy_claims_root_bound = is_hex_root(&evidence.proxy_policy_claims_root)
+            && expected_proxy_policy_claims_root.as_deref()
+                == Some(evidence.proxy_policy_claims_root.as_str());
+        let firewall_policy_claims_root_bound = is_hex_root(&evidence.firewall_policy_claims_root)
+            && expected_firewall_policy_claims_root.as_deref()
+                == Some(evidence.firewall_policy_claims_root.as_str());
         let rate_limit_policy_claims_root_bound =
-            is_hex_root(&evidence.rate_limit_policy_claims_root);
+            is_hex_root(&evidence.rate_limit_policy_claims_root)
+                && expected_rate_limit_policy_claims_root.as_deref()
+                    == Some(evidence.rate_limit_policy_claims_root.as_str());
         let private_summary_probe_root_bound =
             is_hex_root(&evidence.private_summary_probe_root);
         let proxy_policy_verified = rate_limits_enforced
@@ -5985,6 +6005,18 @@ impl Testnet {
                 .unwrap_or("missing-tls-endpoint-pin-set-root"),
             &evidence.tls_endpoint_pin_count.to_string(),
             &expected_tls_endpoint_pin_count_string,
+            &evidence.proxy_policy_claims_root,
+            expected_proxy_policy_claims_root
+                .as_deref()
+                .unwrap_or("missing-proxy-policy-claims-root"),
+            &evidence.firewall_policy_claims_root,
+            expected_firewall_policy_claims_root
+                .as_deref()
+                .unwrap_or("missing-firewall-policy-claims-root"),
+            &evidence.rate_limit_policy_claims_root,
+            expected_rate_limit_policy_claims_root
+                .as_deref()
+                .unwrap_or("missing-rate-limit-policy-claims-root"),
             &evidence.bootstrap_node_set_root,
             &summary.public_bootstrap_profile.bootstrap_node_set_root,
             &evidence.bootstrap_node_count.to_string(),
@@ -6150,10 +6182,13 @@ impl Testnet {
             tls_endpoint_pin_count: evidence.tls_endpoint_pin_count,
             expected_tls_endpoint_pin_count,
             proxy_policy_claims_root: Some(evidence.proxy_policy_claims_root.clone()),
+            expected_proxy_policy_claims_root,
             firewall_policy_claims_root: Some(evidence.firewall_policy_claims_root.clone()),
+            expected_firewall_policy_claims_root,
             rate_limit_policy_claims_root: Some(
                 evidence.rate_limit_policy_claims_root.clone(),
             ),
+            expected_rate_limit_policy_claims_root,
             private_summary_probe_root: Some(evidence.private_summary_probe_root.clone()),
             preflight_receipt_bound,
             preflight_receipt_root_bound,
@@ -7239,8 +7274,11 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         tls_endpoint_pin_count: 0,
         expected_tls_endpoint_pin_count: None,
         proxy_policy_claims_root: None,
+        expected_proxy_policy_claims_root: None,
         firewall_policy_claims_root: None,
+        expected_firewall_policy_claims_root: None,
         rate_limit_policy_claims_root: None,
+        expected_rate_limit_policy_claims_root: None,
         private_summary_probe_root: None,
         preflight_receipt_bound: false,
         preflight_receipt_root_bound: false,
@@ -7678,6 +7716,18 @@ fn public_deployment_repair_roots(
         (
             "tls_endpoint_pin_set_root_bound",
             report.expected_tls_endpoint_pin_set_root.as_deref(),
+        ),
+        (
+            "proxy_policy_claims_root_bound",
+            report.expected_proxy_policy_claims_root.as_deref(),
+        ),
+        (
+            "firewall_policy_claims_root_bound",
+            report.expected_firewall_policy_claims_root.as_deref(),
+        ),
+        (
+            "rate_limit_policy_claims_root_bound",
+            report.expected_rate_limit_policy_claims_root.as_deref(),
         ),
         (
             "public_deployment_runbook_root_bound",
@@ -32689,6 +32739,10 @@ mod tests {
         ));
         let mut evidence =
             load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let expected_proxy_policy_claims_root = evidence.proxy_policy_claims_root.clone();
+        let expected_firewall_policy_claims_root = evidence.firewall_policy_claims_root.clone();
+        let expected_rate_limit_policy_claims_root =
+            evidence.rate_limit_policy_claims_root.clone();
         evidence.rate_limits_enforced = false;
         evidence.firewall_allows_public_only = false;
         evidence.no_private_summary_exposed = false;
@@ -32724,6 +32778,27 @@ mod tests {
             "missing-proxy-policy-claims-root"
         );
         assert_eq!(
+            summary
+                .public_deployment
+                .expected_proxy_policy_claims_root
+                .as_deref(),
+            Some(expected_proxy_policy_claims_root.as_str())
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_firewall_policy_claims_root
+                .as_deref(),
+            Some(expected_firewall_policy_claims_root.as_str())
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_rate_limit_policy_claims_root
+                .as_deref(),
+            Some(expected_rate_limit_policy_claims_root.as_str())
+        );
+        assert_eq!(
             summary.public_launch_readiness.blocking_gaps,
             vec!["public-launch-deployment-attestation"]
         );
@@ -32751,6 +32826,128 @@ mod tests {
                 "missing failed subcheck {failed_subcheck}"
             );
         }
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("proxy_policy_claims_root_bound")
+                .map(String::as_str),
+            Some(expected_proxy_policy_claims_root.as_str())
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("firewall_policy_claims_root_bound")
+                .map(String::as_str),
+            Some(expected_firewall_policy_claims_root.as_str())
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("rate_limit_policy_claims_root_bound")
+                .map(String::as_str),
+            Some(expected_rate_limit_policy_claims_root.as_str())
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_valid_shaped_stale_policy_claim_roots() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path = write_public_deployment_evidence(&valid_public_deployment_evidence(
+            &base_summary,
+        ));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let expected_proxy_policy_claims_root = evidence.proxy_policy_claims_root.clone();
+        let expected_firewall_policy_claims_root = evidence.firewall_policy_claims_root.clone();
+        let expected_rate_limit_policy_claims_root =
+            evidence.rate_limit_policy_claims_root.clone();
+        evidence.proxy_policy_claims_root =
+            root(&["test-public-deployment", "stale-proxy-policy-claims-root"]);
+        evidence.firewall_policy_claims_root =
+            root(&["test-public-deployment", "stale-firewall-policy-claims-root"]);
+        evidence.rate_limit_policy_claims_root =
+            root(&["test-public-deployment", "stale-rate-limit-policy-claims-root"]);
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.proxy_policy_verified);
+        assert!(!summary.public_deployment.proxy_policy_claims_root_bound);
+        assert!(!summary
+            .public_deployment
+            .firewall_policy_claims_root_bound);
+        assert!(!summary
+            .public_deployment
+            .rate_limit_policy_claims_root_bound);
+        assert!(summary.public_deployment.rate_limits_enforced);
+        assert!(summary.public_deployment.firewall_allows_public_only);
+        assert!(summary.public_deployment.public_status_manifest_redacted);
+        assert!(summary.public_deployment.no_private_summary_exposed);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_proxy_policy_claims_root
+                .as_deref(),
+            Some(expected_proxy_policy_claims_root.as_str())
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_firewall_policy_claims_root
+                .as_deref(),
+            Some(expected_firewall_policy_claims_root.as_str())
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_rate_limit_policy_claims_root
+                .as_deref(),
+            Some(expected_rate_limit_policy_claims_root.as_str())
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        for failed_subcheck in [
+            "proxy_policy_verified",
+            "proxy_policy_claims_root_bound",
+            "firewall_policy_claims_root_bound",
+            "rate_limit_policy_claims_root_bound",
+        ] {
+            assert!(
+                remediation
+                    .failed_subchecks
+                    .contains(&failed_subcheck.to_string()),
+                "missing failed subcheck {failed_subcheck}"
+            );
+        }
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("proxy_policy_claims_root_bound")
+                .map(String::as_str),
+            Some(expected_proxy_policy_claims_root.as_str())
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("firewall_policy_claims_root_bound")
+                .map(String::as_str),
+            Some(expected_firewall_policy_claims_root.as_str())
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("rate_limit_policy_claims_root_bound")
+                .map(String::as_str),
+            Some(expected_rate_limit_policy_claims_root.as_str())
+        );
         let _ = fs::remove_file(path);
     }
 
