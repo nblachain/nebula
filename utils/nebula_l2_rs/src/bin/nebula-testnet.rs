@@ -385,6 +385,7 @@ struct Cli {
     public_launch_bundle_path: Option<String>,
     public_launch_bundle_verify_path: Option<String>,
     public_launch_readiness_report_path: Option<String>,
+    public_launch_readiness_report_verify_path: Option<String>,
     public_capture_todo_path: Option<String>,
     public_capture_todo_verify_path: Option<String>,
     public_launch_package_dir: Option<String>,
@@ -465,6 +466,7 @@ impl Default for Cli {
             public_launch_bundle_path: None,
             public_launch_bundle_verify_path: None,
             public_launch_readiness_report_path: None,
+            public_launch_readiness_report_verify_path: None,
             public_capture_todo_path: None,
             public_capture_todo_verify_path: None,
             public_launch_package_dir: None,
@@ -7129,6 +7131,12 @@ fn run() -> Result<(), String> {
     if let Some(path) = cli.public_launch_readiness_report_path.as_deref() {
         write_public_launch_readiness_report(path, &summary)?;
     }
+    if let Some(path) = cli
+        .public_launch_readiness_report_verify_path
+        .as_deref()
+    {
+        verify_public_launch_readiness_report(path, &summary)?;
+    }
     if let Some(path) = cli.public_capture_todo_path.as_deref() {
         write_public_capture_todo(path, &summary)?;
     }
@@ -8612,11 +8620,29 @@ fn write_public_launch_readiness_report(
 ) -> Result<(), String> {
     ensure_local_json_path(path, "--write-public-launch-readiness-report")?;
     let report = public_launch_readiness_report_artifact(summary);
+    ensure_public_launch_readiness_report_artifact_safe(&report)?;
     let encoded = serde_json::to_string_pretty(&report).map_err(|error| {
         format!("failed to encode public launch readiness report json: {error}")
     })?;
     fs::write(path, format!("{encoded}\n"))
         .map_err(|error| format!("failed to write public launch readiness report: {error}"))
+}
+
+fn verify_public_launch_readiness_report(path: &str, summary: &TestnetSummary) -> Result<(), String> {
+    ensure_local_json_path(path, "--verify-public-launch-readiness-report")?;
+    let actual = read_json_file(&PathBuf::from(path), "public launch readiness report")?;
+    ensure(
+        actual.get("kind").and_then(Value::as_str)
+            == Some("nebula-public-launch-readiness-report"),
+        "public launch readiness report has the wrong kind",
+    )?;
+    ensure_public_launch_readiness_report_artifact_safe(&actual)?;
+    let expected = public_launch_readiness_report_artifact(summary);
+    ensure_public_launch_readiness_report_artifact_safe(&expected)?;
+    ensure(
+        actual == expected,
+        "public launch readiness report does not match this run",
+    )
 }
 
 fn public_launch_readiness_report_artifact(summary: &TestnetSummary) -> Value {
@@ -17362,6 +17388,125 @@ fn ensure_public_launch_bundle_redacted(value: &Value) -> Result<(), String> {
     )
 }
 
+fn ensure_public_launch_readiness_report_artifact_safe(value: &Value) -> Result<(), String> {
+    ensure(
+        value.get("kind").and_then(Value::as_str)
+            == Some("nebula-public-launch-readiness-report"),
+        "public launch readiness report kind mismatch",
+    )?;
+    ensure(
+        value.get("local_operator_only").and_then(Value::as_bool) == Some(true),
+        "public launch readiness report must remain operator-local",
+    )?;
+    ensure(
+        value
+            .get("usable_as_public_deployment_evidence")
+            .and_then(Value::as_bool)
+            == Some(false),
+        "public launch readiness report must not be accepted as deployment evidence",
+    )?;
+    ensure(
+        value
+            .get("usable_as_mainnet_custody_approval")
+            .and_then(Value::as_bool)
+            == Some(false),
+        "public launch readiness report must not be accepted as mainnet custody approval",
+    )?;
+    ensure(
+        value.get("custody_mode").and_then(Value::as_str) == Some("no-mainnet-custody"),
+        "public launch readiness report custody mode mismatch",
+    )?;
+    let readiness = value
+        .get("public_launch_readiness")
+        .ok_or_else(|| "public launch readiness report missing nested readiness".to_string())?;
+    ensure(
+        readiness.as_object().is_some(),
+        "public launch readiness report must include the operator launch report",
+    )?;
+    for key in PUBLIC_STATUS_FORBIDDEN_KEYS {
+        if key == "public_launch_readiness" {
+            continue;
+        }
+        ensure(
+            !value_contains_exact_key(value, key),
+            &format!("public launch readiness report contains forbidden key '{key}'"),
+        )?;
+    }
+    for marker in SENSITIVE_FIELD_MARKERS {
+        ensure(
+            !value_contains_key_marker(value, marker),
+            &format!("public launch readiness report contains sensitive marker '{marker}'"),
+        )?;
+    }
+    ensure(
+        value
+            .get("public_launch_readiness_report_root")
+            .and_then(Value::as_str)
+            == readiness.get("report_root").and_then(Value::as_str),
+        "public launch readiness report root mismatch",
+    )?;
+    ensure(
+        value
+            .get("public_launch_readiness_check_root")
+            .and_then(Value::as_str)
+            == readiness.get("check_root").and_then(Value::as_str),
+        "public launch readiness check root mismatch",
+    )?;
+    ensure(
+        value
+            .get("public_launch_readiness_remediation_root")
+            .and_then(Value::as_str)
+            == readiness.get("remediation_root").and_then(Value::as_str),
+        "public launch readiness remediation root mismatch",
+    )?;
+    let blocking_gap_count = value
+        .get("blocking_gap_count")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "public launch readiness report missing blocking_gap_count".to_string())?;
+    let remediation_count = value
+        .get("remediation_count")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "public launch readiness report missing remediation_count".to_string())?;
+    ensure(
+        readiness
+            .get("blocking_gaps")
+            .and_then(Value::as_array)
+            .map(|gaps| gaps.len() as u64)
+            == Some(blocking_gap_count),
+        "public launch readiness blocking gap count mismatch",
+    )?;
+    ensure(
+        readiness
+            .get("remediations")
+            .and_then(Value::as_array)
+            .map(|remediations| remediations.len() as u64)
+            == Some(remediation_count),
+        "public launch readiness remediation count mismatch",
+    )?;
+    ensure(
+        value.get("public_launch_ready").and_then(Value::as_bool)
+            == readiness.get("public_launch_ready").and_then(Value::as_bool),
+        "public launch readiness ready flag mismatch",
+    )?;
+    ensure(
+        value.get("level").and_then(Value::as_str) == readiness.get("level").and_then(Value::as_str),
+        "public launch readiness level mismatch",
+    )?;
+    let mut rootless = value.clone();
+    let Some(map) = rootless.as_object_mut() else {
+        return Err("public launch readiness report must be an object".to_string());
+    };
+    map.remove("public_launch_readiness_artifact_root");
+    let expected_root = value_root("public-launch-readiness-report-artifact", &rootless);
+    ensure(
+        value
+            .get("public_launch_readiness_artifact_root")
+            .and_then(Value::as_str)
+            == Some(expected_root.as_str()),
+        "public launch readiness report artifact root mismatch",
+    )
+}
+
 fn ensure_public_deployment_capture_plan_redacted(value: &Value) -> Result<(), String> {
     ensure(
         value.get("kind").and_then(Value::as_str)
@@ -18584,6 +18729,14 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
                     "--write-public-launch-readiness-report",
                 )?);
             }
+            "--verify-public-launch-readiness-report" => {
+                index += 1;
+                cli.public_launch_readiness_report_verify_path = Some(parse_string(
+                    &args,
+                    index,
+                    "--verify-public-launch-readiness-report",
+                )?);
+            }
             "--write-public-capture-todo" => {
                 index += 1;
                 cli.public_capture_todo_path =
@@ -18890,6 +19043,13 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
             "--write-public-launch-readiness-report requires --mainnet-readiness",
         )?;
         ensure_local_json_path(path, "--write-public-launch-readiness-report")?;
+    }
+    if let Some(path) = cli.public_launch_readiness_report_verify_path.as_deref() {
+        ensure(
+            cli.mainnet_readiness,
+            "--verify-public-launch-readiness-report requires --mainnet-readiness",
+        )?;
+        ensure_local_json_path(path, "--verify-public-launch-readiness-report")?;
     }
     if let Some(path) = cli.public_capture_todo_path.as_deref() {
         ensure(
@@ -26383,6 +26543,8 @@ OPTIONS:
                               Verify a redacted public-alpha deployment handoff bundle against this run
         --write-public-launch-readiness-report PATH
                               Write a local operator-only public launch gate report and remediation list
+        --verify-public-launch-readiness-report PATH
+                              Verify a local operator-only public launch gate report against this run
         --write-public-capture-todo PATH
                               Write a rooted machine-readable external capture work order for deployment CI
         --verify-public-capture-todo PATH
@@ -28703,6 +28865,19 @@ mod tests {
     }
 
     #[test]
+    fn public_launch_readiness_report_verify_requires_mainnet_readiness_mode() {
+        let path = temp_json_path("nebula-public-launch-readiness-report-verify-rejected");
+        let error = parse_cli(vec![
+            "--verify-public-launch-readiness-report".to_string(),
+            path,
+        ])
+        .expect_err(
+            "public launch readiness report verification should require mainnet-readiness mode",
+        );
+        assert!(error.contains("requires --mainnet-readiness"));
+    }
+
+    #[test]
     fn public_capture_todo_requires_mainnet_readiness_mode() {
         let path = temp_json_path("nebula-public-capture-todo-rejected");
         let error = parse_cli(vec!["--write-public-capture-todo".to_string(), path])
@@ -29832,6 +30007,8 @@ mod tests {
                 .as_str()
                 .expect("artifact root")
         ));
+        ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect("safe public launch readiness report");
     }
 
     #[test]
@@ -29870,7 +30047,70 @@ mod tests {
                 .as_str()
                 .expect("artifact root")
         ));
+        ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect("safe ready public launch readiness report");
         let _ = fs::remove_file(evidence_path);
+    }
+
+    #[test]
+    fn public_launch_readiness_report_verifier_accepts_current_run_export() {
+        let path = temp_json_path("nebula-public-launch-readiness-report-verify-current");
+        let cli = parse_cli(vec![
+            "--mainnet-readiness".to_string(),
+            "--write-public-launch-readiness-report".to_string(),
+            path.clone(),
+            "--verify-public-launch-readiness-report".to_string(),
+            path.clone(),
+        ])
+        .expect("public launch readiness report write+verify flags should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_launch_readiness_report(&path, &summary)
+            .expect("write public launch readiness report");
+        verify_public_launch_readiness_report(&path, &summary)
+            .expect("current-run public launch readiness report should verify");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_launch_readiness_report_verifier_rejects_re_rooted_stale_report() {
+        let path = temp_json_path("nebula-public-launch-readiness-report-stale");
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet-readiness CLI should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_launch_readiness_report(&path, &summary)
+            .expect("write public launch readiness report");
+        verify_public_launch_readiness_report(&path, &summary)
+            .expect("fresh public launch readiness report should verify");
+
+        let mut stale: Value = serde_json::from_slice(&fs::read(&path).expect("read report"))
+            .expect("public launch readiness report json");
+        stale["public_launch_package_file_set_root"] =
+            json!(root(&["tampered-public-launch-package-file-set", &summary.manifest_id]));
+        let mut rootless = stale.clone();
+        if let Some(map) = rootless.as_object_mut() {
+            map.remove("public_launch_readiness_artifact_root");
+        }
+        stale["public_launch_readiness_artifact_root"] =
+            json!(value_root("public-launch-readiness-report-artifact", &rootless));
+        ensure_public_launch_readiness_report_artifact_safe(&stale)
+            .expect("re-rooted report should remain structurally safe");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&stale).expect("encode stale report")
+            ),
+        )
+        .expect("write stale report");
+
+        let error = verify_public_launch_readiness_report(&path, &summary)
+            .expect_err("re-rooted stale report should fail exact verification");
+        assert!(error.contains("does not match this run"));
+        let _ = fs::remove_file(path);
     }
 
     #[test]

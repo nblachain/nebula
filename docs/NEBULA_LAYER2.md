@@ -3288,8 +3288,12 @@ real XMR.
   package file-set root, deployment evidence root if present,
   deployment-attestation failed subchecks such as package file-set, package
   manifest, and readiness artifact binding mismatches, expected package file-set,
-  package manifest, and readiness artifact repair roots, and a report artifact root. It is marked unusable as public
-  deployment evidence or mainnet custody approval.
+  package manifest, and readiness artifact repair roots, and a report artifact
+  root. It is marked unusable as public deployment evidence or mainnet custody
+  approval. The paired `--verify-public-launch-readiness-report` command
+  recomputes the report and artifact root against the current run, rejecting
+  stale package-root, status, bundle, capture-plan, or deployment-evidence
+  bindings before deployment CI consumes the report root.
 - Public launch automation consumes a redacted
   `nebula-public-testnet-launch-bundle` that binds the status manifest,
   bootstrap profile, proxy policy, typed bootstrap-node commitment manifest,

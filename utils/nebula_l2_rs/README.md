@@ -203,10 +203,11 @@ cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-final
 
 For a controlled public-alpha bootstrap, write the redacted deployment profile,
 public status manifest, typed deployment runbook, combined launch handoff bundle,
-schema v5 deployment evidence worksheet, and standalone capture todo:
+operator-only launch-readiness report, schema v5 deployment evidence worksheet,
+and standalone capture todo:
 
 ```powershell
-cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-bootstrap-profile .\nebula-public-bootstrap.json --verify-public-bootstrap-profile .\nebula-public-bootstrap.json --write-public-status-manifest .\nebula-public-status.json --verify-public-status-manifest .\nebula-public-status.json --write-public-deployment-runbook .\nebula-public-deployment-runbook.json --verify-public-deployment-runbook .\nebula-public-deployment-runbook.json --write-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --verify-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --write-public-launch-bundle .\nebula-public-launch-bundle.json --verify-public-launch-bundle .\nebula-public-launch-bundle.json --write-public-capture-todo .\nebula-public-capture-todo.json --verify-public-capture-todo .\nebula-public-capture-todo.json --write-public-deployment-evidence-template .\nebula-public-deployment-template.json --write-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --verify-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --json
+cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-bootstrap-profile .\nebula-public-bootstrap.json --verify-public-bootstrap-profile .\nebula-public-bootstrap.json --write-public-status-manifest .\nebula-public-status.json --verify-public-status-manifest .\nebula-public-status.json --write-public-deployment-runbook .\nebula-public-deployment-runbook.json --verify-public-deployment-runbook .\nebula-public-deployment-runbook.json --write-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --verify-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --write-public-launch-bundle .\nebula-public-launch-bundle.json --verify-public-launch-bundle .\nebula-public-launch-bundle.json --write-public-launch-readiness-report .\nebula-public-launch-readiness-report.json --verify-public-launch-readiness-report .\nebula-public-launch-readiness-report.json --write-public-capture-todo .\nebula-public-capture-todo.json --verify-public-capture-todo .\nebula-public-capture-todo.json --write-public-deployment-evidence-template .\nebula-public-deployment-template.json --write-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --verify-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --json
 ```
 
 The same public-alpha handoff can be exported as one rooted package directory:
@@ -426,6 +427,10 @@ roots, package file-set root, deployment evidence root if present, and its own
 artifact root. The report is not a public deployment attestation and has both
 `usable_as_public_deployment_evidence` and
 `usable_as_mainnet_custody_approval` set to false.
+`--verify-public-launch-readiness-report path\to\launch-report.json`
+recomputes the report and artifact root against the current run, rejecting
+stale package-root, status, bundle, capture-plan, or deployment-evidence
+bindings before deployment CI consumes the report root.
 
 `--write-public-launch-package path\to\package-dir` also requires
 `--mainnet-readiness` and writes the full redacted public-alpha handoff set into
