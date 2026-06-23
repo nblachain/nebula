@@ -1187,7 +1187,9 @@ struct PublicDeploymentReport {
     public_launch_bundle_root: Option<String>,
     public_launch_package_file_set_root: Option<String>,
     public_launch_package_manifest_root: Option<String>,
+    expected_public_launch_package_manifest_root: Option<String>,
     public_launch_readiness_artifact_root: Option<String>,
+    expected_public_launch_readiness_artifact_root: Option<String>,
     public_status_manifest_root: Option<String>,
     expected_public_status_manifest_root: Option<String>,
     public_bootstrap_profile_root: Option<String>,
@@ -5941,8 +5943,14 @@ impl Testnet {
             public_launch_package_manifest_root: Some(
                 evidence.public_launch_package_manifest_root.clone(),
             ),
+            expected_public_launch_package_manifest_root: Some(
+                expected_public_launch_package_manifest_root,
+            ),
             public_launch_readiness_artifact_root: Some(
                 evidence.public_launch_readiness_artifact_root.clone(),
+            ),
+            expected_public_launch_readiness_artifact_root: Some(
+                expected_public_launch_readiness_artifact_root,
             ),
             public_status_manifest_root: Some(evidence.public_status_manifest_root.clone()),
             expected_public_status_manifest_root: Some(expected_public_status_manifest_root),
@@ -7000,7 +7008,9 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         public_launch_bundle_root: None,
         public_launch_package_file_set_root: None,
         public_launch_package_manifest_root: None,
+        expected_public_launch_package_manifest_root: None,
         public_launch_readiness_artifact_root: None,
+        expected_public_launch_readiness_artifact_root: None,
         public_status_manifest_root: None,
         expected_public_status_manifest_root: None,
         public_bootstrap_profile_root: None,
@@ -28937,6 +28947,36 @@ mod tests {
         assert!(is_hex_root(
             summary
                 .public_deployment
+                .expected_public_launch_package_manifest_root
+                .as_deref()
+                .expect("expected package manifest root")
+        ));
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_package_manifest_root
+                .as_deref()
+                .expect("expected package manifest root"),
+            public_launch_package_manifest_root_for_summary(&summary)
+        );
+        assert!(is_hex_root(
+            summary
+                .public_deployment
+                .expected_public_launch_readiness_artifact_root
+                .as_deref()
+                .expect("expected readiness artifact root")
+        ));
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_readiness_artifact_root
+                .as_deref()
+                .expect("expected readiness artifact root"),
+            public_launch_readiness_artifact_root_for_summary(&summary)
+        );
+        assert!(is_hex_root(
+            summary
+                .public_deployment
                 .expected_public_bootstrap_profile_root
                 .as_deref()
                 .expect("expected bootstrap profile root")
@@ -32039,6 +32079,72 @@ mod tests {
                 "missing failed subcheck {failed_subcheck}"
             );
         }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_exposes_expected_package_handoff_roots() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut value: Value =
+            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
+                .expect("deployment evidence json");
+        value["public_launch_package_manifest_root"] =
+            json!(root(&["test-public-deployment", "wrong-package-manifest"]));
+        value["public_launch_readiness_artifact_root"] =
+            json!(root(&["test-public-deployment", "wrong-readiness-artifact"]));
+        value["provenance_root"] =
+            json!(public_deployment_provenance_root_from_value(&value)
+                .expect("provenance root"));
+        value["evidence_root"] =
+            json!(public_deployment_attestation_root_from_value(&value)
+                .expect("evidence root"));
+        let path = write_public_deployment_evidence(
+            &serde_json::to_string_pretty(&value).expect("deployment evidence json"),
+        );
+        let evidence = load_public_deployment_evidence(&path)
+            .expect("self-consistent wrong package handoff evidence loads");
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary
+            .public_deployment
+            .public_launch_package_manifest_root_bound);
+        assert!(!summary
+            .public_deployment
+            .public_launch_readiness_artifact_root_bound);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_package_manifest_root
+                .as_deref()
+                .expect("expected package manifest root"),
+            public_launch_package_manifest_root_for_summary(&summary)
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_readiness_artifact_root
+                .as_deref()
+                .expect("expected readiness artifact root"),
+            public_launch_readiness_artifact_root_for_summary(&summary)
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        assert_eq!(
+            remediation.failed_subchecks,
+            vec![
+                "public_launch_package_manifest_root_bound".to_string(),
+                "public_launch_readiness_artifact_root_bound".to_string()
+            ]
+        );
         let _ = fs::remove_file(path);
     }
 
