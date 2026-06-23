@@ -378,6 +378,7 @@ struct Cli {
     public_status_manifest_path: Option<String>,
     public_deployment_runbook_path: Option<String>,
     public_launch_artifact_manifest_path: Option<String>,
+    public_launch_artifact_manifest_verify_path: Option<String>,
     public_launch_bundle_path: Option<String>,
     public_launch_readiness_report_path: Option<String>,
     public_capture_todo_path: Option<String>,
@@ -453,6 +454,7 @@ impl Default for Cli {
             public_status_manifest_path: None,
             public_deployment_runbook_path: None,
             public_launch_artifact_manifest_path: None,
+            public_launch_artifact_manifest_verify_path: None,
             public_launch_bundle_path: None,
             public_launch_readiness_report_path: None,
             public_capture_todo_path: None,
@@ -7095,6 +7097,12 @@ fn run() -> Result<(), String> {
     if let Some(path) = cli.public_launch_artifact_manifest_path.as_deref() {
         write_public_launch_artifact_manifest(path, &summary)?;
     }
+    if let Some(path) = cli
+        .public_launch_artifact_manifest_verify_path
+        .as_deref()
+    {
+        verify_public_launch_artifact_manifest(path, &summary)?;
+    }
     if let Some(path) = cli.public_launch_bundle_path.as_deref() {
         write_public_launch_bundle(path, &summary)?;
     }
@@ -8449,6 +8457,29 @@ fn write_public_launch_artifact_manifest(
         format!("failed to write public launch artifact manifest: {error}")
     })?;
     Ok(())
+}
+
+fn verify_public_launch_artifact_manifest(
+    path: &str,
+    summary: &TestnetSummary,
+) -> Result<(), String> {
+    ensure_local_json_path(path, "--verify-public-launch-artifact-manifest")?;
+    let actual = read_json_file(
+        &PathBuf::from(path),
+        "public launch artifact manifest",
+    )?;
+    ensure(
+        actual.get("kind").and_then(Value::as_str)
+            == Some("nebula-public-launch-artifact-manifest"),
+        "public launch artifact manifest has the wrong kind",
+    )?;
+    ensure_public_launch_artifact_manifest_redacted(&actual)?;
+    let expected = public_launch_artifact_manifest(summary);
+    ensure_public_launch_artifact_manifest_redacted(&expected)?;
+    ensure(
+        actual == expected,
+        "public launch artifact manifest does not match this run",
+    )
 }
 
 fn write_public_launch_bundle(path: &str, summary: &TestnetSummary) -> Result<(), String> {
@@ -18310,6 +18341,14 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
                     "--write-public-launch-artifact-manifest",
                 )?);
             }
+            "--verify-public-launch-artifact-manifest" => {
+                index += 1;
+                cli.public_launch_artifact_manifest_verify_path = Some(parse_string(
+                    &args,
+                    index,
+                    "--verify-public-launch-artifact-manifest",
+                )?);
+            }
             "--write-public-launch-bundle" => {
                 index += 1;
                 cli.public_launch_bundle_path =
@@ -18577,6 +18616,16 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
             "--write-public-launch-artifact-manifest requires --mainnet-readiness",
         )?;
         ensure_local_json_path(path, "--write-public-launch-artifact-manifest")?;
+    }
+    if let Some(path) = cli
+        .public_launch_artifact_manifest_verify_path
+        .as_deref()
+    {
+        ensure(
+            cli.mainnet_readiness,
+            "--verify-public-launch-artifact-manifest requires --mainnet-readiness",
+        )?;
+        ensure_local_json_path(path, "--verify-public-launch-artifact-manifest")?;
     }
     if let Some(path) = cli.public_launch_bundle_path.as_deref() {
         ensure(
@@ -26070,6 +26119,8 @@ OPTIONS:
                               Write a rooted public-alpha deployment runbook for external launch operators
         --write-public-launch-artifact-manifest PATH
                               Write a rooted pre-capture manifest over the public status, bootstrap, runbook, and launch bundle artifacts
+        --verify-public-launch-artifact-manifest PATH
+                              Verify a rooted pre-capture artifact manifest against this run
         --write-public-launch-bundle PATH
                               Write a redacted public-alpha deployment handoff bundle
         --write-public-launch-readiness-report PATH
@@ -28330,6 +28381,19 @@ mod tests {
     }
 
     #[test]
+    fn public_launch_artifact_manifest_verify_requires_mainnet_readiness_mode() {
+        let path = temp_json_path("nebula-public-launch-artifacts-verify-rejected");
+        let error = parse_cli(vec![
+            "--verify-public-launch-artifact-manifest".to_string(),
+            path,
+        ])
+        .expect_err(
+            "public launch artifact manifest verification should require mainnet-readiness mode",
+        );
+        assert!(error.contains("requires --mainnet-readiness"));
+    }
+
+    #[test]
     fn public_launch_bundle_requires_mainnet_readiness_mode() {
         let path = temp_json_path("nebula-public-launch-bundle-rejected");
         let error = parse_cli(vec!["--write-public-launch-bundle".to_string(), path])
@@ -28979,6 +29043,67 @@ mod tests {
         let error = ensure_public_launch_artifact_manifest_redacted(&metadata_tampered)
             .expect_err("metadata-tampered artifact manifest should fail");
         assert!(error.contains("artifact record root mismatch"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_launch_artifact_manifest_verify_accepts_current_run_export() {
+        let path = temp_json_path("nebula-public-launch-artifacts-verify-current");
+        let cli = parse_cli(vec![
+            "--mainnet-readiness".to_string(),
+            "--write-public-launch-artifact-manifest".to_string(),
+            path.clone(),
+            "--verify-public-launch-artifact-manifest".to_string(),
+            path.clone(),
+        ])
+        .expect("public launch artifact manifest write+verify flags should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_launch_artifact_manifest(&path, &summary)
+            .expect("write public launch artifact manifest");
+        verify_public_launch_artifact_manifest(&path, &summary)
+            .expect("current-run public launch artifact manifest should verify");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_launch_artifact_manifest_verify_rejects_re_rooted_stale_manifest() {
+        let path = temp_json_path("nebula-public-launch-artifacts-stale");
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet-readiness CLI should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_launch_artifact_manifest(&path, &summary)
+            .expect("write public launch artifact manifest");
+        verify_public_launch_artifact_manifest(&path, &summary)
+            .expect("fresh public launch artifact manifest should verify");
+
+        let mut stale: Value = serde_json::from_slice(&fs::read(&path).expect("read manifest"))
+            .expect("manifest json");
+        stale["source_roots"]["run_checkpoint_root"] =
+            json!(root(&["tampered-public-launch-artifact-manifest", &summary.manifest_id]));
+        let mut rootless = stale.clone();
+        if let Some(map) = rootless.as_object_mut() {
+            map.remove("public_launch_artifact_manifest_root");
+        }
+        stale["public_launch_artifact_manifest_root"] =
+            json!(value_root("public-launch-artifact-manifest", &rootless));
+        ensure_public_launch_artifact_manifest_redacted(&stale)
+            .expect("re-rooted manifest should still be structurally redacted");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&stale).expect("encode stale manifest")
+            ),
+        )
+        .expect("write stale manifest");
+
+        let error = verify_public_launch_artifact_manifest(&path, &summary)
+            .expect_err("re-rooted stale manifest should fail exact verification");
+        assert!(error.contains("does not match this run"));
         let _ = fs::remove_file(path);
     }
 

@@ -206,7 +206,7 @@ public status manifest, typed deployment runbook, combined launch handoff bundle
 schema v5 deployment evidence worksheet, and standalone capture todo:
 
 ```powershell
-cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-bootstrap-profile .\nebula-public-bootstrap.json --write-public-status-manifest .\nebula-public-status.json --write-public-deployment-runbook .\nebula-public-deployment-runbook.json --write-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --write-public-launch-bundle .\nebula-public-launch-bundle.json --write-public-capture-todo .\nebula-public-capture-todo.json --verify-public-capture-todo .\nebula-public-capture-todo.json --write-public-deployment-evidence-template .\nebula-public-deployment-template.json --write-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --verify-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --json
+cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-bootstrap-profile .\nebula-public-bootstrap.json --write-public-status-manifest .\nebula-public-status.json --write-public-deployment-runbook .\nebula-public-deployment-runbook.json --write-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --verify-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --write-public-launch-bundle .\nebula-public-launch-bundle.json --write-public-capture-todo .\nebula-public-capture-todo.json --verify-public-capture-todo .\nebula-public-capture-todo.json --write-public-deployment-evidence-template .\nebula-public-deployment-template.json --write-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --verify-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --json
 ```
 
 The same public-alpha handoff can be exported as one rooted package directory:
@@ -389,10 +389,12 @@ runbook, and public launch bundle. It records each artifact's export flag,
 root field, root, order, required-before-capture flag, publishability flag,
 non-evidence/non-custody flags, record root, and a collection `artifact_set_root`
 without embedding operator-private evidence. The manifest guard recomputes the
-artifact record, set, and manifest roots before export/package verification. The
-capture plan and deployment evidence worksheet bind `public_launch_artifact_manifest_root` and
-`public_launch_artifact_set_root`, so deployment CI can freeze the exact files
-used before public probes, TLS pin capture, and observer attestations begin.
+artifact record, set, and manifest roots before export, standalone
+`--verify-public-launch-artifact-manifest`, and package verification. The
+capture plan and deployment evidence worksheet bind
+`public_launch_artifact_manifest_root` and `public_launch_artifact_set_root`, so
+deployment CI can freeze the exact files used before public probes, TLS pin
+capture, and observer attestations begin.
 
 `--write-public-launch-bundle path\to\bundle.json` also requires
 `--mainnet-readiness` and writes a `kind:

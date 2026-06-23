@@ -3230,8 +3230,9 @@ real XMR.
   root, order, required-before-capture flag, publishability flag,
   non-evidence/non-custody flags, and record root, plus a collection
   `artifact_set_root`, without embedding operator-private evidence. The
-  manifest guard recomputes those record, set, and manifest roots before export
-  or package verification. The evidence worksheet and capture plan bind
+  manifest guard recomputes those record, set, and manifest roots before export,
+  standalone manifest verification, or package verification. The evidence
+  worksheet and capture plan bind
   `public_launch_artifact_manifest_root` and
   `public_launch_artifact_set_root` so CI can detect swapped or stale launch
   artifacts before TLS, public probes, or observer attestations are captured.
