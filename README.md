@@ -3392,6 +3392,7 @@ real XMR.
   attestation. The
   assembler binds the current run's public status manifest, launch bundle,
   package file-set root, bootstrap profile, launch artifact manifest roots,
+  release approval template root, release-authority registry template root,
   capture plan, preflight checklist, completed preflight
   receipt, completed runbook receipt, node set, and policy roots, derives
   preflight phase-set and receipt roots, derives runbook step-receipt-set and
@@ -3427,7 +3428,9 @@ real XMR.
   the current rooted package file set, requires the embedded
   `public_launch_package_manifest_root` and
   `public_launch_readiness_artifact_root` to match the pre-capture launch
-  package handoff, and requires the embedded
+  package handoff, requires the embedded `release_approval_template_root`
+  and `release_authority_registry_template_root` to match the release
+  handoff templates in the verified package, and requires the embedded
   `deployment_preflight_receipt_root`, `deployment_preflight_phase_set_root`,
   and phase count to match the completed receipt body. It also requires the
   embedded public deployment runbook root, step-set root, `public_deployment_runbook_receipt_root`,
@@ -3440,7 +3443,8 @@ real XMR.
   endpoint fields, invalid freshness windows, stale capture times,
   invalid deployment run ids, malformed preflight receipt fields or phases,
   malformed runbook receipt fields or steps, expected capture-plan,
-  capture-contract, preflight, package-manifest, and readiness-artifact roots,
+  capture-contract, preflight, package-manifest, readiness-artifact,
+  release-approval-template, and release-authority-registry-template roots,
   mismatched frozen launch/status roots,
   missing or extra TLS endpoint pin roles,
   malformed TLS endpoint pin records, missing or extra public-surface probe
@@ -3464,7 +3468,8 @@ real XMR.
   artifact.
 - Filled public deployment attestations bind the launch bundle to publicly
   routable HTTPS endpoints, the exact capture plan root, capture contract root,
-  deployment preflight checklist root, package file-set root, completed
+  deployment preflight checklist root, package file-set root, release approval
+  template root, release-authority registry template root, completed
   preflight receipt root and phase-set root, completed runbook receipt root and
   step-receipt-set root, typed TLS endpoint-pin records for public RPC,
   status-page, health, metrics, incident-contact, faucet, and reset-runbook surfaces, typed bootstrap node

@@ -681,7 +681,8 @@ bootstrap operator registry records, observer records, and observer/operator
 signature verification transcripts must all bind the same `deployment_run_id`
 so deployment CI cannot stitch together independently valid fragments from
 different captures. The runner binds the current run's public status manifest,
-launch bundle, package file-set root, bootstrap profile, node set, and policy
+launch bundle, package file-set root, release approval template root,
+release-authority registry template root, bootstrap profile, node set, and policy
 roots, derives TLS endpoint-pin set roots and the aggregate SPKI root from
 `tls_endpoint_pins`, derives bootstrap node/operator/region roots plus public
 endpoint-set roots and the bootstrap operator count from `bootstrap_nodes`,
@@ -707,7 +708,9 @@ require the embedded `public_launch_package_file_set_root` to match the current
 rooted package file set, require the embedded
 `public_launch_package_manifest_root` and
 `public_launch_readiness_artifact_root` to match the pre-capture launch package
-handoff, and require the embedded preflight receipt root,
+handoff, require the embedded `release_approval_template_root` and
+`release_authority_registry_template_root` to match the release handoff
+templates in the verified package, and require the embedded preflight receipt root,
 phase-set root, and phase count to match the completed receipt body. Schema v5 also requires the embedded
 public deployment runbook root, step-set root, runbook receipt root,
 step-receipt-set root, and step receipt count to match the completed runbook
@@ -729,13 +732,16 @@ routable P2P endpoint. It must bind the capture plan root, capture contract
 root, and deployment preflight checklist root generated for the same run.
 It also must bind the current `public_launch_package_file_set_root`,
 the pre-capture `public_launch_package_manifest_root`, the pre-capture
-`public_launch_readiness_artifact_root`,
+`public_launch_readiness_artifact_root`, the package-derived
+`release_approval_template_root`, the package-derived
+`release_authority_registry_template_root`,
 `deployment_preflight_receipt`,
 `deployment_preflight_receipt_root`, `deployment_preflight_phase_set_root`, and
 `deployment_preflight_phase_count`, proving every required preflight phase was
 completed in order before the public deployment evidence was assembled.
-When either package handoff root is stale, the deployment report exposes the
-expected package file-set, package manifest, and readiness artifact roots
+When either package handoff or release-template root is stale, the deployment
+report exposes the expected package file-set, package manifest, readiness
+artifact, release approval template, and release-authority registry roots
 alongside the failed subchecks so the capture can be repaired from the
 pre-capture package files.
 It must also bind `public_deployment_runbook_receipt`,
