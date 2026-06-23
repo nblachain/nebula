@@ -3550,7 +3550,10 @@ real XMR.
   per-surface probe roots/counts, placeholder hygiene, and local bootstrap/
   finality dependencies, wallet recovery, mempool accountability, bridge release
   safety, privacy classification, and whether external deployment capture is
-  required. That private operator report is intentionally absent from the public status
+  required. When the deployment attestation is still absent, the remediation
+  still seeds the current capture-plan, package file-set, status, runbook, and
+  bootstrap topology roots so deployment CI can start capture from deterministic
+  expected bindings. That private operator report is intentionally absent from the public status
   manifest and launch bundle.
 - External review evidence must bind the release-candidate manifest id, latest
   height, and local run-profile, Wasm runtime, crypto-inventory,

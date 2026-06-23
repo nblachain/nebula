@@ -834,6 +834,9 @@ bindings, aggregate probe repair roots/counts, per-endpoint publicness, TLS pin 
 proxy/firewall/rate-limit policy repair roots, per-surface probe roots/counts,
 placeholder hygiene, local bootstrap/finality dependencies, wallet recovery,
 mempool accountability, bridge release safety, privacy-denial, and custody
+bindings. When deployment evidence is still absent, the remediation still seeds
+the current capture-plan, package file-set, status, runbook, and bootstrap
+topology roots so deployment CI can begin external capture from deterministic expected
 bindings; the redacted public status manifest does not include that local
 operator report.
 

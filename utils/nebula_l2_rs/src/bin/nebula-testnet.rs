@@ -7767,7 +7767,15 @@ fn public_launch_remediation_for_check(
         Vec::new()
     };
     let repair_roots = if check.id == "public-launch-deployment-attestation" {
-        public_deployment_repair_roots(&summary.public_deployment, &failed_subchecks)
+        let mut repair_roots =
+            public_deployment_repair_roots(&summary.public_deployment, &failed_subchecks);
+        if summary.public_deployment.evidence_root.is_none() {
+            repair_roots.extend(public_deployment_missing_evidence_repair_roots(
+                summary,
+                &failed_subchecks,
+            ));
+        }
+        repair_roots
     } else {
         BTreeMap::new()
     };
@@ -7819,6 +7827,117 @@ fn public_launch_remediation_for_check(
         external_capture_required,
         remediation_root,
     }
+}
+
+fn public_deployment_missing_evidence_repair_roots(
+    summary: &TestnetSummary,
+    failed_subchecks: &[String],
+) -> BTreeMap<String, String> {
+    let failed = failed_subchecks
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let public_status = public_status_manifest(summary);
+    let public_bundle = public_launch_bundle(summary);
+    let capture_plan = public_deployment_capture_plan(summary);
+    let deployment_runbook = public_deployment_runbook(summary);
+    let mut candidates = BTreeMap::new();
+    candidates.insert(
+        "public_launch_bundle_root_bound",
+        public_bundle["public_launch_bundle_root"]
+            .as_str()
+            .unwrap_or("missing-public-launch-bundle-root")
+            .to_string(),
+    );
+    candidates.insert(
+        "public_launch_package_file_set_root_bound",
+        public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id),
+    );
+    candidates.insert(
+        "public_bootstrap_profile_root_bound",
+        summary.public_bootstrap_profile.profile_root.clone(),
+    );
+    candidates.insert(
+        "public_bootstrap_profile_report_root_bound",
+        summary.public_bootstrap_profile.report_root.clone(),
+    );
+    candidates.insert(
+        "rate_limit_policy_root_bound",
+        summary.public_bootstrap_profile.rate_limit_policy_root.clone(),
+    );
+    candidates.insert(
+        "status_manifest_root_bound",
+        public_status["public_status_manifest_root"]
+            .as_str()
+            .unwrap_or("missing-public-status-manifest-root")
+            .to_string(),
+    );
+    candidates.insert(
+        "public_status_manifest_root_bound",
+        public_status["public_status_manifest_root"]
+            .as_str()
+            .unwrap_or("missing-public-status-manifest-root")
+            .to_string(),
+    );
+    candidates.insert(
+        "public_status_manifest_payload_bound",
+        public_status["public_status_manifest_root"]
+            .as_str()
+            .unwrap_or("missing-public-status-manifest-root")
+            .to_string(),
+    );
+    candidates.insert(
+        "capture_plan_root_bound",
+        capture_plan["capture_plan_root"]
+            .as_str()
+            .unwrap_or("missing-public-deployment-capture-plan-root")
+            .to_string(),
+    );
+    candidates.insert(
+        "capture_contract_root_bound",
+        capture_plan["capture_contract_root"]
+            .as_str()
+            .unwrap_or("missing-public-deployment-capture-contract-root")
+            .to_string(),
+    );
+    candidates.insert(
+        "deployment_preflight_checklist_root_bound",
+        capture_plan["deployment_preflight"]["checklist_root"]
+            .as_str()
+            .unwrap_or("missing-public-deployment-preflight-checklist-root")
+            .to_string(),
+    );
+    candidates.insert(
+        "public_deployment_runbook_root_bound",
+        deployment_runbook["public_deployment_runbook_root"]
+            .as_str()
+            .unwrap_or("missing-public-deployment-runbook-root")
+            .to_string(),
+    );
+    candidates.insert(
+        "public_deployment_runbook_step_set_root_bound",
+        deployment_runbook["step_set_root"]
+            .as_str()
+            .unwrap_or("missing-public-deployment-runbook-step-set-root")
+            .to_string(),
+    );
+    candidates.insert(
+        "bootstrap_node_set_root_bound",
+        summary.public_bootstrap_profile.bootstrap_node_set_root.clone(),
+    );
+    candidates.insert(
+        "bootstrap_operator_set_root_bound",
+        summary.public_bootstrap_profile.bootstrap_operator_set_root.clone(),
+    );
+    candidates.insert(
+        "bootstrap_region_set_root_bound",
+        summary.public_bootstrap_profile.bootstrap_region_set_root.clone(),
+    );
+    candidates
+        .into_iter()
+        .filter(|(subcheck, expected_root)| failed.contains(*subcheck) && is_hex_root(expected_root))
+        .map(|(subcheck, expected_root)| (subcheck.to_string(), expected_root))
+        .collect()
 }
 
 fn public_deployment_repair_roots(
@@ -38844,6 +38963,95 @@ mod tests {
         assert!(remediation
             .failed_subchecks
             .contains(&"public_launch_package_file_set_root_bound".to_string()));
+        let expected_capture_plan = public_deployment_capture_plan(&summary);
+        let expected_public_status = public_status_manifest(&summary);
+        let expected_public_bundle = public_launch_bundle(&summary);
+        let expected_runbook = public_deployment_runbook(&summary);
+        let expected_package_file_set_root =
+            public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("capture_plan_root_bound")
+                .map(String::as_str),
+            expected_capture_plan["capture_plan_root"].as_str()
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("capture_contract_root_bound")
+                .map(String::as_str),
+            expected_capture_plan["capture_contract_root"].as_str()
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("deployment_preflight_checklist_root_bound")
+                .map(String::as_str),
+            expected_capture_plan["deployment_preflight"]["checklist_root"].as_str()
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("public_launch_bundle_root_bound")
+                .map(String::as_str),
+            expected_public_bundle["public_launch_bundle_root"].as_str()
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("public_launch_package_file_set_root_bound")
+                .map(String::as_str),
+            Some(expected_package_file_set_root.as_str())
+        );
+        assert!(!remediation
+            .repair_roots
+            .contains_key("public_launch_package_manifest_root_bound"));
+        assert!(!remediation
+            .repair_roots
+            .contains_key("public_launch_readiness_artifact_root_bound"));
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("public_status_manifest_root_bound")
+                .map(String::as_str),
+            expected_public_status["public_status_manifest_root"].as_str()
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("public_deployment_runbook_root_bound")
+                .map(String::as_str),
+            expected_runbook["public_deployment_runbook_root"].as_str()
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("public_deployment_runbook_step_set_root_bound")
+                .map(String::as_str),
+            expected_runbook["step_set_root"].as_str()
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("bootstrap_node_set_root_bound")
+                .map(String::as_str),
+            Some(summary.public_bootstrap_profile.bootstrap_node_set_root.as_str())
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("bootstrap_operator_set_root_bound")
+                .map(String::as_str),
+            Some(summary.public_bootstrap_profile.bootstrap_operator_set_root.as_str())
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("bootstrap_region_set_root_bound")
+                .map(String::as_str),
+            Some(summary.public_bootstrap_profile.bootstrap_region_set_root.as_str())
+        );
         assert!(is_hex_root(&remediation.remediation_root));
         let public_status = public_status_manifest(&summary);
         assert!(!value_contains_exact_key(
@@ -38882,6 +39090,16 @@ mod tests {
                 .as_array()
                 .expect("failed subchecks")
                 .contains(&json!("public_launch_package_file_set_root_bound"))
+        );
+        assert_eq!(
+            summary_json["public_launch_readiness"]["remediations"][0]["repair_roots"]
+                ["capture_plan_root_bound"],
+            expected_capture_plan["capture_plan_root"]
+        );
+        assert!(
+            summary_json["public_launch_readiness"]["remediations"][0]["repair_roots"]
+                .get("public_launch_package_manifest_root_bound")
+                .is_none()
         );
     }
 
