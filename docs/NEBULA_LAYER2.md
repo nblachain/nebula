@@ -3254,6 +3254,12 @@ real XMR.
   the exact top-level package file set and package-level readiness summary, and
   fails on stale, tampered, swapped, cross-run, shape-tampered, or extra-file
   package directories before public evidence capture begins.
+- A public testnet certification export writes and verifies the rooted launch
+  package, emits the operator-only launch readiness report, and records
+  `local_testnet_ready`, `public_launch_ready`, package/report roots, blocking
+  gaps, remediation commands, and whether external capture is still required in
+  `nebula-public-testnet-certification.json`. It is deliberately operator-local
+  and remains blocked until the filled schema v5 deployment attestation passes.
 - A local operator-only public launch readiness report export gives CI a
   standalone `nebula-public-launch-readiness-report` with the launch level,
   blocker ids, remediation commands, public status/bundle/capture-plan roots,

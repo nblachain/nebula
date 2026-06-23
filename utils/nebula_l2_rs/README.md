@@ -222,6 +222,13 @@ before any public endpoint evidence is filled:
 cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-launch-package .\nebula-public-launch-package --verify-public-launch-package .\nebula-public-launch-package --json
 ```
 
+To produce a one-command local certification directory with the verified
+package, operator launch report, and exact remaining blocker/remediation state:
+
+```powershell
+cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-testnet-certification .\nebula-public-testnet-certification --json
+```
+
 The runner uses the Monero `stagenet` bridge profile by default, produces local
 L2 blocks, exercises deposit observation and withdrawal release accounting,
 publishes reserve coverage roots, prepares epoch checkpoint/anchor, DA,
@@ -425,6 +432,18 @@ root, verifies package-only/public-alpha boundaries and per-artifact
 capture/operator-fill flags, enforces the exact top-level package file set and
 package-level readiness summary, and fails if the directory contains stale,
 tampered, swapped, cross-run, or extra handoff files.
+
+`--write-public-testnet-certification path\to\cert-dir` also requires
+`--mainnet-readiness` and writes a one-command public-testnet certification
+directory. It exports and verifies `nebula-public-launch-package`, writes the
+operator-only launch readiness report, and writes
+`nebula-public-testnet-certification.json` with `local_testnet_ready`,
+`public_launch_ready`, package roots, launch report roots, blocking gaps,
+remediations, whether external capture is still required, and the exact capture,
+verify, assemble, and launch-gate commands. The certification artifact is
+operator-local, not public deployment evidence and not mainnet custody approval;
+it truthfully remains `public-launch-blocked` until a filled schema v5
+deployment attestation passes the gate.
 
 `--write-public-deployment-evidence-template path\to\deployment-template.json`
 also requires `--mainnet-readiness` and writes the schema v5 worksheet that a
