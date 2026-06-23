@@ -388,6 +388,8 @@ struct Cli {
     public_testnet_certification_verify_dir: Option<String>,
     public_deployment_evidence_template_path: Option<String>,
     public_deployment_capture_plan_path: Option<String>,
+    public_deployment_capture_scaffold_path: Option<String>,
+    public_deployment_capture_scaffold_package_dir: Option<String>,
     public_deployment_capture_verify_path: Option<String>,
     public_deployment_capture_audit_path: Option<String>,
     public_deployment_capture_audit_output_path: Option<String>,
@@ -458,6 +460,8 @@ impl Default for Cli {
             public_testnet_certification_verify_dir: None,
             public_deployment_evidence_template_path: None,
             public_deployment_capture_plan_path: None,
+            public_deployment_capture_scaffold_path: None,
+            public_deployment_capture_scaffold_package_dir: None,
             public_deployment_capture_verify_path: None,
             public_deployment_capture_audit_path: None,
             public_deployment_capture_audit_output_path: None,
@@ -7115,6 +7119,13 @@ fn run() -> Result<(), String> {
     if let Some(path) = cli.public_deployment_capture_plan_path.as_deref() {
         write_public_deployment_capture_plan(path, &summary)?;
     }
+    if let (Some(path), Some(package_dir)) = (
+        cli.public_deployment_capture_scaffold_path.as_deref(),
+        cli.public_deployment_capture_scaffold_package_dir
+            .as_deref(),
+    ) {
+        write_public_deployment_capture_scaffold(path, package_dir, &summary)?;
+    }
     if let (Some(capture_path), Some(output_path)) = (
         cli.public_deployment_capture_audit_path.as_deref(),
         cli.public_deployment_capture_audit_output_path.as_deref(),
@@ -9496,6 +9507,97 @@ fn write_public_deployment_capture_plan(
     fs::write(path, format!("{encoded}\n"))
         .map_err(|error| format!("failed to write public deployment capture plan: {error}"))?;
     Ok(())
+}
+
+fn write_public_deployment_capture_scaffold(
+    path: &str,
+    package_dir: &str,
+    summary: &TestnetSummary,
+) -> Result<(), String> {
+    ensure_local_json_path(path, "--write-public-deployment-capture-scaffold")?;
+    ensure_local_output_dir_path(package_dir, "--public-deployment-capture-scaffold-package")?;
+    verify_public_launch_package(package_dir, summary)?;
+    let package_dir = PathBuf::from(package_dir);
+    let package_manifest = read_json_file(
+        &package_dir.join("nebula-public-launch-package.json"),
+        "public launch package manifest",
+    )?;
+    let launch_report = read_json_file(
+        &package_dir.join("nebula-public-launch-readiness-report.json"),
+        "public launch readiness report",
+    )?;
+    let scaffold =
+        public_deployment_capture_scaffold(summary, &package_manifest, &launch_report)?;
+    write_json_artifact(
+        &PathBuf::from(path),
+        &scaffold,
+        "public-deployment-capture-scaffold",
+    )
+}
+
+fn public_deployment_capture_scaffold(
+    summary: &TestnetSummary,
+    package_manifest: &Value,
+    launch_report: &Value,
+) -> Result<Value, String> {
+    let capture_plan = public_deployment_capture_plan(summary);
+    ensure_public_deployment_capture_plan_redacted(&capture_plan)?;
+    let capture_plan_root = required_root(&capture_plan, "capture_plan_root")?;
+    let capture_contract_root = required_root(&capture_plan, "capture_contract_root")?;
+    let deployment_preflight_checklist_root = required_root(
+        capture_plan
+            .get("deployment_preflight")
+            .ok_or_else(|| "public deployment capture plan missing preflight".to_string())?,
+        "checklist_root",
+    )?;
+    let public_launch_package_file_set_root =
+        required_root(package_manifest, "package_file_set_root")?;
+    let public_launch_package_manifest_root =
+        required_root(package_manifest, "package_manifest_root")?;
+    let public_launch_readiness_artifact_root =
+        required_root(launch_report, "public_launch_readiness_artifact_root")?;
+    let public_status = public_status_manifest(summary);
+    let public_launch_bundle = public_launch_bundle(summary);
+    let deployment_runbook = public_deployment_runbook(summary);
+    let public_status_manifest_root = required_root(&public_status, "public_status_manifest_root")?;
+    let public_launch_bundle_root =
+        required_root(&public_launch_bundle, "public_launch_bundle_root")?;
+
+    let mut scaffold = public_deployment_evidence_template(summary);
+    scaffold["kind"] = json!("nebula-public-deployment-capture-scaffold");
+    scaffold["operator_notice"] = json!("Fill the remaining endpoint, TLS, probe, bootstrap, operator-registry, observer, preflight, runbook, freshness, and evidence-root placeholders, then run --audit-public-deployment-capture followed by --verify-public-deployment-capture before assembling public deployment evidence. This scaffold is package-bound but is not public deployment evidence.");
+    scaffold["capture_plan_root"] = json!(capture_plan_root);
+    scaffold["capture_contract_root"] = json!(capture_contract_root);
+    scaffold["deployment_preflight_checklist_root"] =
+        json!(deployment_preflight_checklist_root);
+    scaffold["public_launch_package_file_set_root"] =
+        json!(public_launch_package_file_set_root);
+    scaffold["public_launch_package_manifest_root"] =
+        json!(public_launch_package_manifest_root);
+    scaffold["public_launch_readiness_artifact_root"] =
+        json!(public_launch_readiness_artifact_root);
+    let deployment_preflight_checklist_root = scaffold["deployment_preflight_checklist_root"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let capture_contract_root = scaffold["capture_contract_root"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    scaffold["deployment_preflight_receipt"] = public_deployment_preflight_receipt_template(
+        &deployment_preflight_checklist_root,
+        &capture_contract_root,
+        &public_launch_bundle_root,
+        &public_status_manifest_root,
+    );
+    scaffold["public_deployment_runbook_receipt"] =
+        public_deployment_runbook_receipt_template(
+            &deployment_runbook,
+            &capture_contract_root,
+            &public_launch_bundle_root,
+            &public_status_manifest_root,
+        );
+    Ok(scaffold)
 }
 
 fn write_public_deployment_capture_audit(
@@ -18150,6 +18252,22 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
                     "--write-public-deployment-capture-plan",
                 )?);
             }
+            "--write-public-deployment-capture-scaffold" => {
+                index += 1;
+                cli.public_deployment_capture_scaffold_path = Some(parse_string(
+                    &args,
+                    index,
+                    "--write-public-deployment-capture-scaffold",
+                )?);
+            }
+            "--public-deployment-capture-scaffold-package" => {
+                index += 1;
+                cli.public_deployment_capture_scaffold_package_dir = Some(parse_string(
+                    &args,
+                    index,
+                    "--public-deployment-capture-scaffold-package",
+                )?);
+            }
             "--verify-public-deployment-capture" => {
                 index += 1;
                 cli.public_deployment_capture_verify_path = Some(parse_string(
@@ -18382,6 +18500,30 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
             "--write-public-deployment-capture-plan requires --mainnet-readiness",
         )?;
         ensure_local_json_path(path, "--write-public-deployment-capture-plan")?;
+    }
+    if cli.public_deployment_capture_scaffold_path.is_some()
+        || cli
+            .public_deployment_capture_scaffold_package_dir
+            .is_some()
+    {
+        ensure(
+            cli.mainnet_readiness,
+            "--write-public-deployment-capture-scaffold requires --mainnet-readiness",
+        )?;
+        let scaffold_path = cli
+            .public_deployment_capture_scaffold_path
+            .as_deref()
+            .ok_or_else(|| {
+                "--public-deployment-capture-scaffold-package requires --write-public-deployment-capture-scaffold".to_string()
+            })?;
+        let package_dir = cli
+            .public_deployment_capture_scaffold_package_dir
+            .as_deref()
+            .ok_or_else(|| {
+                "--write-public-deployment-capture-scaffold requires --public-deployment-capture-scaffold-package".to_string()
+            })?;
+        ensure_local_json_path(scaffold_path, "--write-public-deployment-capture-scaffold")?;
+        ensure_local_output_dir_path(package_dir, "--public-deployment-capture-scaffold-package")?;
     }
     if let Some(path) = cli.public_deployment_capture_verify_path.as_deref() {
         ensure(
@@ -25770,6 +25912,10 @@ OPTIONS:
                               Write a schema v5 public deployment evidence worksheet for incident-contact probes, runbook receipts, probe transcripts, and observer provenance
         --write-public-deployment-capture-plan PATH
                               Write a redacted deployment CI capture plan listing required public evidence and probe coverage
+        --write-public-deployment-capture-scaffold PATH
+                              Write a package-bound public deployment capture scaffold with provable roots filled
+        --public-deployment-capture-scaffold-package DIR
+                              Verified public launch package directory used as the capture scaffold root source
         --verify-public-deployment-capture PATH
                               Verify captured deployment probe/policy JSON without writing the final attestation
         --audit-public-deployment-capture PATH
@@ -28095,6 +28241,28 @@ mod tests {
     }
 
     #[test]
+    fn public_deployment_capture_scaffold_requires_mainnet_readiness_and_package() {
+        let path = temp_json_path("nebula-public-deployment-capture-scaffold-rejected");
+        let package_dir = temp_json_path("nebula-public-launch-package-scaffold-rejected");
+        let error = parse_cli(vec![
+            "--write-public-deployment-capture-scaffold".to_string(),
+            path.clone(),
+            "--public-deployment-capture-scaffold-package".to_string(),
+            package_dir,
+        ])
+        .expect_err("public deployment capture scaffold should require mainnet-readiness mode");
+        assert!(error.contains("requires --mainnet-readiness"));
+
+        let error = parse_cli(vec![
+            "--mainnet-readiness".to_string(),
+            "--write-public-deployment-capture-scaffold".to_string(),
+            path,
+        ])
+        .expect_err("public deployment capture scaffold should require a package source");
+        assert!(error.contains("--public-deployment-capture-scaffold-package"));
+    }
+
+    #[test]
     fn public_deployment_capture_verify_requires_mainnet_readiness_mode() {
         let path = temp_json_path("nebula-public-deployment-capture-verify-rejected");
         let error = parse_cli(vec![
@@ -30136,6 +30304,115 @@ mod tests {
         assert!(error.contains("capture plan root mismatch"));
         assert!(!value_contains_placeholder(&value));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_capture_scaffold_fills_verified_package_roots_without_evidence_claim() {
+        let counter = TEST_FILE_COUNTER.fetch_add(1, AtomicOrdering::SeqCst);
+        let package_dir = env::temp_dir().join(format!(
+            "nebula-public-launch-package-scaffold-{}",
+            root(&["test-public-capture-scaffold-package", &counter.to_string()])
+        ));
+        let package_dir_string = package_dir.to_string_lossy().into_owned();
+        let scaffold_path = temp_json_path("nebula-public-deployment-capture-scaffold");
+        let cli = parse_cli(vec![
+            "--mainnet-readiness".to_string(),
+            "--write-public-launch-package".to_string(),
+            package_dir_string.clone(),
+            "--write-public-deployment-capture-scaffold".to_string(),
+            scaffold_path.clone(),
+            "--public-deployment-capture-scaffold-package".to_string(),
+            package_dir_string.clone(),
+        ])
+        .expect("public deployment capture scaffold flags should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_launch_package(&package_dir_string, &summary)
+            .expect("write public launch package");
+        write_public_deployment_capture_scaffold(
+            &scaffold_path,
+            &package_dir_string,
+            &summary,
+        )
+        .expect("write public deployment capture scaffold");
+
+        let scaffold: Value =
+            serde_json::from_slice(&fs::read(&scaffold_path).expect("read scaffold"))
+                .expect("scaffold json");
+        let capture_plan = public_deployment_capture_plan(&summary);
+        let package_manifest: Value = serde_json::from_slice(
+            &fs::read(package_dir.join("nebula-public-launch-package.json"))
+                .expect("read package manifest"),
+        )
+        .expect("package manifest json");
+        let launch_report: Value = serde_json::from_slice(
+            &fs::read(package_dir.join("nebula-public-launch-readiness-report.json"))
+                .expect("read launch report"),
+        )
+        .expect("launch report json");
+
+        assert_eq!(
+            scaffold["kind"],
+            "nebula-public-deployment-capture-scaffold"
+        );
+        assert_eq!(scaffold["template_only"], true);
+        assert_eq!(scaffold["operator_fill_required"], true);
+        assert_eq!(scaffold["usable_as_public_deployment_evidence"], false);
+        assert_eq!(
+            scaffold["capture_plan_root"],
+            capture_plan["capture_plan_root"]
+        );
+        assert_eq!(
+            scaffold["capture_contract_root"],
+            capture_plan["capture_contract_root"]
+        );
+        assert_eq!(
+            scaffold["deployment_preflight_checklist_root"],
+            capture_plan["deployment_preflight"]["checklist_root"]
+        );
+        assert_eq!(
+            scaffold["public_launch_package_file_set_root"],
+            package_manifest["package_file_set_root"]
+        );
+        assert_eq!(
+            scaffold["public_launch_package_manifest_root"],
+            package_manifest["package_manifest_root"]
+        );
+        assert_eq!(
+            scaffold["public_launch_readiness_artifact_root"],
+            launch_report["public_launch_readiness_artifact_root"]
+        );
+        assert_eq!(
+            scaffold["deployment_preflight_receipt"]["capture_contract_root"],
+            scaffold["capture_contract_root"]
+        );
+        assert_eq!(
+            scaffold["deployment_preflight_receipt"]["deployment_preflight_checklist_root"],
+            scaffold["deployment_preflight_checklist_root"]
+        );
+        assert_eq!(
+            scaffold["public_deployment_runbook_receipt"]["capture_contract_root"],
+            scaffold["capture_contract_root"]
+        );
+
+        let audit = public_deployment_capture_audit(&scaffold_path, &summary)
+            .expect("audit scaffold");
+        assert_eq!(audit["missing_required_fields"], json!([]));
+        assert_eq!(audit["capture_plan_root_matches"], true);
+        assert_eq!(audit["capture_contract_root_matches"], true);
+        assert_eq!(audit["deployment_preflight_checklist_root_matches"], true);
+        assert_eq!(audit["public_launch_package_file_set_root_matches"], true);
+        assert_eq!(audit["public_launch_package_manifest_root_matches"], true);
+        assert_eq!(audit["public_launch_readiness_artifact_root_matches"], true);
+        assert_eq!(audit["placeholder_present"], true);
+        assert_eq!(audit["assembler_ready"], false);
+        let error = load_public_deployment_evidence(&scaffold_path)
+            .expect_err("scaffold must not be accepted as public deployment evidence");
+        assert!(error.contains("placeholders"));
+
+        let _ = fs::remove_file(scaffold_path);
+        let _ = fs::remove_dir_all(package_dir);
     }
 
     #[test]

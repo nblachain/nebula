@@ -3339,6 +3339,16 @@ real XMR.
   ordered public deployment runbook step. This keeps the remaining
   public-launch blocker operationally precise without letting the local runner
   invent external reachability, TLS, or observer-signature evidence.
+- A package-bound capture scaffold export lets deployment CI start from a
+  verified `nebula-public-launch-package` directory and write a schema v5
+  capture worksheet with the current capture-plan root, capture-contract root,
+  deployment preflight checklist root, package file-set root, package manifest
+  root, readiness artifact root, and matching preflight/runbook receipt
+  bindings already filled. The scaffold is still marked operator-fill-required
+  and unusable as public deployment evidence; live endpoints, TLS pins, public
+  probes, bootstrap/operator records, observer signatures, freshness, and the
+  final evidence root must still be captured before the public launch gate can
+  pass.
 - A public deployment evidence assembler lets deployment automation feed
   captured endpoint, TLS, typed policy, probe, observer, runbook receipt,
   capture-plan, and freshness transcripts into the runner and receive a rooted schema v5

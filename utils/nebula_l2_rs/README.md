@@ -222,6 +222,13 @@ before any public endpoint evidence is filled:
 cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-launch-package .\nebula-public-launch-package --verify-public-launch-package .\nebula-public-launch-package --json
 ```
 
+To turn that verified package into a filled-root capture worksheet before the
+deployment system adds live endpoint, TLS, probe, and observer evidence:
+
+```powershell
+cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --verify-public-launch-package .\nebula-public-launch-package --write-public-deployment-capture-scaffold .\nebula-public-deployment-capture.json --public-deployment-capture-scaffold-package .\nebula-public-launch-package --json
+```
+
 To produce a one-command local certification directory with the verified
 package, operator launch report, and exact remaining blocker/remediation state:
 
@@ -530,6 +537,20 @@ order. The assembler derives `deployment_preflight_phase_set_root`,
 `deployment_preflight_receipt_root`, and `deployment_preflight_phase_count`
 from that receipt and rejects missing, incomplete, out-of-order, stale, or
 root-mismatched phase receipts.
+
+`--write-public-deployment-capture-scaffold path\to\capture.json
+--public-deployment-capture-scaffold-package path\to\package-dir` also requires
+`--mainnet-readiness`. It first verifies the supplied public launch package,
+then writes a non-evidence schema v5 capture scaffold with the current
+`capture_plan_root`, `capture_contract_root`,
+`deployment_preflight_checklist_root`, package file-set root, package manifest
+root, readiness artifact root, and matching preflight/runbook receipt bindings
+already filled from the verified package and current release-candidate summary.
+The scaffold still contains placeholders for the live public endpoints, TLS
+pins, probe transcripts, bootstrap/operator records, observer signatures,
+freshness window, and evidence root, so `--audit-public-deployment-capture`
+continues to report it as incomplete until deployment CI captures real external
+evidence.
 
 `--audit-public-deployment-capture path\to\capture.json
 --write-public-deployment-capture-audit path\to\capture-audit.json` also
