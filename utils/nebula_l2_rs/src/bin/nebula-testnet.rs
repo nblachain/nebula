@@ -135,7 +135,7 @@ const REQUIRED_PUBLIC_DEPLOYMENT_PROBE_ROOT_FIELDS: [&str; 12] = [
     "reset_runbook_probe_root",
     "private_summary_probe_root",
 ];
-const PUBLIC_LAUNCH_PACKAGE_ARTIFACTS: [(&str, &str, &str); 8] = [
+const PUBLIC_LAUNCH_PACKAGE_ARTIFACTS: [(&str, &str, &str); 9] = [
     (
         "public-status-manifest",
         "nebula-public-status.json",
@@ -175,6 +175,11 @@ const PUBLIC_LAUNCH_PACKAGE_ARTIFACTS: [(&str, &str, &str); 8] = [
         "public-deployment-capture-plan",
         "nebula-public-deployment-capture-plan.json",
         "capture_plan_root",
+    ),
+    (
+        "public-capture-todo",
+        "nebula-public-capture-todo.json",
+        "public_capture_todo_root",
     ),
 ];
 const REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS: &[&str] = &[
@@ -8481,6 +8486,120 @@ fn public_launch_readiness_report_artifact(summary: &TestnetSummary) -> Value {
     report
 }
 
+fn public_capture_todo_artifact(summary: &TestnetSummary) -> Value {
+    let capture_plan = public_deployment_capture_plan(summary);
+    let readiness_report = public_launch_readiness_report_artifact(summary);
+    let public_status = public_status_manifest(summary);
+    let launch_bundle = public_launch_bundle(summary);
+    let public_status_manifest_root = public_status["public_status_manifest_root"]
+        .as_str()
+        .unwrap_or("missing-public-status-manifest-root")
+        .to_string();
+    let public_launch_bundle_root = launch_bundle["public_launch_bundle_root"]
+        .as_str()
+        .unwrap_or("missing-public-launch-bundle-root")
+        .to_string();
+    let capture_plan_root = capture_plan["capture_plan_root"]
+        .as_str()
+        .unwrap_or("missing-capture-plan-root")
+        .to_string();
+    let capture_contract_root = capture_plan["capture_contract_root"]
+        .as_str()
+        .unwrap_or("missing-capture-contract-root")
+        .to_string();
+    let deployment_preflight_checklist_root = capture_plan["deployment_preflight"]
+        ["checklist_root"]
+        .as_str()
+        .unwrap_or("missing-deployment-preflight-checklist-root")
+        .to_string();
+    let public_deployment_runbook_root = capture_plan["public_deployment_runbook_root"]
+        .as_str()
+        .unwrap_or("missing-public-deployment-runbook-root")
+        .to_string();
+    let public_deployment_runbook_step_set_root = capture_plan
+        ["public_deployment_runbook_step_set_root"]
+        .as_str()
+        .unwrap_or("missing-public-deployment-runbook-step-set-root")
+        .to_string();
+    let public_launch_artifact_manifest_root = capture_plan["public_launch_artifact_manifest_root"]
+        .as_str()
+        .unwrap_or("missing-public-launch-artifact-manifest-root")
+        .to_string();
+    let public_launch_artifact_set_root = capture_plan["public_launch_artifact_set_root"]
+        .as_str()
+        .unwrap_or("missing-public-launch-artifact-set-root")
+        .to_string();
+    let public_launch_package_file_set_root =
+        public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
+    let public_launch_readiness_artifact_root = readiness_report
+        ["public_launch_readiness_artifact_root"]
+        .as_str()
+        .unwrap_or("missing-public-launch-readiness-artifact-root")
+        .to_string();
+    let external_capture_required = summary
+        .public_launch_readiness
+        .remediations
+        .iter()
+        .any(|remediation| remediation.external_capture_required);
+    let mut todo = json!({
+        "kind": "nebula-public-capture-todo",
+        "schema_version": 1,
+        "chain_id": CHAIN_ID,
+        "version": VERSION,
+        "testnet_id": &summary.testnet_id,
+        "manifest_id": &summary.manifest_id,
+        "public_alpha_only": true,
+        "operator_fill_required": true,
+        "external_capture_required": external_capture_required,
+        "usable_as_public_deployment_evidence": false,
+        "usable_as_mainnet_custody_approval": false,
+        "custody_mode": "no-mainnet-custody",
+        "public_launch_ready": summary.public_launch_readiness.public_launch_ready,
+        "blocking_gaps": &summary.public_launch_readiness.blocking_gaps,
+        "remediations": &summary.public_launch_readiness.remediations,
+        "public_status_manifest_root": public_status_manifest_root,
+        "public_launch_bundle_root": public_launch_bundle_root,
+        "public_launch_artifact_manifest_root": public_launch_artifact_manifest_root,
+        "public_launch_artifact_set_root": public_launch_artifact_set_root,
+        "public_launch_package_file_set_root": public_launch_package_file_set_root,
+        "public_launch_readiness_report_root": &summary.public_launch_readiness.report_root,
+        "public_launch_readiness_artifact_root": public_launch_readiness_artifact_root,
+        "capture_plan_root": capture_plan_root,
+        "capture_contract_root": capture_contract_root,
+        "deployment_preflight_checklist_root": deployment_preflight_checklist_root,
+        "public_deployment_runbook_root": public_deployment_runbook_root,
+        "public_deployment_runbook_step_set_root": public_deployment_runbook_step_set_root,
+        "minimum_bootstrap_operator_count": MIN_PUBLIC_DEPLOYMENT_OPERATOR_COUNT,
+        "minimum_observer_count": MIN_PUBLIC_DEPLOYMENT_OBSERVER_COUNT,
+        "minimum_region_count": MIN_PUBLIC_DEPLOYMENT_REGION_COUNT,
+        "freshness_window_ms": MAX_PUBLIC_DEPLOYMENT_FRESHNESS_MS,
+        "deployment_run_id_must_match_nested_records": true,
+        "package_manifest_root_source_file": "nebula-public-launch-package.json",
+        "package_manifest_root_source_field": "package_manifest_root",
+        "readiness_artifact_root_source_file": "nebula-public-launch-readiness-report.json",
+        "readiness_artifact_root_source_field": "public_launch_readiness_artifact_root",
+    });
+    todo["required_capture_fields"] = json!(REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS);
+    todo["required_endpoint_fields"] = json!(REQUIRED_PUBLIC_DEPLOYMENT_ENDPOINT_FIELDS);
+    todo["required_public_surfaces"] = json!(REQUIRED_PUBLIC_DEPLOYMENT_SURFACES);
+    todo["required_probe_root_fields"] = json!(REQUIRED_PUBLIC_DEPLOYMENT_PROBE_ROOT_FIELDS);
+    todo["required_preflight_phase_ids"] = json!(REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES);
+    todo["required_runbook_step_ids"] = json!(PUBLIC_DEPLOYMENT_RUNBOOK_STEPS);
+    todo["required_tls_endpoint_pin_roles"] = json!(PUBLIC_TLS_ENDPOINT_PIN_ROLES);
+    todo["required_public_surface_probe_roles"] = json!(REQUIRED_PUBLIC_SURFACE_PROBE_ROLES);
+    todo["capture_contract"] = capture_plan["capture_contract"].clone();
+    todo["deployment_preflight"] = capture_plan["deployment_preflight"].clone();
+    todo["commands"] = json!({
+        "audit_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json",
+        "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --json",
+        "assemble_public_deployment": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json",
+        "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --public-deployment-evidence nebula-public-deployment.json --fail-on-public-launch-gaps --json"
+    });
+    let todo_root = value_root("public-capture-todo", &todo);
+    todo["public_capture_todo_root"] = json!(todo_root);
+    todo
+}
+
 fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(), String> {
     ensure_local_output_dir_path(path, "--write-public-launch-package")?;
     let dir = PathBuf::from(path);
@@ -9048,13 +9167,14 @@ fn public_launch_package_required_before_capture(artifact_id: &str) -> bool {
             | "public-launch-readiness-report"
             | "public-deployment-evidence-template"
             | "public-deployment-capture-plan"
+            | "public-capture-todo"
     )
 }
 
 fn public_launch_package_operator_fill_required(artifact_id: &str) -> bool {
     matches!(
         artifact_id,
-        "public-deployment-evidence-template" | "public-deployment-capture-plan"
+        "public-deployment-evidence-template" | "public-deployment-capture-plan" | "public-capture-todo"
     )
 }
 
@@ -9075,6 +9195,7 @@ fn public_launch_package_artifact_value(
             ensure_public_deployment_capture_plan_redacted(&plan)?;
             Ok(plan)
         }
+        "public-capture-todo" => Ok(public_capture_todo_artifact(summary)),
         other => Err(format!("unknown public launch package artifact '{other}'")),
     }
 }
@@ -28446,6 +28567,7 @@ mod tests {
                 "public-deployment-capture-plan",
                 "nebula-public-deployment-capture-plan.json",
             ),
+            ("public-capture-todo", "nebula-public-capture-todo.json"),
         ];
         let artifacts = manifest["artifacts"].as_array().expect("package artifacts");
         assert_eq!(artifacts.len(), expected.len());
@@ -28534,6 +28656,35 @@ mod tests {
         )
         .expect("capture plan json");
         assert_eq!(artifacts[7]["root"], capture_plan["capture_plan_root"]);
+        let capture_todo: Value = serde_json::from_slice(
+            &fs::read(package_dir.join("nebula-public-capture-todo.json"))
+                .expect("read capture todo"),
+        )
+        .expect("capture todo json");
+        assert_eq!(artifacts[8]["root"], capture_todo["public_capture_todo_root"]);
+        assert_eq!(capture_todo["kind"], "nebula-public-capture-todo");
+        assert_eq!(capture_todo["operator_fill_required"], true);
+        assert_eq!(capture_todo["external_capture_required"], true);
+        assert_eq!(capture_todo["usable_as_public_deployment_evidence"], false);
+        assert_eq!(capture_todo["usable_as_mainnet_custody_approval"], false);
+        assert_eq!(capture_todo["capture_plan_root"], capture_plan["capture_plan_root"]);
+        assert_eq!(
+            capture_todo["deployment_preflight_checklist_root"],
+            capture_plan["deployment_preflight"]["checklist_root"]
+        );
+        assert_eq!(
+            capture_todo["required_capture_fields"],
+            capture_plan["capture_contract"]["required_capture_fields"]
+        );
+        assert_eq!(
+            capture_todo["blocking_gaps"][0],
+            "public-launch-deployment-attestation"
+        );
+        assert!(is_hex_root(
+            capture_todo["public_capture_todo_root"]
+                .as_str()
+                .expect("capture todo root")
+        ));
         let readiness_report: Value = serde_json::from_slice(
             &fs::read(package_dir.join("nebula-public-launch-readiness-report.json"))
                 .expect("read readiness report"),

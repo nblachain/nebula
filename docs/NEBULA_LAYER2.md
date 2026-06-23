@@ -3239,8 +3239,10 @@ real XMR.
   before capture starts. It contains the public status manifest, bootstrap
   profile template, typed deployment runbook, launch artifact manifest, launch
   bundle, local launch-readiness report, schema v5 deployment evidence
-  template, deployment capture plan, and a `nebula-public-launch-package`
-  manifest. The package manifest binds each filename, root field, artifact
+  template, deployment capture plan, a rooted machine-readable
+  `nebula-public-capture-todo` work order, and a
+  `nebula-public-launch-package` manifest. The package manifest binds each
+  filename, root field, artifact
   root, record root, required-before-capture flag, operator-fill flag,
   non-evidence/non-custody flags, package `artifact_set_root`, package
   `package_file_set_root`, release-candidate manifest id, launch level,
@@ -3260,6 +3262,15 @@ real XMR.
   gaps, remediation commands, and whether external capture is still required in
   `nebula-public-testnet-certification.json`. It is deliberately operator-local
   and remains blocked until the filled schema v5 deployment attestation passes.
+- The package-level public capture todo export gives CI a rooted
+  `nebula-public-capture-todo` artifact that repeats the exact remaining
+  external-capture work without scraping prose: capture-plan, capture-contract,
+  preflight, readiness, status, launch-bundle, package file-set, required
+  endpoint, TLS, probe, observer, operator-registry, runbook-step, freshness,
+  and no-mainnet-custody inputs. It is required before public capture,
+  operator-fill-required, and explicitly not deployment evidence or custody
+  approval; it avoids embedding the package manifest root to keep package roots
+  acyclic.
 - A local operator-only public launch readiness report export gives CI a
   standalone `nebula-public-launch-readiness-report` with the launch level,
   blocker ids, remediation commands, public status/bundle/capture-plan roots,

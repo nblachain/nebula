@@ -432,6 +432,12 @@ root, verifies package-only/public-alpha boundaries and per-artifact
 capture/operator-fill flags, enforces the exact top-level package file set and
 package-level readiness summary, and fails if the directory contains stale,
 tampered, swapped, cross-run, or extra handoff files.
+The package also includes `nebula-public-capture-todo.json`, a rooted
+machine-readable work order for the exact endpoint, TLS, probe, observer,
+operator-registry, runbook, preflight, freshness, package, and
+no-mainnet-custody fields deployment CI must capture. The todo artifact is
+operator-fill-required, not public deployment evidence, and not custody
+approval.
 
 `--write-public-testnet-certification path\to\cert-dir` also requires
 `--mainnet-readiness` and writes a one-command public-testnet certification
