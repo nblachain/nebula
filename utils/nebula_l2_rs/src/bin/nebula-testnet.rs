@@ -375,6 +375,7 @@ struct Cli {
     public_deployment_evidence: Option<PublicDeploymentEvidence>,
     readiness_template_path: Option<String>,
     public_bootstrap_profile_path: Option<String>,
+    public_bootstrap_profile_verify_path: Option<String>,
     public_status_manifest_path: Option<String>,
     public_status_manifest_verify_path: Option<String>,
     public_deployment_runbook_path: Option<String>,
@@ -454,6 +455,7 @@ impl Default for Cli {
             public_deployment_evidence: None,
             readiness_template_path: None,
             public_bootstrap_profile_path: None,
+            public_bootstrap_profile_verify_path: None,
             public_status_manifest_path: None,
             public_status_manifest_verify_path: None,
             public_deployment_runbook_path: None,
@@ -7094,6 +7096,9 @@ fn run() -> Result<(), String> {
     if let Some(path) = cli.public_bootstrap_profile_path.as_deref() {
         write_public_bootstrap_profile(path, &summary)?;
     }
+    if let Some(path) = cli.public_bootstrap_profile_verify_path.as_deref() {
+        verify_public_bootstrap_profile(path, &summary)?;
+    }
     if let Some(path) = cli.public_status_manifest_path.as_deref() {
         write_public_status_manifest(path, &summary)?;
     }
@@ -8430,11 +8435,29 @@ fn write_readiness_template(path: &str, summary: &TestnetSummary) -> Result<(), 
 fn write_public_bootstrap_profile(path: &str, summary: &TestnetSummary) -> Result<(), String> {
     ensure_local_json_path(path, "--write-public-bootstrap-profile")?;
     let profile = public_bootstrap_profile_template(summary);
+    ensure_public_bootstrap_profile_template_redacted(&profile)?;
     let encoded = serde_json::to_string_pretty(&profile)
         .map_err(|error| format!("failed to encode public bootstrap profile json: {error}"))?;
     fs::write(path, format!("{encoded}\n"))
         .map_err(|error| format!("failed to write public bootstrap profile: {error}"))?;
     Ok(())
+}
+
+fn verify_public_bootstrap_profile(path: &str, summary: &TestnetSummary) -> Result<(), String> {
+    ensure_local_json_path(path, "--verify-public-bootstrap-profile")?;
+    let actual = read_json_file(&PathBuf::from(path), "public bootstrap profile")?;
+    ensure(
+        actual.get("kind").and_then(Value::as_str)
+            == Some("nebula-public-testnet-bootstrap-profile"),
+        "public bootstrap profile has the wrong kind",
+    )?;
+    ensure_public_bootstrap_profile_template_redacted(&actual)?;
+    let expected = public_bootstrap_profile_template(summary);
+    ensure_public_bootstrap_profile_template_redacted(&expected)?;
+    ensure(
+        actual == expected,
+        "public bootstrap profile does not match this run",
+    )
 }
 
 fn write_public_status_manifest(path: &str, summary: &TestnetSummary) -> Result<(), String> {
@@ -17155,6 +17178,89 @@ fn ensure_public_status_manifest_redacted(value: &Value) -> Result<(), String> {
     )
 }
 
+fn ensure_public_bootstrap_profile_template_redacted(value: &Value) -> Result<(), String> {
+    ensure(
+        value.get("kind").and_then(Value::as_str)
+            == Some("nebula-public-testnet-bootstrap-profile"),
+        "public bootstrap profile kind mismatch",
+    )?;
+    ensure(
+        value.get("template_only").and_then(Value::as_bool) == Some(true),
+        "public bootstrap profile must be a template",
+    )?;
+    ensure(
+        value
+            .get("operator_fill_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public bootstrap profile must require operator fill-in",
+    )?;
+    ensure(
+        value
+            .get("usable_as_mainnet_custody_approval")
+            .and_then(Value::as_bool)
+            == Some(false),
+        "public bootstrap profile must not be usable as mainnet custody approval",
+    )?;
+    for key in PUBLIC_STATUS_FORBIDDEN_KEYS {
+        ensure(
+            !value_contains_exact_key(value, key),
+            &format!("public bootstrap profile contains forbidden key '{key}'"),
+        )?;
+    }
+    for marker in SENSITIVE_FIELD_MARKERS {
+        ensure(
+            !value_contains_key_marker(value, marker),
+            &format!("public bootstrap profile contains sensitive marker '{marker}'"),
+        )?;
+    }
+    ensure(
+        value
+            .pointer("/endpoint_policy/runtime_binds_remain_loopback")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public bootstrap profile must keep runtime binds loopback",
+    )?;
+    ensure(
+        value
+            .pointer("/endpoint_policy/public_bind_not_enabled_by_runner")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public bootstrap profile must prove public binds are not enabled by the runner",
+    )?;
+    ensure(
+        value
+            .pointer("/endpoint_policy/endpoint_commitments_only")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public bootstrap profile must expose endpoint commitments only",
+    )?;
+    ensure(
+        value
+            .pointer("/acceptance_snapshot/no_mainnet_custody")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public bootstrap profile must keep no-mainnet-custody true",
+    )?;
+    ensure(
+        value
+            .pointer("/acceptance_snapshot/mainnet_value_ready")
+            .and_then(Value::as_bool)
+            == Some(false),
+        "public bootstrap profile must keep mainnet value readiness false",
+    )?;
+    let mut rootless = value.clone();
+    let Some(map) = rootless.as_object_mut() else {
+        return Err("public bootstrap profile must be an object".to_string());
+    };
+    map.remove("template_root");
+    let expected_root = value_root("public-bootstrap-profile-template", &rootless);
+    ensure(
+        value.get("template_root").and_then(Value::as_str) == Some(expected_root.as_str()),
+        "public bootstrap profile template root mismatch",
+    )
+}
+
 fn ensure_public_launch_bundle_redacted(value: &Value) -> Result<(), String> {
     ensure(
         value.get("kind").and_then(Value::as_str) == Some("nebula-public-testnet-launch-bundle"),
@@ -18410,6 +18516,14 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
                 cli.public_bootstrap_profile_path =
                     Some(parse_string(&args, index, "--write-public-bootstrap-profile")?);
             }
+            "--verify-public-bootstrap-profile" => {
+                index += 1;
+                cli.public_bootstrap_profile_verify_path = Some(parse_string(
+                    &args,
+                    index,
+                    "--verify-public-bootstrap-profile",
+                )?);
+            }
             "--write-public-status-manifest" => {
                 index += 1;
                 cli.public_status_manifest_path =
@@ -18703,6 +18817,13 @@ fn parse_cli(args: Vec<String>) -> Result<Cli, String> {
             "--write-public-bootstrap-profile requires --mainnet-readiness",
         )?;
         ensure_local_json_path(path, "--write-public-bootstrap-profile")?;
+    }
+    if let Some(path) = cli.public_bootstrap_profile_verify_path.as_deref() {
+        ensure(
+            cli.mainnet_readiness,
+            "--verify-public-bootstrap-profile requires --mainnet-readiness",
+        )?;
+        ensure_local_json_path(path, "--verify-public-bootstrap-profile")?;
     }
     if let Some(path) = cli.public_status_manifest_path.as_deref() {
         ensure(
@@ -26242,6 +26363,8 @@ OPTIONS:
                               Write a redacted operator template/checklist for external evidence collection
         --write-public-bootstrap-profile PATH
                               Write a redacted public-testnet bootstrap/deployment profile
+        --verify-public-bootstrap-profile PATH
+                              Verify a redacted public-testnet bootstrap/deployment profile against this run
         --write-public-status-manifest PATH
                               Write a redacted public status manifest suitable for deployment proxies
         --verify-public-status-manifest PATH
@@ -28489,6 +28612,14 @@ mod tests {
     }
 
     #[test]
+    fn public_bootstrap_profile_verify_requires_mainnet_readiness_mode() {
+        let path = temp_json_path("nebula-public-bootstrap-profile-verify-rejected");
+        let error = parse_cli(vec!["--verify-public-bootstrap-profile".to_string(), path])
+            .expect_err("public bootstrap verification should require mainnet-readiness mode");
+        assert!(error.contains("requires --mainnet-readiness"));
+    }
+
+    #[test]
     fn public_status_manifest_requires_mainnet_readiness_mode() {
         let path = temp_json_path("nebula-public-status-manifest-rejected");
         let error = parse_cli(vec!["--write-public-status-manifest".to_string(), path])
@@ -28880,6 +29011,66 @@ mod tests {
         assert!(is_hex_root(
             value["template_root"].as_str().expect("template root")
         ));
+        ensure_public_bootstrap_profile_template_redacted(&value)
+            .expect("redacted public bootstrap profile");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_bootstrap_profile_verifier_accepts_current_run_export() {
+        let path = temp_json_path("nebula-public-bootstrap-profile-verify-current");
+        let cli = parse_cli(vec![
+            "--mainnet-readiness".to_string(),
+            "--write-public-bootstrap-profile".to_string(),
+            path.clone(),
+            "--verify-public-bootstrap-profile".to_string(),
+            path.clone(),
+        ])
+        .expect("public bootstrap profile write+verify flags should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_bootstrap_profile(&path, &summary).expect("write public bootstrap profile");
+        verify_public_bootstrap_profile(&path, &summary)
+            .expect("current-run public bootstrap profile should verify");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_bootstrap_profile_verifier_rejects_re_rooted_stale_profile() {
+        let path = temp_json_path("nebula-public-bootstrap-profile-stale");
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet-readiness CLI should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_bootstrap_profile(&path, &summary).expect("write public bootstrap profile");
+        verify_public_bootstrap_profile(&path, &summary)
+            .expect("fresh public bootstrap profile should verify");
+
+        let mut stale: Value = serde_json::from_slice(&fs::read(&path).expect("read profile"))
+            .expect("public bootstrap profile json");
+        stale["testnet_run_checkpoint_root"] =
+            json!(root(&["tampered-public-bootstrap-profile", &summary.manifest_id]));
+        let mut rootless = stale.clone();
+        if let Some(map) = rootless.as_object_mut() {
+            map.remove("template_root");
+        }
+        stale["template_root"] = json!(value_root("public-bootstrap-profile-template", &rootless));
+        ensure_public_bootstrap_profile_template_redacted(&stale)
+            .expect("re-rooted profile should remain structurally redacted");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&stale).expect("encode stale profile")
+            ),
+        )
+        .expect("write stale profile");
+
+        let error = verify_public_bootstrap_profile(&path, &summary)
+            .expect_err("re-rooted stale profile should fail exact verification");
+        assert!(error.contains("does not match this run"));
         let _ = fs::remove_file(path);
     }
 

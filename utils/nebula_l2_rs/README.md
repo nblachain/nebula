@@ -206,7 +206,7 @@ public status manifest, typed deployment runbook, combined launch handoff bundle
 schema v5 deployment evidence worksheet, and standalone capture todo:
 
 ```powershell
-cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-bootstrap-profile .\nebula-public-bootstrap.json --write-public-status-manifest .\nebula-public-status.json --verify-public-status-manifest .\nebula-public-status.json --write-public-deployment-runbook .\nebula-public-deployment-runbook.json --verify-public-deployment-runbook .\nebula-public-deployment-runbook.json --write-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --verify-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --write-public-launch-bundle .\nebula-public-launch-bundle.json --verify-public-launch-bundle .\nebula-public-launch-bundle.json --write-public-capture-todo .\nebula-public-capture-todo.json --verify-public-capture-todo .\nebula-public-capture-todo.json --write-public-deployment-evidence-template .\nebula-public-deployment-template.json --write-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --verify-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --json
+cargo run --manifest-path testnet_runner\Cargo.toml -- --blocks 8 --target-finality-ms 200 --mainnet-readiness --adversarial-self-test --write-public-bootstrap-profile .\nebula-public-bootstrap.json --verify-public-bootstrap-profile .\nebula-public-bootstrap.json --write-public-status-manifest .\nebula-public-status.json --verify-public-status-manifest .\nebula-public-status.json --write-public-deployment-runbook .\nebula-public-deployment-runbook.json --verify-public-deployment-runbook .\nebula-public-deployment-runbook.json --write-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --verify-public-launch-artifact-manifest .\nebula-public-launch-artifacts.json --write-public-launch-bundle .\nebula-public-launch-bundle.json --verify-public-launch-bundle .\nebula-public-launch-bundle.json --write-public-capture-todo .\nebula-public-capture-todo.json --verify-public-capture-todo .\nebula-public-capture-todo.json --write-public-deployment-evidence-template .\nebula-public-deployment-template.json --write-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --verify-public-deployment-capture-plan .\nebula-public-deployment-capture-plan.json --json
 ```
 
 The same public-alpha handoff can be exported as one rooted package directory:
@@ -353,7 +353,9 @@ operator-registry template, and derivation rules. The registry template makes
 operator independence, exact committed-operator coverage, and ML-DSA-65
 signature-verification transcripts explicit before public deployment capture.
 It is not a mainnet custody approval and does not make the runner accept
-non-loopback binds.
+non-loopback binds. `--verify-public-bootstrap-profile path\to\bootstrap.json`
+recomputes the template root and rejects stale, cross-run, or unsafe public
+bind handoffs before deployment automation fills endpoints.
 
 `--write-public-status-manifest path\to\status.json` also requires
 `--mainnet-readiness` and writes the same redacted
