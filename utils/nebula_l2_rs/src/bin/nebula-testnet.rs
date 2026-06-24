@@ -15842,6 +15842,10 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
         "release_authority_registry_template_root_source_file": "nebula-release-authority-registry-template.json",
         "release_authority_registry_template_root_source_field": "release_authority_registry_template_root",
         "public_launch_package_handoff_root_derivation": "root(['public-launch-package-handoff', chain_id, public_launch_package_file_set_root, public_launch_package_manifest_root, public_launch_readiness_artifact_root, release_approval_template_root, release_authority_registry_template_root])",
+        "public_deployment_evidence_template_root": evidence_template_root,
+        "public_deployment_evidence_template_root_required": true,
+        "public_deployment_evidence_template_root_source_file": "nebula-public-deployment-template.json",
+        "public_deployment_evidence_template_root_source_field": "template_root",
         "assemble_command": "--assemble-public-deployment-evidence <capture.json> --write-public-deployment-evidence <deployment.json> --mainnet-readiness",
     });
     let mut plan = json!({
@@ -19359,6 +19363,22 @@ fn ensure_public_deployment_capture_plan_redacted(value: &Value) -> Result<(), S
                 .and_then(Value::as_str),
         "public deployment preflight release authority registry template root mismatch",
     )?;
+    ensure(
+        value
+            .get("public_deployment_evidence_template_root")
+            .and_then(Value::as_str)
+            .is_some_and(is_hex_root),
+        "public deployment capture plan evidence template root must be fixed",
+    )?;
+    ensure(
+        preflight_source_roots
+            .get("public_deployment_evidence_template_root")
+            .and_then(Value::as_str)
+            == value
+                .get("public_deployment_evidence_template_root")
+                .and_then(Value::as_str),
+        "public deployment preflight evidence template root mismatch",
+    )?;
     let mut rootless_preflight = deployment_preflight.clone();
     if let Some(map) = rootless_preflight.as_object_mut() {
         map.remove("checklist_root");
@@ -19455,6 +19475,36 @@ fn ensure_public_deployment_capture_plan_redacted(value: &Value) -> Result<(), S
                 .get("release_authority_registry_template_root")
                 .and_then(Value::as_str),
         "public deployment capture contract release authority registry template root mismatch",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_deployment_evidence_template_root_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment capture contract must require evidence template root",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_deployment_evidence_template_root")
+            .and_then(Value::as_str)
+            == value
+                .get("public_deployment_evidence_template_root")
+                .and_then(Value::as_str),
+        "public deployment capture contract evidence template root mismatch",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_deployment_evidence_template_root_source_file")
+            .and_then(Value::as_str)
+            == Some("nebula-public-deployment-template.json"),
+        "public deployment capture contract evidence template source file mismatch",
+    )?;
+    ensure(
+        capture_contract
+            .get("public_deployment_evidence_template_root_source_field")
+            .and_then(Value::as_str)
+            == Some("template_root"),
+        "public deployment capture contract evidence template source field mismatch",
     )?;
     ensure(
         capture_contract
@@ -33914,6 +33964,10 @@ mod tests {
             .expect("expected release registry template root");
         let expected_package_file_set_root =
             public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
+        let expected_evidence_template = public_deployment_evidence_template(&summary);
+        let expected_evidence_template_root = expected_evidence_template["template_root"]
+            .as_str()
+            .expect("expected evidence template root");
         assert_eq!(value["kind"], "nebula-public-deployment-capture-plan");
         assert_eq!(value["schema_version"], 1);
         assert_eq!(value["operator_fill_required"], true);
@@ -33935,6 +33989,10 @@ mod tests {
         assert_eq!(
             value["public_launch_package_file_set_root"],
             expected_package_file_set_root
+        );
+        assert_eq!(
+            value["public_deployment_evidence_template_root"],
+            expected_evidence_template_root
         );
         assert_eq!(
             value["release_approval_template_root"],
@@ -33995,6 +34053,22 @@ mod tests {
         assert_eq!(
             value["capture_contract"]["release_authority_registry_template_root"],
             expected_release_registry_root
+        );
+        assert_eq!(
+            value["capture_contract"]["public_deployment_evidence_template_root"],
+            expected_evidence_template_root
+        );
+        assert_eq!(
+            value["capture_contract"]["public_deployment_evidence_template_root_required"],
+            true
+        );
+        assert_eq!(
+            value["capture_contract"]["public_deployment_evidence_template_root_source_file"],
+            "nebula-public-deployment-template.json"
+        );
+        assert_eq!(
+            value["capture_contract"]["public_deployment_evidence_template_root_source_field"],
+            "template_root"
         );
         assert_eq!(
             value["capture_contract"]["public_launch_artifact_manifest_required"],
@@ -34097,6 +34171,11 @@ mod tests {
             value["deployment_preflight"]["source_roots"]
                 ["release_authority_registry_template_root"],
             expected_release_registry_root
+        );
+        assert_eq!(
+            value["deployment_preflight"]["source_roots"]
+                ["public_deployment_evidence_template_root"],
+            expected_evidence_template_root
         );
         assert_eq!(
             value["deployment_preflight"]["source_roots"]["public_status_manifest_root"],
@@ -34251,6 +34330,7 @@ mod tests {
         assert!(freeze_root_fields.contains(&"release_authority_registry_template_root"));
         assert!(freeze_root_fields.contains(&"public_deployment_runbook_root"));
         assert!(freeze_root_fields.contains(&"public_deployment_runbook_step_set_root"));
+        assert!(freeze_root_fields.contains(&"public_deployment_evidence_template_root"));
         assert!(is_hex_root(
             value["deployment_preflight"]["checklist_root"]
                 .as_str()
@@ -34289,6 +34369,12 @@ mod tests {
         let error = ensure_public_deployment_capture_plan_redacted(&unsafe_plan)
             .expect_err("unsafe release template handoff should fail");
         assert!(error.contains("release approval template root"));
+        let mut unsafe_plan = value.clone();
+        unsafe_plan["capture_contract"]["public_deployment_evidence_template_root_required"] =
+            json!(false);
+        let error = ensure_public_deployment_capture_plan_redacted(&unsafe_plan)
+            .expect_err("unsafe evidence template handoff should fail");
+        assert!(error.contains("evidence template root"));
         assert_eq!(
             value["probe_capture"]["required_probe_root_fields"],
             value["capture_contract"]["required_probe_root_fields"]

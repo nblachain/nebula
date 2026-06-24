@@ -550,8 +550,9 @@ does not contain captured evidence and is not loadable as deployment evidence;
 instead it binds the launch bundle, public status manifest, bootstrap profile,
 typed public deployment runbook, launch artifact manifest, artifact-set, and
 package file-set roots, release approval template root, release-authority
-registry template root, and the evidence-template root while listing the exact
-required capture fields, public endpoint fields, public surfaces, probe-root
+registry template root, and the evidence-template root in both the preflight
+source roots and capture contract while listing the exact required capture
+fields, public endpoint fields, public surfaces, probe-root
 fields, freshness window, bootstrap node slots, operator commitments, TLS pin
 roles, the required typed public surface probe roles, observer quorum, a rooted
 ordered deployment

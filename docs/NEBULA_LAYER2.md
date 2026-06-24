@@ -3374,7 +3374,9 @@ real XMR.
   and release-template roots with one aggregate checksum without creating a
   circular package manifest root. The plan names those required source files and
   capture fields while keeping the operator handoff aligned with the same status,
-  bootstrap, launch, package, and evidence-template roots. It also requires a completed
+  bootstrap, launch, package, and evidence-template roots, with the
+  evidence-template root frozen in both the preflight source roots and capture
+  contract. It also requires a completed
   `deployment_preflight_receipt` covering every required preflight phase in
   order plus a completed `public_deployment_runbook_receipt` covering every
   ordered public deployment runbook step. This keeps the remaining
