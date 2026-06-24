@@ -16220,6 +16220,10 @@ fn public_deployment_evidence_template(summary: &TestnetSummary) -> Value {
         json!(public_launch_package_file_set_root),
     );
     template.insert(
+        "public_launch_package_handoff_root".to_string(),
+        json!(ROOT_PLACEHOLDER),
+    );
+    template.insert(
         "release_approval_template_root".to_string(),
         json!(release_approval_template_root),
     );
@@ -19106,6 +19110,20 @@ fn ensure_public_deployment_evidence_template_safe(value: &Value) -> Result<(), 
     ensure(
         value.get("capture_contract_root").and_then(Value::as_str) == Some(ROOT_PLACEHOLDER),
         "public deployment evidence template capture_contract_root must remain a placeholder",
+    )?;
+    ensure(
+        value
+            .get("public_launch_package_file_set_root")
+            .and_then(Value::as_str)
+            .is_some_and(is_hex_root),
+        "public deployment evidence template package file-set root must be fixed",
+    )?;
+    ensure(
+        value
+            .get("public_launch_package_handoff_root")
+            .and_then(Value::as_str)
+            == Some(ROOT_PLACEHOLDER),
+        "public deployment evidence template package handoff root must remain a placeholder",
     )?;
     ensure(
         value
@@ -33589,6 +33607,7 @@ mod tests {
             value["public_launch_package_file_set_root"],
             public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id)
         );
+        assert_eq!(value["public_launch_package_handoff_root"], ROOT_PLACEHOLDER);
         assert_eq!(
             value["release_approval_template_root"],
             expected_release_approval_root
@@ -33796,6 +33815,12 @@ mod tests {
         let error = ensure_public_deployment_evidence_template_safe(&unsafe_template)
             .expect_err("unsafe release template root should fail");
         assert!(error.contains("release approval template root"));
+        let mut unsafe_template = value.clone();
+        unsafe_template["public_launch_package_handoff_root"] =
+            json!(root(&["pre-filled-template-package-handoff-root"]));
+        let error = ensure_public_deployment_evidence_template_safe(&unsafe_template)
+            .expect_err("pre-filled package handoff root should fail");
+        assert!(error.contains("package handoff root"));
         let error = load_public_deployment_evidence(&path)
             .expect_err("template must not be accepted as deployment evidence");
         assert!(error.contains("placeholders"));

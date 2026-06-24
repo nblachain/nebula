@@ -3331,9 +3331,10 @@ real XMR.
   export or package verification.
 - Public deployment evidence templates give deployment automation a schema v5
   worksheet with the canonical public status manifest, launch bundle root,
-  launch artifact manifest roots, package file-set root, release approval
-  template root, release-authority registry template root, typed public
-  deployment runbook roots, a public deployment runbook receipt template,
+  launch artifact manifest roots, package file-set root, placeholder package
+  handoff root, release approval template root, release-authority registry
+  template root, typed public deployment runbook roots, a public deployment
+  runbook receipt template,
   typed bootstrap node commitments, typed proxy/firewall/rate-limit policy claims,
   health/status-page/metrics/deployed-finality/incident-contact/faucet/reset body shapes,
   private-summary denial probe shape, typed bootstrap-node reachability probes,
@@ -3345,8 +3346,8 @@ real XMR.
   replaced by captured deployment evidence. The paired
   `--verify-public-deployment-evidence-template` command recomputes the
   template root and rejects stale status, launch-bundle, launch-artifact,
-  package-file-set, release-template, runbook, bootstrap, or local probe roots
-  before operators fill public endpoint evidence.
+  package-file-set, package-handoff, release-template, runbook, bootstrap, or
+  local probe roots before operators fill public endpoint evidence.
 - A public deployment capture-plan export gives deployment CI a rooted
   `nebula-public-deployment-capture-plan` work order before capture starts. It
   is not evidence; it lists the exact required capture fields, public endpoint

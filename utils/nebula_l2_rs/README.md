@@ -519,8 +519,10 @@ package/report/template/cert roots before public evidence capture starts.
 also requires `--mainnet-readiness` and writes the schema v5 worksheet that a
 deployment system fills before using `--public-deployment-evidence`. The
 template embeds the canonical redacted public status manifest, launch bundle
-root, launch artifact manifest roots, the package file-set root, typed public
-deployment runbook roots, the public deployment runbook receipt template, typed bootstrap node commitments, expected health/status-page/metrics/deployed-finality/
+root, launch artifact manifest roots, the package file-set root, a placeholder
+package handoff root, typed public deployment runbook roots, the public
+deployment runbook receipt template, typed bootstrap node commitments, expected
+health/status-page/metrics/deployed-finality/
 incident-contact/faucet/reset body shapes, typed proxy/firewall/rate-limit policy claims,
 private-summary denial probe shape, typed `bootstrap_node_probes` reachability
 records, typed `public_surface_probes` records for the status manifest, aggregate
@@ -538,7 +540,8 @@ recomputes roots.
 `--verify-public-deployment-evidence-template
 path\to\deployment-template.json` recomputes the template root and rejects
 stale status, launch-bundle, launch-artifact, package-file-set, runbook,
-bootstrap, or local probe roots before operators fill public endpoint evidence.
+package-handoff, bootstrap, or local probe roots before operators fill public
+endpoint evidence.
 
 `--write-public-deployment-capture-plan path\to\capture-plan.json` also
 requires `--mainnet-readiness` and writes a
