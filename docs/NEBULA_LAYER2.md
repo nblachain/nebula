@@ -3276,8 +3276,9 @@ real XMR.
   package, emits the operator-only launch readiness report, writes exact release
   approval and release-authority registry handoff templates, and records
   `local_testnet_ready`, `public_launch_ready`, the
-  `certification_file_set_root`, package/report/template roots, the public
-  deployment evidence root, its readiness-report binding boolean, package-bound
+  `certification_file_set_root`, package/report/template roots, the aggregate
+  `public_launch_package_handoff_root`, the public deployment evidence root,
+  its readiness-report binding boolean, package-bound
   release-template roots, package-binding booleans for both release handoff
   templates, blocking gaps, rooted remediation commands for capture audit, audit
   verification, strict capture verification, assembly, and launch verification,

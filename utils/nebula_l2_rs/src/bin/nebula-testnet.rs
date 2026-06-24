@@ -10089,6 +10089,13 @@ fn public_testnet_certification_artifact(
         "release-authority-registry-template",
         &release_authority_registry_template,
     );
+    let public_launch_package_handoff_root = public_launch_package_handoff_root_from_roots(
+        &package_file_set_root,
+        &package_manifest_root,
+        &public_launch_readiness_artifact_root,
+        &release_approval_template_root,
+        &release_authority_registry_template_root,
+    );
     let release_approval_template_root_bound_to_package =
         release_approval_template_root == package_release_approval_template_root;
     let release_authority_registry_template_root_bound_to_package =
@@ -10136,6 +10143,7 @@ fn public_testnet_certification_artifact(
         "package_verified": true,
         "public_launch_package_dir": "nebula-public-launch-package",
         "public_launch_package_file_set_root": package_file_set_root,
+        "public_launch_package_handoff_root": public_launch_package_handoff_root,
         "public_launch_package_manifest_root": package_manifest_root,
         "public_launch_readiness_report_file": "nebula-public-launch-readiness-report.json",
         "public_launch_readiness_report_root": &summary.public_launch_readiness.report_root,
@@ -33081,6 +33089,26 @@ mod tests {
                 .as_str()
                 .expect("package manifest root")
         ));
+        assert_eq!(
+            certification["public_launch_package_handoff_root"],
+            public_launch_package_handoff_root_from_roots(
+                certification["public_launch_package_file_set_root"]
+                    .as_str()
+                    .expect("certification package file-set root"),
+                certification["public_launch_package_manifest_root"]
+                    .as_str()
+                    .expect("certification package manifest root"),
+                certification["public_launch_readiness_artifact_root"]
+                    .as_str()
+                    .expect("certification readiness artifact root"),
+                certification["release_approval_template_root"]
+                    .as_str()
+                    .expect("certification release approval root"),
+                certification["release_authority_registry_template_root"]
+                    .as_str()
+                    .expect("certification release authority registry root"),
+            )
+        );
         assert!(is_hex_root(
             certification["public_launch_readiness_artifact_root"]
                 .as_str()
@@ -33239,6 +33267,27 @@ mod tests {
         .expect("write package-bound release root tamper");
         let error = verify_public_testnet_certification(&cert_dir_string, &summary)
             .expect_err("tampered package-bound release root should fail verification");
+        assert!(error.contains("public testnet certification does not match this run"));
+
+        write_public_testnet_certification(&cert_dir_string, &summary)
+            .expect("rewrite public testnet certification");
+        let mut certification: Value =
+            serde_json::from_slice(&fs::read(&certification_path).expect("read certification"))
+                .expect("certification json");
+        certification["public_launch_package_handoff_root"] =
+            json!(root(&["tampered-certification-package-handoff-root"]));
+        if let Some(object) = certification.as_object_mut() {
+            object.remove("certification_root");
+        }
+        let certification_root = value_root("public-testnet-certification", &certification);
+        certification["certification_root"] = json!(certification_root);
+        fs::write(
+            &certification_path,
+            serde_json::to_string_pretty(&certification).expect("certification json"),
+        )
+        .expect("write package handoff tampered certification");
+        let error = verify_public_testnet_certification(&cert_dir_string, &summary)
+            .expect_err("tampered package handoff root should fail verification");
         assert!(error.contains("public testnet certification does not match this run"));
 
         write_public_testnet_certification(&cert_dir_string, &summary)

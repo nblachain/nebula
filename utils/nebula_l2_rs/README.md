@@ -495,10 +495,11 @@ operator-only launch readiness report, writes the release approval and release
 authority registry handoff templates, and writes
 `nebula-public-testnet-certification.json` with `local_testnet_ready`,
 `public_launch_ready`, `certification_file_set_root`, package roots, launch
-report roots, blocking gaps, release-template roots, the public deployment
-evidence root, its readiness-report binding boolean, package-bound
-release-template roots, package-binding booleans for both release handoff
-templates, remediations, whether external capture is still required, and the
+report roots, the aggregate `public_launch_package_handoff_root`, blocking gaps,
+release-template roots, the public deployment evidence root, its
+readiness-report binding boolean, package-bound release-template roots,
+package-binding booleans for both release handoff templates, remediations,
+whether external capture is still required, and the
 exact capture-audit, audit-verification, strict capture-verification, assemble,
 and launch-gate commands plus rooted next steps and a rooted command sequence
 for that order.
