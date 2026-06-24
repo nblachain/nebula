@@ -196,6 +196,7 @@ const PUBLIC_LAUNCH_PACKAGE_ARTIFACTS: [(&str, &str, &str); 11] = [
 const REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS: &[&str] = &[
     "capture_plan_root",
     "capture_contract_root",
+    "public_deployment_evidence_template_root",
     "deployment_preflight_checklist_root",
     "public_launch_package_file_set_root",
     "public_launch_package_handoff_root",
@@ -1058,6 +1059,7 @@ struct PublicDeploymentEvidence {
     evidence_root: String,
     capture_plan_root: String,
     capture_contract_root: String,
+    public_deployment_evidence_template_root: String,
     deployment_preflight_checklist_root: String,
     deployment_preflight_receipt: Value,
     deployment_preflight_receipt_root: String,
@@ -1184,6 +1186,7 @@ struct PublicDeploymentReport {
     capture_plan_bound: bool,
     capture_plan_root_bound: bool,
     capture_contract_root_bound: bool,
+    public_deployment_evidence_template_root_bound: bool,
     deployment_preflight_checklist_root_bound: bool,
     matches_current_manifest: bool,
     public_launch_bundle_root_bound: bool,
@@ -1277,9 +1280,11 @@ struct PublicDeploymentReport {
     expected_rate_limit_policy_root: Option<String>,
     capture_plan_root: Option<String>,
     capture_contract_root: Option<String>,
+    public_deployment_evidence_template_root: Option<String>,
     deployment_preflight_checklist_root: Option<String>,
     expected_capture_plan_root: Option<String>,
     expected_capture_contract_root: Option<String>,
+    expected_public_deployment_evidence_template_root: Option<String>,
     expected_deployment_preflight_checklist_root: Option<String>,
     public_rpc_url: Option<String>,
     public_p2p_endpoint: Option<String>,
@@ -5715,6 +5720,11 @@ impl Testnet {
             .as_str()
             .unwrap_or_default()
             .to_string();
+        let expected_public_deployment_evidence_template_root = expected_capture_plan
+            ["public_deployment_evidence_template_root"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         let expected_preflight_checklist_root = expected_capture_plan["deployment_preflight"]
             ["checklist_root"]
             .as_str()
@@ -5735,10 +5745,14 @@ impl Testnet {
         let capture_plan_root_bound = evidence.capture_plan_root == expected_capture_plan_root;
         let capture_contract_root_bound =
             evidence.capture_contract_root == expected_capture_contract_root;
+        let public_deployment_evidence_template_root_bound = evidence
+            .public_deployment_evidence_template_root
+            == expected_public_deployment_evidence_template_root;
         let deployment_preflight_checklist_root_bound =
             evidence.deployment_preflight_checklist_root == expected_preflight_checklist_root;
         let capture_plan_bound = capture_plan_root_bound
             && capture_contract_root_bound
+            && public_deployment_evidence_template_root_bound
             && deployment_preflight_checklist_root_bound;
         let expected_deployment_preflight_receipt_root = evidence
             .deployment_preflight_receipt
@@ -6066,6 +6080,8 @@ impl Testnet {
             &evidence.evidence_root,
             &evidence.capture_plan_root,
             &expected_capture_plan_root,
+            &evidence.public_deployment_evidence_template_root,
+            &expected_public_deployment_evidence_template_root,
             &evidence.deployment_preflight_receipt_root,
             expected_deployment_preflight_receipt_root
                 .as_deref()
@@ -6168,6 +6184,7 @@ impl Testnet {
             capture_plan_bound,
             capture_plan_root_bound,
             capture_contract_root_bound,
+            public_deployment_evidence_template_root_bound,
             deployment_preflight_checklist_root_bound,
             matches_current_manifest,
             public_launch_bundle_root_bound,
@@ -6294,11 +6311,17 @@ impl Testnet {
             ),
             capture_plan_root: Some(evidence.capture_plan_root.clone()),
             capture_contract_root: Some(evidence.capture_contract_root.clone()),
+            public_deployment_evidence_template_root: Some(
+                evidence.public_deployment_evidence_template_root.clone(),
+            ),
             deployment_preflight_checklist_root: Some(
                 evidence.deployment_preflight_checklist_root.clone(),
             ),
             expected_capture_plan_root: Some(expected_capture_plan_root),
             expected_capture_contract_root: Some(expected_capture_contract_root),
+            expected_public_deployment_evidence_template_root: Some(
+                expected_public_deployment_evidence_template_root,
+            ),
             expected_deployment_preflight_checklist_root: Some(expected_preflight_checklist_root),
             public_rpc_url: Some(evidence.public_rpc_url.clone()),
             public_p2p_endpoint: Some(evidence.public_p2p_endpoint.clone()),
@@ -7412,6 +7435,7 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         capture_plan_bound: false,
         capture_plan_root_bound: false,
         capture_contract_root_bound: false,
+        public_deployment_evidence_template_root_bound: false,
         deployment_preflight_checklist_root_bound: false,
         matches_current_manifest: false,
         public_launch_bundle_root_bound: false,
@@ -7505,9 +7529,11 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         expected_rate_limit_policy_root: None,
         capture_plan_root: None,
         capture_contract_root: None,
+        public_deployment_evidence_template_root: None,
         deployment_preflight_checklist_root: None,
         expected_capture_plan_root: None,
         expected_capture_contract_root: None,
+        expected_public_deployment_evidence_template_root: None,
         expected_deployment_preflight_checklist_root: None,
         public_rpc_url: None,
         public_p2p_endpoint: None,
@@ -7978,6 +8004,13 @@ fn public_deployment_missing_evidence_repair_roots(
             .to_string(),
     );
     candidates.insert(
+        "public_deployment_evidence_template_root_bound",
+        capture_plan["public_deployment_evidence_template_root"]
+            .as_str()
+            .unwrap_or("missing-public-deployment-evidence-template-root")
+            .to_string(),
+    );
+    candidates.insert(
         "deployment_preflight_checklist_root_bound",
         capture_plan["deployment_preflight"]["checklist_root"]
             .as_str()
@@ -8048,6 +8081,12 @@ fn public_deployment_repair_roots(
         (
             "capture_contract_root_bound",
             report.expected_capture_contract_root.as_deref(),
+        ),
+        (
+            "public_deployment_evidence_template_root_bound",
+            report
+                .expected_public_deployment_evidence_template_root
+                .as_deref(),
         ),
         (
             "deployment_preflight_checklist_root_bound",
@@ -8214,6 +8253,10 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
         (
             "capture_contract_root_bound",
             report.capture_contract_root_bound,
+        ),
+        (
+            "public_deployment_evidence_template_root_bound",
+            report.public_deployment_evidence_template_root_bound,
         ),
         (
             "deployment_preflight_checklist_root_bound",
@@ -10756,6 +10799,8 @@ fn public_deployment_capture_scaffold(
     scaffold["operator_notice"] = json!("Fill the remaining endpoint, TLS, probe, bootstrap, operator-registry, observer, preflight, runbook, freshness, and evidence-root placeholders, then run --audit-public-deployment-capture followed by --verify-public-deployment-capture before assembling public deployment evidence. This scaffold is package-bound but is not public deployment evidence.");
     scaffold["capture_plan_root"] = json!(capture_plan_root);
     scaffold["capture_contract_root"] = json!(capture_contract_root);
+    scaffold["public_deployment_evidence_template_root"] =
+        capture_plan["public_deployment_evidence_template_root"].clone();
     scaffold["deployment_preflight_checklist_root"] = json!(deployment_preflight_checklist_root);
     scaffold["public_launch_package_file_set_root"] = json!(public_launch_package_file_set_root);
     scaffold["public_launch_package_handoff_root"] = json!(public_launch_package_handoff_root);
@@ -13728,6 +13773,11 @@ fn write_public_deployment_evidence_from_capture(
         .as_str()
         .unwrap_or_default()
         .to_string();
+    let expected_public_deployment_evidence_template_root = capture_plan
+        ["public_deployment_evidence_template_root"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
     let expected_preflight_checklist_root = capture_plan["deployment_preflight"]["checklist_root"]
         .as_str()
         .unwrap_or_default()
@@ -13747,6 +13797,8 @@ fn write_public_deployment_evidence_from_capture(
     validate_public_deployment_run_id(&deployment_run_id)?;
     let capture_plan_root = required_root(&value, "capture_plan_root")?;
     let capture_contract_root = required_root(&value, "capture_contract_root")?;
+    let capture_public_deployment_evidence_template_root =
+        required_root(&value, "public_deployment_evidence_template_root")?;
     let deployment_preflight_checklist_root =
         required_root(&value, "deployment_preflight_checklist_root")?;
     let capture_package_file_set_root =
@@ -13768,6 +13820,11 @@ fn write_public_deployment_evidence_from_capture(
     ensure(
         capture_contract_root == expected_capture_contract_root,
         "public deployment capture_contract_root mismatch",
+    )?;
+    ensure(
+        capture_public_deployment_evidence_template_root
+            == expected_public_deployment_evidence_template_root,
+        "public deployment public_deployment_evidence_template_root mismatch",
     )?;
     ensure(
         deployment_preflight_checklist_root == expected_preflight_checklist_root,
@@ -13897,6 +13954,10 @@ fn write_public_deployment_evidence_from_capture(
         map.insert(
             "capture_contract_root".to_string(),
             json!(&capture_contract_root),
+        );
+        map.insert(
+            "public_deployment_evidence_template_root".to_string(),
+            json!(&expected_public_deployment_evidence_template_root),
         );
         map.insert(
             "deployment_preflight_checklist_root".to_string(),
@@ -21749,6 +21810,8 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
     )?;
     let capture_plan_root = required_root(&value, "capture_plan_root")?;
     let capture_contract_root = required_root(&value, "capture_contract_root")?;
+    let public_deployment_evidence_template_root =
+        required_root(&value, "public_deployment_evidence_template_root")?;
     let deployment_preflight_checklist_root =
         required_root(&value, "deployment_preflight_checklist_root")?;
     let deployment_preflight_receipt = value
@@ -22451,6 +22514,7 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
         evidence_root,
         capture_plan_root,
         capture_contract_root,
+        public_deployment_evidence_template_root,
         deployment_preflight_checklist_root,
         deployment_preflight_receipt,
         deployment_preflight_receipt_root,
@@ -28078,6 +28142,7 @@ fn public_deployment_provenance_root_from_value(value: &Value) -> Result<String,
         &required_u64(value, "freshness_window_ms")?.to_string(),
         required_root(value, "capture_plan_root")?.as_str(),
         required_root(value, "capture_contract_root")?.as_str(),
+        required_root(value, "public_deployment_evidence_template_root")?.as_str(),
         required_root(value, "deployment_preflight_checklist_root")?.as_str(),
         required_root(value, "deployment_preflight_receipt_root")?.as_str(),
         required_root(value, "deployment_preflight_phase_set_root")?.as_str(),
@@ -28132,6 +28197,7 @@ fn public_deployment_attestation_root_from_value(value: &Value) -> Result<String
         CHAIN_ID,
         required_root(value, "capture_plan_root")?.as_str(),
         required_root(value, "capture_contract_root")?.as_str(),
+        required_root(value, "public_deployment_evidence_template_root")?.as_str(),
         required_root(value, "deployment_preflight_checklist_root")?.as_str(),
         value_root(
             "public-deployment-preflight-receipt",
@@ -28289,6 +28355,7 @@ fn public_deployment_provenance_root(evidence: &PublicDeploymentEvidence) -> Str
         &evidence.freshness_window_ms.to_string(),
         &evidence.capture_plan_root,
         &evidence.capture_contract_root,
+        &evidence.public_deployment_evidence_template_root,
         &evidence.deployment_preflight_checklist_root,
         &evidence.deployment_preflight_receipt_root,
         &evidence.deployment_preflight_phase_set_root,
@@ -28345,6 +28412,7 @@ fn public_deployment_attestation_root(evidence: &PublicDeploymentEvidence) -> St
         CHAIN_ID,
         &evidence.capture_plan_root,
         &evidence.capture_contract_root,
+        &evidence.public_deployment_evidence_template_root,
         &evidence.deployment_preflight_checklist_root,
         &value_root(
             "public-deployment-preflight-receipt",
@@ -34838,6 +34906,19 @@ mod tests {
         assert!(
             summary
                 .public_deployment
+                .public_deployment_evidence_template_root_bound
+        );
+        let expected_capture_plan = public_deployment_capture_plan(&summary);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_deployment_evidence_template_root
+                .as_deref(),
+            expected_capture_plan["public_deployment_evidence_template_root"].as_str()
+        );
+        assert!(
+            summary
+                .public_deployment
                 .deployment_preflight_checklist_root_bound
         );
         assert!(summary.public_deployment.matches_current_manifest);
@@ -38078,6 +38159,70 @@ mod tests {
                 .as_deref()
         );
         assert!(!remediation.repair_roots.contains_key("capture_plan_bound"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_stale_evidence_template_root() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut value: Value =
+            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
+                .expect("deployment evidence json");
+        value["public_deployment_evidence_template_root"] =
+            json!(root(&["test-public-deployment", "wrong-evidence-template"]));
+        value["provenance_root"] =
+            json!(public_deployment_provenance_root_from_value(&value).expect("provenance root"));
+        value["evidence_root"] =
+            json!(public_deployment_attestation_root_from_value(&value).expect("evidence root"));
+        let path = write_public_deployment_evidence(
+            &serde_json::to_string_pretty(&value).expect("deployment evidence json"),
+        );
+        let evidence = load_public_deployment_evidence(&path)
+            .expect("self-consistent wrong evidence template root loads");
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.capture_plan_bound);
+        assert!(
+            !summary
+                .public_deployment
+                .public_deployment_evidence_template_root_bound
+        );
+        let expected_capture_plan = public_deployment_capture_plan(&summary);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_deployment_evidence_template_root
+                .as_deref(),
+            expected_capture_plan["public_deployment_evidence_template_root"].as_str()
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"capture_plan_bound".to_string()));
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"public_deployment_evidence_template_root_bound".to_string()));
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("public_deployment_evidence_template_root_bound")
+                .map(String::as_str),
+            summary
+                .public_deployment
+                .expected_public_deployment_evidence_template_root
+                .as_deref()
+        );
+        assert!(ensure_public_launch_gates(&summary).is_err());
         let _ = fs::remove_file(path);
     }
 
@@ -42197,6 +42342,11 @@ mod tests {
             .as_str()
             .expect("capture contract root")
             .to_string();
+        let public_deployment_evidence_template_root = capture_plan
+            ["public_deployment_evidence_template_root"]
+            .as_str()
+            .expect("public deployment evidence template root")
+            .to_string();
         let deployment_preflight_checklist_root = capture_plan["deployment_preflight"]
             ["checklist_root"]
             .as_str()
@@ -42908,6 +43058,7 @@ mod tests {
             evidence_root: String::new(),
             capture_plan_root: capture_plan_root.clone(),
             capture_contract_root: capture_contract_root.clone(),
+            public_deployment_evidence_template_root,
             deployment_preflight_checklist_root: deployment_preflight_checklist_root.clone(),
             deployment_preflight_receipt: deployment_preflight_receipt.clone(),
             deployment_preflight_receipt_root: deployment_preflight_receipt_validation

@@ -3434,7 +3434,8 @@ real XMR.
   policy/probe/provenance/evidence root, writes
   the assembled artifact, and validates it through the same verifier used by
   the public launch gate. The public deployment report compares the embedded
-  `capture_plan_root`, `capture_contract_root`, and
+  `capture_plan_root`, `capture_contract_root`,
+  `public_deployment_evidence_template_root`, and
   `deployment_preflight_checklist_root` against the current generated capture
   plan, exposes individual root-binding booleans plus expected repair roots,
   requires the embedded `public_launch_package_file_set_root` to match
@@ -3483,8 +3484,9 @@ real XMR.
   artifact.
 - Filled public deployment attestations bind the launch bundle to publicly
   routable HTTPS endpoints, the exact capture plan root, capture contract root,
-  deployment preflight checklist root, package file-set root, release approval
-  template root, release-authority registry template root, completed
+  public deployment evidence-template root, deployment preflight checklist
+  root, package file-set root, release approval template root,
+  release-authority registry template root, completed
   preflight receipt root and phase-set root, completed runbook receipt root and
   step-receipt-set root, typed TLS endpoint-pin records for public RPC,
   status-page, health, metrics, incident-contact, faucet, and reset-runbook surfaces, typed bootstrap node

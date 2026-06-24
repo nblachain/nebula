@@ -744,7 +744,8 @@ requires `schema_version: 5` and `template_only: false`, rejects placeholders
 and sensitive field names, requires HTTPS publicly routable
 RPC/status/health/metrics/incident-contact/faucet/reset endpoints, and requires a publicly
 routable P2P endpoint. It must bind the capture plan root, capture contract
-root, and deployment preflight checklist root generated for the same run.
+root, public deployment evidence-template root, and deployment preflight
+checklist root generated for the same run.
 It also must bind the current `public_launch_package_file_set_root`,
 the aggregate `public_launch_package_handoff_root`, the pre-capture
 `public_launch_package_manifest_root`, the pre-capture
