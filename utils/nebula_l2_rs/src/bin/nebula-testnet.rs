@@ -22243,11 +22243,54 @@ fn ensure_public_launch_readiness_roots_match_report(
         readiness.get("check_root").and_then(Value::as_str) == Some(expected_check_root.as_str()),
         "public launch readiness nested check root mismatch",
     )?;
+    let failed_check_ids = checks
+        .iter()
+        .filter_map(|check| {
+            let id = required_nested_str(check, "id", "public launch readiness check").ok()?;
+            let status =
+                required_nested_str(check, "status", "public launch readiness check").ok()?;
+            (status != "pass").then(|| id.to_string())
+        })
+        .collect::<Vec<_>>();
+    let blocking_gaps =
+        required_nested_string_list(readiness, "blocking_gaps", "public launch readiness")?;
+    ensure(
+        blocking_gaps == failed_check_ids,
+        "public launch readiness blocking gaps must match failed checks",
+    )?;
+    let public_launch_ready = readiness
+        .get("public_launch_ready")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "public launch readiness missing public_launch_ready".to_string())?;
+    ensure(
+        public_launch_ready == failed_check_ids.is_empty(),
+        "public launch readiness ready flag must match failed checks",
+    )?;
+    let expected_level = if public_launch_ready {
+        "public-launch-ready"
+    } else {
+        "public-launch-blocked"
+    };
+    ensure(
+        readiness.get("level").and_then(Value::as_str) == Some(expected_level),
+        "public launch readiness level must match ready flag",
+    )?;
 
     let remediations = readiness
         .get("remediations")
         .and_then(Value::as_array)
         .ok_or_else(|| "public launch readiness missing remediations".to_string())?;
+    let remediation_blockers = remediations
+        .iter()
+        .map(|remediation| {
+            required_nested_str(remediation, "blocker_id", "public launch remediation")
+                .map(str::to_string)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    ensure(
+        remediation_blockers == failed_check_ids,
+        "public launch readiness remediations must match failed checks",
+    )?;
     let remediation_roots = remediations
         .iter()
         .map(|remediation| {
@@ -22267,11 +22310,6 @@ fn ensure_public_launch_readiness_roots_match_report(
             == Some(expected_remediation_root.as_str()),
         "public launch readiness nested remediation root mismatch",
     )?;
-
-    let public_launch_ready = readiness
-        .get("public_launch_ready")
-        .and_then(Value::as_bool)
-        .ok_or_else(|| "public launch readiness missing public_launch_ready".to_string())?;
     let expected_report_root = root(&[
         "public-launch-readiness-report",
         CHAIN_ID,
@@ -35968,6 +36006,53 @@ mod tests {
         assert!(error.contains(
             "public launch remediation deferred repair root for unexpected subcheck not_a_failed_subcheck"
         ));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_ready_flag_with_failed_check() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_ready"] = json!(true);
+        value["level"] = json!("public-launch-ready");
+        value["public_launch_readiness"]["public_launch_ready"] = json!(true);
+        value["public_launch_readiness"]["level"] = json!("public-launch-ready");
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("ready flag with failed check should fail safety checks");
+        assert!(error.contains("public launch readiness ready flag must match failed checks"));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_blocking_gap_mismatch() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["blocking_gap_count"] = json!(0);
+        value["public_launch_readiness"]["blocking_gaps"] = json!([]);
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("blocking gap mismatch should fail safety checks");
+        assert!(error.contains("public launch readiness blocking gaps must match failed checks"));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_remediation_gap_mismatch() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["remediation_count"] = json!(0);
+        value["public_launch_readiness"]["remediations"] = json!([]);
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("remediation gap mismatch should fail safety checks");
+        assert!(error.contains("public launch readiness remediations must match failed checks"));
     }
 
     #[test]
