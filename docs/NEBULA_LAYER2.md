@@ -3369,9 +3369,10 @@ real XMR.
   derivation rules. Templates remain rejected until every placeholder is
   replaced by captured deployment evidence. The paired
   `--verify-public-deployment-evidence-template` command recomputes the
-  template root and rejects stale status, launch-bundle, launch-artifact,
-  package-file-set, package-handoff, release-template, runbook, bootstrap, or
-  local probe roots before operators fill public endpoint evidence.
+  template root, checks the current status, launch-bundle, launch-artifact,
+  package-file-set, release-template, runbook, bootstrap, policy-claim, local
+  probe, and template roots, and rejects stale bindings before operators fill
+  public endpoint evidence.
 - A public deployment capture-plan export gives deployment CI a rooted
   `nebula-public-deployment-capture-plan` work order before capture starts. It
   is not evidence; it lists the exact required capture fields, public endpoint

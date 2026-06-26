@@ -562,10 +562,11 @@ is intentionally `template_only: true`, contains placeholders, and is rejected
 by the verifier until deployment tooling replaces every placeholder and
 recomputes roots.
 `--verify-public-deployment-evidence-template
-path\to\deployment-template.json` recomputes the template root and rejects
-stale status, launch-bundle, launch-artifact, package-file-set, runbook,
-package-handoff, bootstrap, or local probe roots before operators fill public
-endpoint evidence.
+path\to\deployment-template.json` recomputes the template root, checks the
+current status, launch-bundle, launch-artifact, package-file-set,
+release-template, runbook, bootstrap, policy-claim, local probe, and template
+roots, and rejects stale bindings before operators fill public endpoint
+evidence.
 
 `--write-public-deployment-capture-plan path\to\capture-plan.json` also
 requires `--mainnet-readiness` and writes a

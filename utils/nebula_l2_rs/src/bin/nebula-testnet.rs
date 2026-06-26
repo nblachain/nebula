@@ -11461,6 +11461,118 @@ fn verify_public_deployment_evidence_template(
     ensure_public_deployment_evidence_template_safe(&actual)?;
     let expected = public_deployment_evidence_template(summary);
     ensure_public_deployment_evidence_template_safe(&expected)?;
+    ensure_current_run_pointer_bindings(
+        &actual,
+        &expected,
+        "public deployment evidence template",
+        &[
+            ("testnet_manifest_id", "/testnet_manifest_id"),
+            (
+                "public_status_manifest_root",
+                "/public_status_manifest_root",
+            ),
+            ("public_launch_bundle_root", "/public_launch_bundle_root"),
+            (
+                "public_launch_artifact_manifest_root",
+                "/public_launch_artifact_manifest_root",
+            ),
+            (
+                "public_launch_artifact_set_root",
+                "/public_launch_artifact_set_root",
+            ),
+            (
+                "public_launch_package_file_set_root",
+                "/public_launch_package_file_set_root",
+            ),
+            (
+                "release_approval_template_root",
+                "/release_approval_template_root",
+            ),
+            (
+                "release_authority_registry_template_root",
+                "/release_authority_registry_template_root",
+            ),
+            (
+                "public_deployment_runbook_root",
+                "/public_deployment_runbook_root",
+            ),
+            (
+                "public_deployment_runbook_step_set_root",
+                "/public_deployment_runbook_step_set_root",
+            ),
+            (
+                "public_bootstrap_profile_root",
+                "/public_bootstrap_profile_root",
+            ),
+            (
+                "public_bootstrap_profile_report_root",
+                "/public_bootstrap_profile_report_root",
+            ),
+            ("bootstrap_node_set_root", "/bootstrap_node_set_root"),
+            ("bootstrap_node_count", "/bootstrap_node_count"),
+            (
+                "bootstrap_operator_set_root",
+                "/bootstrap_operator_set_root",
+            ),
+            ("bootstrap_operator_count", "/bootstrap_operator_count"),
+            ("bootstrap_region_set_root", "/bootstrap_region_set_root"),
+            ("bootstrap_node_probe_count", "/bootstrap_node_probe_count"),
+            ("rate_limit_policy_root", "/rate_limit_policy_root"),
+            (
+                "proxy_policy_claims/public_launch_bundle_root",
+                "/proxy_policy_claims/public_launch_bundle_root",
+            ),
+            (
+                "proxy_policy_claims/public_status_manifest_root",
+                "/proxy_policy_claims/public_status_manifest_root",
+            ),
+            (
+                "proxy_policy_claims/public_bootstrap_profile_root",
+                "/proxy_policy_claims/public_bootstrap_profile_root",
+            ),
+            (
+                "proxy_policy_claims/health_check_root",
+                "/proxy_policy_claims/health_check_root",
+            ),
+            (
+                "proxy_policy_claims/rate_limit_policy_root",
+                "/proxy_policy_claims/rate_limit_policy_root",
+            ),
+            (
+                "rate_limit_policy_claims/rate_limit_policy_root",
+                "/rate_limit_policy_claims/rate_limit_policy_root",
+            ),
+            (
+                "rate_limit_policy_claims/faucet_policy_root",
+                "/rate_limit_policy_claims/faucet_policy_root",
+            ),
+            (
+                "health_probe/public_bootstrap_profile_root",
+                "/health_probe/public_bootstrap_profile_root",
+            ),
+            (
+                "health_probe/public_launch_bundle_root",
+                "/health_probe/public_launch_bundle_root",
+            ),
+            (
+                "status_page_probe/public_launch_bundle_root",
+                "/status_page_probe/public_launch_bundle_root",
+            ),
+            (
+                "status_page_probe/status_page_commitment_root",
+                "/status_page_probe/status_page_commitment_root",
+            ),
+            (
+                "status_page_probe/incident_response_contact_root",
+                "/status_page_probe/incident_response_contact_root",
+            ),
+            (
+                "metrics_probe/public_launch_bundle_root",
+                "/metrics_probe/public_launch_bundle_root",
+            ),
+            ("template_root", "/template_root"),
+        ],
+    )?;
     ensure(
         actual == expected,
         "public deployment evidence template does not match this run",
@@ -35766,7 +35878,7 @@ mod tests {
 
         let error = verify_public_deployment_evidence_template(&path, &summary)
             .expect_err("re-rooted stale template should fail exact verification");
-        assert!(error.contains("does not match this run"));
+        assert!(error.contains("public_launch_package_file_set_root mismatch"));
         let _ = fs::remove_file(path);
     }
 
