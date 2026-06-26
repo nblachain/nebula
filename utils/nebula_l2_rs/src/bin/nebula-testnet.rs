@@ -9359,6 +9359,13 @@ fn public_testnet_certification_next_steps() -> Value {
     )
 }
 
+fn public_launch_package_next_steps() -> Value {
+    public_deployment_capture_next_steps(
+        "Run write_capture_scaffold, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
+        false,
+    )
+}
+
 fn public_deployment_capture_next_steps_root(next_steps: &Value) -> String {
     let step_roots = next_steps
         .as_object()
@@ -9947,10 +9954,7 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
     let remediation_count = summary.public_launch_readiness.remediations.len() as u64;
     let package_file_set_root =
         public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
-    let next_steps = public_deployment_capture_next_steps(
-        "Run write_capture_scaffold, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
-        false,
-    );
+    let next_steps = public_launch_package_next_steps();
     let next_steps_root = public_deployment_capture_next_steps_root(&next_steps);
     let command_sequence = public_deployment_capture_command_sequence();
     let command_sequence_root =
@@ -10078,10 +10082,7 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
     ensure_public_deployment_capture_next_steps(
         &manifest,
         "public launch package",
-        public_deployment_capture_next_steps(
-            "Run write_capture_scaffold, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
-            false,
-        ),
+        public_launch_package_next_steps(),
     )?;
     ensure(
         required_str(&manifest, "public_launch_level")? == summary.public_launch_readiness.level,
@@ -33994,10 +33995,7 @@ mod tests {
             .contains("--verify-public-deployment-capture-scaffold"));
         assert_eq!(
             manifest["next_steps"],
-            public_deployment_capture_next_steps(
-                "Run write_capture_scaffold, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
-                false,
-            )
+            public_launch_package_next_steps()
         );
         assert_eq!(
             manifest["next_steps_root"],
@@ -34088,6 +34086,64 @@ mod tests {
         let error = verify_public_launch_package(&package_dir_string, &summary)
             .expect_err("next-steps tampered package should fail");
         assert!(error.contains("next_steps mismatch"));
+        let mut re_rooted_next_steps_tampered_manifest = manifest.clone();
+        re_rooted_next_steps_tampered_manifest["next_steps"]["verify_public_launch"] =
+            json!("cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --json");
+        let next_steps = re_rooted_next_steps_tampered_manifest["next_steps"].clone();
+        re_rooted_next_steps_tampered_manifest["next_steps_root"] =
+            json!(public_deployment_capture_next_steps_root(&next_steps));
+        re_rooted_next_steps_tampered_manifest["package_manifest_root"] = json!(public_launch_package_manifest_root(
+            re_rooted_next_steps_tampered_manifest["manifest_id"]
+                .as_str()
+                .expect("manifest id"),
+            re_rooted_next_steps_tampered_manifest["testnet_id"]
+                .as_str()
+                .expect("testnet id"),
+            re_rooted_next_steps_tampered_manifest["artifact_set_root"]
+                .as_str()
+                .expect("artifact set root"),
+            re_rooted_next_steps_tampered_manifest["package_file_set_root"]
+                .as_str()
+                .expect("package file-set root"),
+            re_rooted_next_steps_tampered_manifest["public_launch_level"]
+                .as_str()
+                .expect("launch level"),
+            re_rooted_next_steps_tampered_manifest["public_launch_ready"]
+                .as_bool()
+                .expect("launch ready"),
+            re_rooted_next_steps_tampered_manifest["blocking_gap_count"]
+                .as_u64()
+                .expect("blocking gap count"),
+            re_rooted_next_steps_tampered_manifest["remediation_count"]
+                .as_u64()
+                .expect("remediation count"),
+            re_rooted_next_steps_tampered_manifest["public_launch_readiness_report_root"]
+                .as_str()
+                .expect("readiness report root"),
+            re_rooted_next_steps_tampered_manifest["public_launch_readiness_artifact_root"]
+                .as_str()
+                .expect("readiness artifact root"),
+            true,
+            re_rooted_next_steps_tampered_manifest["commands_root"]
+                .as_str()
+                .expect("commands root"),
+            re_rooted_next_steps_tampered_manifest["next_steps_root"]
+                .as_str()
+                .expect("next steps root"),
+            re_rooted_next_steps_tampered_manifest["command_sequence_root"]
+                .as_str()
+                .expect("command sequence root"),
+        )
+        );
+        fs::write(
+            &package_manifest_path,
+            serde_json::to_string_pretty(&re_rooted_next_steps_tampered_manifest)
+                .expect("tampered manifest json"),
+        )
+        .expect("write re-rooted next-steps tampered package manifest");
+        let error = verify_public_launch_package(&package_dir_string, &summary)
+            .expect_err("re-rooted next-steps tampered package should fail");
+        assert!(error.contains("next_steps root mismatch"));
         let mut next_steps_root_tampered_manifest = manifest.clone();
         next_steps_root_tampered_manifest["next_steps_root"] =
             json!(root(&["tampered-next-steps-root"]));
