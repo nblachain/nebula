@@ -22025,9 +22025,25 @@ fn ensure_public_launch_readiness_report_artifact_safe(value: &Value) -> Result<
     let readiness = value
         .get("public_launch_readiness")
         .ok_or_else(|| "public launch readiness report missing nested readiness".to_string())?;
+    let readiness_object = readiness.as_object().ok_or_else(|| {
+        "public launch readiness report must include the operator launch report".to_string()
+    })?;
     ensure(
-        readiness.as_object().is_some(),
-        "public launch readiness report must include the operator launch report",
+        readiness_object.keys().all(|key| {
+            matches!(
+                key.as_str(),
+                "level"
+                    | "public_launch_ready"
+                    | "dry_run"
+                    | "report_root"
+                    | "check_root"
+                    | "remediation_root"
+                    | "blocking_gaps"
+                    | "remediations"
+                    | "checks"
+            )
+        }),
+        "public launch readiness report contains non-canonical nested readiness fields",
     )?;
     ensure(
         readiness.get("dry_run").and_then(Value::as_bool) == Some(true),
@@ -36228,6 +36244,24 @@ mod tests {
         assert!(
             error.contains("public launch readiness report must remain a dry-run readiness report")
         );
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_extra_nested_readiness_field() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["operator_note"] =
+            json!("not part of the nested readiness contract");
+
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("extra nested readiness field should fail safety checks");
+        assert!(error.contains(
+            "public launch readiness report contains non-canonical nested readiness fields"
+        ));
     }
 
     #[test]

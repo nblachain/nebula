@@ -3348,8 +3348,8 @@ real XMR.
   report, requires all repair-root values to be hex roots while identity values
   such as the package manifest id remain in expected values, requires the
   blocker, ready flag, level, and remediation lists to match the failed checks,
-  rejects non-canonical readiness check ordering/fields, unknown readiness check
-  ids/statuses, tampered readiness check detail text, malformed readiness
+  rejects non-canonical nested readiness fields, readiness check ordering/fields,
+  unknown readiness check ids/statuses, tampered readiness check detail text, malformed readiness
   evidence roots, duplicate readiness check ids, non-canonical remediation
   fields, and duplicate remediation subcheck/deferred-repair lists, and rejects
   stale package-root, readiness-root, status, bundle, capture-plan,
