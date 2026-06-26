@@ -754,7 +754,9 @@ The verifier and public deployment report also compare the embedded
 `capture_plan_root`, `capture_contract_root`,
 `public_deployment_evidence_template_root`, and
 `deployment_preflight_checklist_root` against the current generated capture plan,
-bind those actual/expected capture roots into the report root, seal the public
+bind those actual/expected capture roots into the report root, expose
+observer-set, attestor-registry, PQ-signature, observer-count, and region-count
+provenance bindings in the public launch report/remediation roots, seal the public
 RPC, P2P, status, health, metrics, incident, faucet, and reset-runbook endpoint
 strings into the report root, require the embedded
 `public_launch_package_file_set_root` to match the current rooted package file

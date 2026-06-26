@@ -1264,6 +1264,12 @@ struct PublicDeploymentReport {
     public_surface_probe_count_bound: bool,
     public_probe_set_root_bound: bool,
     public_probe_count_bound: bool,
+    observer_provenance_bound: bool,
+    probe_observer_set_root_bound: bool,
+    attestor_registry_root_bound: bool,
+    pq_signature_root_bound: bool,
+    observer_count_bound: bool,
+    observed_region_count_bound: bool,
     no_private_summary_exposed: bool,
     mainnet_custody_disabled: bool,
     public_launch_bundle_root: Option<String>,
@@ -1378,6 +1384,17 @@ struct PublicDeploymentReport {
     expected_public_probe_set_root: Option<String>,
     public_probe_count: u64,
     expected_public_probe_count: Option<u64>,
+    probe_observer_set_root: Option<String>,
+    expected_probe_observer_set_root: Option<String>,
+    attestor_registry_root: Option<String>,
+    expected_attestor_registry_root: Option<String>,
+    pq_signature_root: Option<String>,
+    expected_pq_signature_root: Option<String>,
+    observer_quorum_threshold: u64,
+    observer_count: u64,
+    expected_observer_count: Option<u64>,
+    observed_region_count: u64,
+    expected_observed_region_count: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -6022,6 +6039,83 @@ impl Testnet {
                 == Some(evidence.public_probe_set_root.as_str());
         let public_probe_count_bound =
             Some(evidence.public_probe_count) == expected_public_probe_count;
+        let expected_probe_roots = [
+            ("status_probe_root", evidence.status_probe_root.clone()),
+            ("p2p_handshake_root", evidence.p2p_handshake_root.clone()),
+            (
+                "public_surface_probe_set_root",
+                evidence.public_surface_probe_set_root.clone(),
+            ),
+            (
+                "bootstrap_node_probe_set_root",
+                evidence.bootstrap_node_probe_set_root.clone(),
+            ),
+            ("health_probe_root", evidence.health_probe_root.clone()),
+            (
+                "status_page_probe_root",
+                evidence.status_page_probe_root.clone(),
+            ),
+            ("metrics_probe_root", evidence.metrics_probe_root.clone()),
+            (
+                "deployed_finality_probe_root",
+                evidence.deployed_finality_probe_root.clone(),
+            ),
+            (
+                "incident_contact_probe_root",
+                evidence.incident_contact_probe_root.clone(),
+            ),
+            ("faucet_probe_root", evidence.faucet_probe_root.clone()),
+            (
+                "reset_runbook_probe_root",
+                evidence.reset_runbook_probe_root.clone(),
+            ),
+            (
+                "private_summary_probe_root",
+                evidence.private_summary_probe_root.clone(),
+            ),
+        ];
+        let expected_observer_validation = validate_public_probe_observers(
+            &evidence.probe_observers,
+            &evidence.public_launch_bundle_root,
+            &evidence.public_status_manifest_root,
+            &evidence.deployment_run_id,
+            evidence.observed_at_unix_ms,
+            evidence.expires_at_unix_ms,
+            evidence.observer_quorum_threshold,
+            &expected_probe_roots,
+        )
+        .ok();
+        let expected_probe_observer_set_root = expected_observer_validation
+            .as_ref()
+            .map(|validation| validation.probe_observer_set_root.clone());
+        let expected_attestor_registry_root = expected_observer_validation
+            .as_ref()
+            .map(|validation| validation.attestor_registry_root.clone());
+        let expected_pq_signature_root = expected_observer_validation
+            .as_ref()
+            .map(|validation| validation.pq_signature_root.clone());
+        let expected_observer_count = expected_observer_validation
+            .as_ref()
+            .map(|validation| validation.observer_count);
+        let expected_observed_region_count = expected_observer_validation
+            .as_ref()
+            .map(|validation| validation.observed_region_count);
+        let probe_observer_set_root_bound = is_hex_root(&evidence.probe_observer_set_root)
+            && expected_probe_observer_set_root.as_deref()
+                == Some(evidence.probe_observer_set_root.as_str());
+        let attestor_registry_root_bound = is_hex_root(&evidence.attestor_registry_root)
+            && expected_attestor_registry_root.as_deref()
+                == Some(evidence.attestor_registry_root.as_str());
+        let pq_signature_root_bound = is_hex_root(&evidence.pq_signature_root)
+            && expected_pq_signature_root.as_deref() == Some(evidence.pq_signature_root.as_str());
+        let observer_count_bound = Some(evidence.observer_count) == expected_observer_count;
+        let observed_region_count_bound =
+            Some(evidence.observed_region_count) == expected_observed_region_count;
+        let observer_provenance_bound = probe_observer_set_root_bound
+            && attestor_registry_root_bound
+            && pq_signature_root_bound
+            && observer_count_bound
+            && observed_region_count_bound;
         let live_probe_roots_bound = status_probe_root_bound
             && p2p_handshake_root_bound
             && health_probe_root_bound
@@ -6059,6 +6153,7 @@ impl Testnet {
             && proxy_policy_verified
             && bootstrap_nodes_bound
             && live_probe_roots_bound
+            && observer_provenance_bound
             && mainnet_custody_disabled
             && public_bootstrap_profile_passed
             && finality_latency_profile_passed;
@@ -6089,6 +6184,12 @@ impl Testnet {
         let expected_public_probe_count_string = expected_public_probe_count
             .map(|count| count.to_string())
             .unwrap_or_else(|| "missing-public-probe-count".to_string());
+        let expected_observer_count_string = expected_observer_count
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "missing-observer-count".to_string());
+        let expected_observed_region_count_string = expected_observed_region_count
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "missing-observed-region-count".to_string());
         let report_root = root(&[
             "public-deployment-report",
             CHAIN_ID,
@@ -6206,6 +6307,23 @@ impl Testnet {
                 .unwrap_or("missing-public-probe-set-root"),
             &evidence.public_probe_count.to_string(),
             &expected_public_probe_count_string,
+            &evidence.probe_observer_set_root,
+            expected_probe_observer_set_root
+                .as_deref()
+                .unwrap_or("missing-probe-observer-set-root"),
+            &evidence.attestor_registry_root,
+            expected_attestor_registry_root
+                .as_deref()
+                .unwrap_or("missing-attestor-registry-root"),
+            &evidence.pq_signature_root,
+            expected_pq_signature_root
+                .as_deref()
+                .unwrap_or("missing-pq-signature-root"),
+            &evidence.observer_quorum_threshold.to_string(),
+            &evidence.observer_count.to_string(),
+            &expected_observer_count_string,
+            &evidence.observed_region_count.to_string(),
+            &expected_observed_region_count_string,
             &evidence.schema_version.to_string(),
             bool_str(passed),
         ]);
@@ -6289,6 +6407,12 @@ impl Testnet {
             public_surface_probe_count_bound,
             public_probe_set_root_bound,
             public_probe_count_bound,
+            observer_provenance_bound,
+            probe_observer_set_root_bound,
+            attestor_registry_root_bound,
+            pq_signature_root_bound,
+            observer_count_bound,
+            observed_region_count_bound,
             no_private_summary_exposed,
             mainnet_custody_disabled,
             public_launch_bundle_root: Some(evidence.public_launch_bundle_root.clone()),
@@ -6480,6 +6604,17 @@ impl Testnet {
             expected_public_probe_set_root,
             public_probe_count: evidence.public_probe_count,
             expected_public_probe_count,
+            probe_observer_set_root: Some(evidence.probe_observer_set_root.clone()),
+            expected_probe_observer_set_root,
+            attestor_registry_root: Some(evidence.attestor_registry_root.clone()),
+            expected_attestor_registry_root,
+            pq_signature_root: Some(evidence.pq_signature_root.clone()),
+            expected_pq_signature_root,
+            observer_quorum_threshold: evidence.observer_quorum_threshold,
+            observer_count: evidence.observer_count,
+            expected_observer_count,
+            observed_region_count: evidence.observed_region_count,
+            expected_observed_region_count,
         }
     }
 
@@ -7540,6 +7675,12 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         public_surface_probe_count_bound: false,
         public_probe_set_root_bound: false,
         public_probe_count_bound: false,
+        observer_provenance_bound: false,
+        probe_observer_set_root_bound: false,
+        attestor_registry_root_bound: false,
+        pq_signature_root_bound: false,
+        observer_count_bound: false,
+        observed_region_count_bound: false,
         no_private_summary_exposed: false,
         mainnet_custody_disabled: false,
         public_launch_bundle_root: None,
@@ -7654,6 +7795,17 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         expected_public_probe_set_root: None,
         public_probe_count: 0,
         expected_public_probe_count: None,
+        probe_observer_set_root: None,
+        expected_probe_observer_set_root: None,
+        attestor_registry_root: None,
+        expected_attestor_registry_root: None,
+        pq_signature_root: None,
+        expected_pq_signature_root: None,
+        observer_quorum_threshold: 0,
+        observer_count: 0,
+        expected_observer_count: None,
+        observed_region_count: 0,
+        expected_observed_region_count: None,
     }
 }
 
@@ -8351,6 +8503,18 @@ fn public_deployment_repair_roots(
             "public_probe_set_root_bound",
             report.expected_public_probe_set_root.as_deref(),
         ),
+        (
+            "probe_observer_set_root_bound",
+            report.expected_probe_observer_set_root.as_deref(),
+        ),
+        (
+            "attestor_registry_root_bound",
+            report.expected_attestor_registry_root.as_deref(),
+        ),
+        (
+            "pq_signature_root_bound",
+            report.expected_pq_signature_root.as_deref(),
+        ),
     ];
     for (subcheck, expected_root) in candidates {
         if failed.contains(subcheck) {
@@ -8593,6 +8757,24 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
             report.public_probe_set_root_bound,
         ),
         ("public_probe_count_bound", report.public_probe_count_bound),
+        (
+            "observer_provenance_bound",
+            report.observer_provenance_bound,
+        ),
+        (
+            "probe_observer_set_root_bound",
+            report.probe_observer_set_root_bound,
+        ),
+        (
+            "attestor_registry_root_bound",
+            report.attestor_registry_root_bound,
+        ),
+        ("pq_signature_root_bound", report.pq_signature_root_bound),
+        ("observer_count_bound", report.observer_count_bound),
+        (
+            "observed_region_count_bound",
+            report.observed_region_count_bound,
+        ),
         (
             "no_private_summary_exposed",
             report.no_private_summary_exposed,
@@ -42093,6 +42275,118 @@ mod tests {
         assert!(!remediation
             .repair_roots
             .contains_key("public_probe_count_bound"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_unbound_observer_provenance_roots() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path =
+            write_public_deployment_evidence(&valid_public_deployment_evidence(&base_summary));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let expected_probe_observer_set_root = evidence.probe_observer_set_root.clone();
+        let expected_attestor_registry_root = evidence.attestor_registry_root.clone();
+        let expected_pq_signature_root = evidence.pq_signature_root.clone();
+        let expected_observer_count = evidence.observer_count;
+        let expected_observed_region_count = evidence.observed_region_count;
+        evidence.probe_observer_set_root =
+            root(&["test-public-deployment", "wrong-probe-observer-set"]);
+        evidence.attestor_registry_root =
+            root(&["test-public-deployment", "wrong-attestor-registry"]);
+        evidence.pq_signature_root = root(&["test-public-deployment", "wrong-pq-signature-set"]);
+        evidence.observer_count = 0;
+        evidence.observed_region_count = 0;
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.observer_provenance_bound);
+        assert!(!summary.public_deployment.probe_observer_set_root_bound);
+        assert!(!summary.public_deployment.attestor_registry_root_bound);
+        assert!(!summary.public_deployment.pq_signature_root_bound);
+        assert!(!summary.public_deployment.observer_count_bound);
+        assert!(!summary.public_deployment.observed_region_count_bound);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_probe_observer_set_root
+                .as_deref(),
+            Some(expected_probe_observer_set_root.as_str())
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_attestor_registry_root
+                .as_deref(),
+            Some(expected_attestor_registry_root.as_str())
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_pq_signature_root
+                .as_deref(),
+            Some(expected_pq_signature_root.as_str())
+        );
+        assert_eq!(
+            summary.public_deployment.expected_observer_count,
+            Some(expected_observer_count)
+        );
+        assert_eq!(
+            summary.public_deployment.expected_observed_region_count,
+            Some(expected_observed_region_count)
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        for failed_subcheck in [
+            "observer_provenance_bound",
+            "probe_observer_set_root_bound",
+            "attestor_registry_root_bound",
+            "pq_signature_root_bound",
+            "observer_count_bound",
+            "observed_region_count_bound",
+        ] {
+            assert!(
+                remediation
+                    .failed_subchecks
+                    .contains(&failed_subcheck.to_string()),
+                "missing failed subcheck {failed_subcheck}"
+            );
+        }
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("probe_observer_set_root_bound")
+                .map(String::as_str),
+            Some(expected_probe_observer_set_root.as_str())
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("attestor_registry_root_bound")
+                .map(String::as_str),
+            Some(expected_attestor_registry_root.as_str())
+        );
+        assert_eq!(
+            remediation
+                .repair_roots
+                .get("pq_signature_root_bound")
+                .map(String::as_str),
+            Some(expected_pq_signature_root.as_str())
+        );
+        assert!(!remediation
+            .repair_roots
+            .contains_key("observer_count_bound"));
+        assert!(!remediation
+            .repair_roots
+            .contains_key("observed_region_count_bound"));
         let _ = fs::remove_file(path);
     }
 

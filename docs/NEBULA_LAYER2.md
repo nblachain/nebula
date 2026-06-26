@@ -3472,6 +3472,8 @@ real XMR.
   `deployment_preflight_checklist_root` against the current generated capture
   plan, binds those actual/expected capture roots into the report root, exposes
   individual root-binding booleans plus expected repair roots,
+  binds observer-set, attestor-registry, PQ-signature, observer-count, and
+  region-count provenance into the public launch report and remediation roots,
   seals the public RPC, P2P, status, health, metrics, incident, faucet, and
   reset-runbook endpoint strings into the report root,
   requires the embedded `public_launch_package_file_set_root` to match
