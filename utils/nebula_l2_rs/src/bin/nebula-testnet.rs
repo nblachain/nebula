@@ -21980,6 +21980,45 @@ fn ensure_public_launch_bundle_redacted(value: &Value) -> Result<(), String> {
 }
 
 fn ensure_public_launch_readiness_report_artifact_safe(value: &Value) -> Result<(), String> {
+    let report_object = value
+        .as_object()
+        .ok_or_else(|| "public launch readiness report must be an object".to_string())?;
+    ensure(
+        report_object.keys().all(|key| {
+            matches!(
+                key.as_str(),
+                "kind"
+                    | "schema_version"
+                    | "chain_id"
+                    | "version"
+                    | "testnet_id"
+                    | "manifest_id"
+                    | "public_alpha_only"
+                    | "local_operator_only"
+                    | "usable_as_public_deployment_evidence"
+                    | "usable_as_mainnet_custody_approval"
+                    | "custody_mode"
+                    | "level"
+                    | "public_launch_ready"
+                    | "blocking_gap_count"
+                    | "remediation_count"
+                    | "public_launch_readiness_report_root"
+                    | "public_launch_readiness_check_root"
+                    | "public_launch_readiness_remediation_root"
+                    | "public_status_manifest_root"
+                    | "public_launch_bundle_root"
+                    | "capture_plan_root"
+                    | "capture_contract_root"
+                    | "public_deployment_evidence_template_root"
+                    | "deployment_preflight_checklist_root"
+                    | "public_launch_package_file_set_root"
+                    | "public_deployment_evidence_root"
+                    | "public_launch_readiness"
+                    | "public_launch_readiness_artifact_root"
+            )
+        }),
+        "public launch readiness report contains non-canonical top-level fields",
+    )?;
     ensure(
         value.get("kind").and_then(Value::as_str) == Some("nebula-public-launch-readiness-report"),
         "public launch readiness report kind mismatch",
@@ -36244,6 +36283,22 @@ mod tests {
         assert!(
             error.contains("public launch readiness report must remain a dry-run readiness report")
         );
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_extra_top_level_field() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["operator_note"] = json!("not part of the top-level readiness report contract");
+
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("extra top-level readiness report field should fail safety checks");
+        assert!(error
+            .contains("public launch readiness report contains non-canonical top-level fields"));
     }
 
     #[test]
