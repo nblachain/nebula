@@ -3366,8 +3366,9 @@ real XMR.
   requires exactly one independently verified ML-DSA-65-signed registry record
   per committed operator before deployment evidence can clear the public launch
   gate. The bundle is explicitly unusable as public deployment evidence or
-  mainnet custody approval, and its guard recomputes the bundle root before
-  export, standalone verification, or package verification. Standalone
+  mainnet custody approval, and its guard pins schema, chain, and version
+  identity while recomputing the bundle root before export, standalone
+  verification, or package verification. Standalone
   verification checks the current run's status, bootstrap, runbook, readiness,
   operations, reserve, privacy, wallet-recovery, watchtower, and bundle roots
   before the full bundle comparison.

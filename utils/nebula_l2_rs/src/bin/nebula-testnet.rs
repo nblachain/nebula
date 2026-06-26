@@ -21885,6 +21885,18 @@ fn ensure_public_launch_bundle_redacted(value: &Value) -> Result<(), String> {
         "public launch bundle kind mismatch",
     )?;
     ensure(
+        value.get("schema_version").and_then(Value::as_u64) == Some(1),
+        "public launch bundle schema_version mismatch",
+    )?;
+    ensure(
+        value.get("chain_id").and_then(Value::as_str) == Some(CHAIN_ID),
+        "public launch bundle chain_id mismatch",
+    )?;
+    ensure(
+        value.get("version").and_then(Value::as_str) == Some(VERSION),
+        "public launch bundle version mismatch",
+    )?;
+    ensure(
         value.get("template_only").and_then(Value::as_bool) == Some(true),
         "public launch bundle must be a template",
     )?;
@@ -36168,6 +36180,27 @@ mod tests {
             .expect_err("root-tampered launch bundle should fail");
         assert!(error.contains("public launch bundle root mismatch"));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_launch_bundle_rejects_re_rooted_wrong_version() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_bundle(&summary);
+        value["version"] = json!("nebula-testnet-wrong-version");
+        value
+            .as_object_mut()
+            .expect("public launch bundle object")
+            .remove("public_launch_bundle_root");
+        let bundle_root = value_root("public-launch-bundle", &value);
+        value["public_launch_bundle_root"] = json!(bundle_root);
+
+        let error = ensure_public_launch_bundle_redacted(&value)
+            .expect_err("re-rooted launch bundle with wrong version should fail safety checks");
+        assert!(error.contains("public launch bundle version mismatch"));
     }
 
     #[test]
