@@ -54,6 +54,12 @@ jobs:
           assert readiness["remediation_root"]
           assert economics["native_fee_token"] == "NBLA"
           assert economics["bridged_fee_token"] == "nXMR"
+          assert economics["native_base_unit"] == "nebulai"
+          assert economics["nebulai_per_nbla"] == 1000000
+          assert economics["target_nxmr_per_nbla_numerator"] == 1
+          assert economics["target_nxmr_per_nbla_denominator"] == 1000
+          assert economics["target_nxmr_base_units_per_nxmr"] == 1000000000
+          assert economics["target_nxmr_to_nbla_rate_nebulai_per_unit"] == 1
           assert economics["nxmr_reserve_backing_bps"] == 9000
           assert economics["nxmr_validator_reward_bps"] == 1000
           PY

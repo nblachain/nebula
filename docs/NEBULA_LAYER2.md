@@ -66,14 +66,18 @@ Nebula testnet uses a hybrid fee policy:
 
 - Gas can be paid in native `NBLA`.
 - Gas can also be paid in bridged `nXMR`.
+- `nebulai` is the base accounting unit for gas and validator rewards.
+- `1 NBLA = 1,000,000 nebulai`.
+- The target reserve reference is `1 NBLA = 0.001 nXMR`.
+- At that target, one `nXMR` base unit maps to one `nebulai`.
 - `NBLA` gas is credited directly to the validator reward ledger.
 - `nXMR` gas is converted into NBLA accounting value before distribution.
 - Converted `nXMR` value is split with `90%` reserved as NBLA backing and `10%`
   credited to the validator reward ledger.
 
 Public testnet rewards are non-transferable validator points. Points mirror the
-validator reward ledger so validators can prove uptime, attestation quality, and
-fee contribution before any live-value reward policy is enabled.
+validator reward ledger in `nebulai` so validators can prove uptime, attestation
+quality, and fee contribution before any live-value reward policy is enabled.
 
 ## CI
 

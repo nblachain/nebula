@@ -20,3 +20,6 @@ the required deployment attestation.
 Gas can be paid in `NBLA` or `nXMR`. `NBLA` fees go directly to the validator
 reward ledger. `nXMR` fees are converted into NBLA accounting value and split
 with `90%` reserved for NBLA backing and `10%` credited to validator rewards.
+Fees and validator points are denominated in `nebulai`, where
+`1 NBLA = 1,000,000 nebulai` and the target reserve reference is
+`1 NBLA = 0.001 nXMR`.
