@@ -244,6 +244,136 @@ const REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS: &[&str] = &[
     "private_summary_probe_status",
     "private_summary_probe",
 ];
+const PUBLIC_DEPLOYMENT_EVIDENCE_TOP_LEVEL_FIELDS: &[&str] = &[
+    "schema_version",
+    "kind",
+    "template_only",
+    "chain_id",
+    "version",
+    "public_alpha_only",
+    "custody_mode",
+    "evidence_root",
+    "capture_plan_root",
+    "capture_contract_root",
+    "public_deployment_evidence_template_root",
+    "deployment_preflight_checklist_root",
+    "deployment_preflight_receipt",
+    "deployment_preflight_receipt_root",
+    "deployment_preflight_phase_set_root",
+    "deployment_preflight_phase_count",
+    "public_deployment_runbook_root",
+    "public_deployment_runbook_step_set_root",
+    "public_deployment_runbook_receipt",
+    "public_deployment_runbook_receipt_root",
+    "public_deployment_runbook_step_receipt_set_root",
+    "public_deployment_runbook_step_receipt_count",
+    "public_launch_bundle_root",
+    "public_launch_package_file_set_root",
+    "public_launch_package_handoff_root",
+    "public_launch_package_manifest_root",
+    "public_launch_package_schema_version",
+    "public_launch_package_chain_id",
+    "public_launch_package_version",
+    "public_launch_package_manifest_id",
+    "public_launch_package_testnet_id",
+    "public_launch_readiness_artifact_root",
+    "release_approval_template_root",
+    "release_authority_registry_template_root",
+    "testnet_manifest_id",
+    "public_status_manifest_root",
+    "public_status_manifest",
+    "public_bootstrap_profile_root",
+    "public_bootstrap_profile_report_root",
+    "public_rpc_url",
+    "public_p2p_endpoint",
+    "status_page_url",
+    "health_check_url",
+    "metrics_url",
+    "incident_contact_url",
+    "faucet_url",
+    "reset_runbook_url",
+    "tls_spki_pin_root",
+    "tls_endpoint_pins",
+    "tls_endpoint_pin_set_root",
+    "tls_endpoint_pin_count",
+    "bootstrap_nodes",
+    "bootstrap_node_set_root",
+    "bootstrap_node_count",
+    "bootstrap_operator_set_root",
+    "bootstrap_operator_count",
+    "bootstrap_operator_registry",
+    "bootstrap_operator_registry_root",
+    "bootstrap_operator_registry_count",
+    "bootstrap_operator_signature_root",
+    "bootstrap_region_set_root",
+    "bootstrap_p2p_endpoint_set_root",
+    "bootstrap_status_page_set_root",
+    "bootstrap_public_endpoint_count",
+    "bootstrap_node_probes",
+    "bootstrap_node_probe_set_root",
+    "bootstrap_node_probe_count",
+    "proxy_policy_root",
+    "firewall_policy_root",
+    "rate_limit_policy_root",
+    "proxy_policy_claims",
+    "proxy_policy_claims_root",
+    "firewall_policy_claims",
+    "firewall_policy_claims_root",
+    "rate_limit_policy_claims",
+    "rate_limit_policy_claims_root",
+    "status_probe_http_status",
+    "status_probe_root",
+    "p2p_handshake",
+    "p2p_handshake_root",
+    "health_probe_http_status",
+    "health_probe",
+    "health_probe_root",
+    "status_page_probe_http_status",
+    "status_page_probe",
+    "status_page_probe_root",
+    "metrics_probe_http_status",
+    "metrics_probe",
+    "metrics_probe_root",
+    "deployed_finality_probe_http_status",
+    "deployed_finality_probe",
+    "deployed_finality_probe_root",
+    "incident_contact_probe_http_status",
+    "incident_contact_probe",
+    "incident_contact_probe_root",
+    "faucet_probe_http_status",
+    "faucet_probe",
+    "faucet_probe_root",
+    "reset_runbook_probe_http_status",
+    "reset_runbook_probe",
+    "reset_runbook_probe_root",
+    "public_surface_probes",
+    "public_surface_probe_set_root",
+    "public_surface_probe_count",
+    "public_probe_set_root",
+    "public_probe_count",
+    "deployment_run_id",
+    "observed_at_unix_ms",
+    "expires_at_unix_ms",
+    "freshness_window_ms",
+    "probe_observers",
+    "probe_observer_set_root",
+    "attestor_registry_root",
+    "pq_signature_root",
+    "observer_quorum_threshold",
+    "observer_count",
+    "observed_region_count",
+    "provenance_root",
+    "private_summary_probe_status",
+    "private_summary_probe",
+    "private_summary_probe_root",
+    "no_private_summary_exposed",
+    "public_status_manifest_redacted",
+    "tls_required",
+    "rate_limits_enforced",
+    "firewall_allows_public_only",
+    "mainnet_custody_disabled",
+    "placeholders_absent",
+];
 const PICONERO_PER_XMR: u64 = 1_000_000_000_000;
 const ROOT_PLACEHOLDER: &str = "<64-hex-root>";
 const SENSITIVE_FIELD_MARKERS: [&str; 9] = [
@@ -25517,6 +25647,7 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
         custody_mode == "no-mainnet-custody",
         "public deployment evidence custody_mode must be no-mainnet-custody",
     )?;
+    ensure_public_deployment_evidence_top_level_fields(&value)?;
     let capture_plan_root = required_root(&value, "capture_plan_root")?;
     let capture_contract_root = required_root(&value, "capture_contract_root")?;
     let public_deployment_evidence_template_root =
@@ -26389,6 +26520,25 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
         "public deployment evidence_root mismatch",
     )?;
     Ok(evidence)
+}
+
+fn ensure_public_deployment_evidence_top_level_fields(value: &Value) -> Result<(), String> {
+    let Some(map) = value.as_object() else {
+        return Err("public deployment evidence must be a JSON object".to_string());
+    };
+    for key in map.keys() {
+        ensure(
+            PUBLIC_DEPLOYMENT_EVIDENCE_TOP_LEVEL_FIELDS.contains(&key.as_str()),
+            &format!("public deployment evidence contains unexpected top-level field '{key}'"),
+        )?;
+    }
+    for key in PUBLIC_DEPLOYMENT_EVIDENCE_TOP_LEVEL_FIELDS {
+        ensure(
+            map.contains_key(*key),
+            &format!("public deployment evidence missing top-level field '{key}'"),
+        )?;
+    }
+    Ok(())
 }
 
 fn verify_public_deployment_evidence(path: &str, summary: &TestnetSummary) -> Result<(), String> {
@@ -46541,6 +46691,28 @@ mod tests {
         let error = load_public_deployment_evidence(&path)
             .expect_err("wrong-version deployment evidence should be rejected");
         assert!(error.contains("version mismatch"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_evidence_rejects_extra_top_level_field() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut value: Value =
+            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
+                .expect("deployment evidence json");
+        value["operator_launch_note"] = json!("uncommitted side-band launch claim");
+        let path = write_public_deployment_evidence(
+            &serde_json::to_string_pretty(&value).expect("deployment evidence string"),
+        );
+        let error = load_public_deployment_evidence(&path)
+            .expect_err("extra top-level deployment evidence field should be rejected");
+        assert!(error.contains(
+            "public deployment evidence contains unexpected top-level field 'operator_launch_note'"
+        ));
         let _ = fs::remove_file(path);
     }
 

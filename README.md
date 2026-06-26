@@ -3568,7 +3568,9 @@ real XMR.
   public status manifest, the P2P handshake derived from that canonical status
   JSON, health/status-page/metrics/incident-contact/faucet/reset probe bodies, a
   deployed-finality probe, a private-summary denial probe, and observer
-  provenance. Bootstrap node records must cover every committed node slot with
+  provenance. The filled attestation loader rejects unexpected top-level fields
+  before root validation so uncommitted side-band launch claims cannot ride next
+  to a valid evidence root. Bootstrap node records must cover every committed node slot with
   unique public P2P and HTTPS status-page endpoints whose set roots are bound
   into the deployment attestation, and they must cover at least the minimum
   committed operator count. Literal private, loopback, link-local,
