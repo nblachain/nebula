@@ -3442,7 +3442,8 @@ real XMR.
   `capture_plan_root`, `capture_contract_root`,
   `public_deployment_evidence_template_root`, and
   `deployment_preflight_checklist_root` against the current generated capture
-  plan, exposes individual root-binding booleans plus expected repair roots,
+  plan, binds those actual/expected capture roots into the report root, exposes
+  individual root-binding booleans plus expected repair roots,
   requires the embedded `public_launch_package_file_set_root` to match
   the current rooted package file set, requires the embedded
   `public_launch_package_handoff_root` to match both the expected package

@@ -6080,8 +6080,12 @@ impl Testnet {
             &evidence.evidence_root,
             &evidence.capture_plan_root,
             &expected_capture_plan_root,
+            &evidence.capture_contract_root,
+            &expected_capture_contract_root,
             &evidence.public_deployment_evidence_template_root,
             &expected_public_deployment_evidence_template_root,
+            &evidence.deployment_preflight_checklist_root,
+            &expected_preflight_checklist_root,
             &evidence.deployment_preflight_receipt_root,
             expected_deployment_preflight_receipt_root
                 .as_deref()
@@ -38263,6 +38267,44 @@ mod tests {
             write_public_deployment_evidence(&valid_public_deployment_evidence(&base_summary));
         let mut evidence =
             load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let mut contract_only = evidence.clone();
+        contract_only.capture_contract_root =
+            root(&["test-public-deployment", "wrong-capture-contract"]);
+        base_testnet.cli.public_deployment_evidence = Some(contract_only);
+        let contract_only_summary = base_testnet.summary(Vec::new());
+        assert!(!contract_only_summary.public_deployment.passed);
+        assert!(
+            !contract_only_summary
+                .public_deployment
+                .capture_contract_root_bound
+        );
+        assert!(
+            contract_only_summary
+                .public_deployment
+                .deployment_preflight_checklist_root_bound
+        );
+
+        let mut preflight_only = evidence.clone();
+        preflight_only.deployment_preflight_checklist_root =
+            root(&["test-public-deployment", "wrong-preflight-checklist"]);
+        base_testnet.cli.public_deployment_evidence = Some(preflight_only);
+        let preflight_only_summary = base_testnet.summary(Vec::new());
+        assert!(!preflight_only_summary.public_deployment.passed);
+        assert!(
+            preflight_only_summary
+                .public_deployment
+                .capture_contract_root_bound
+        );
+        assert!(
+            !preflight_only_summary
+                .public_deployment
+                .deployment_preflight_checklist_root_bound
+        );
+        assert_ne!(
+            contract_only_summary.public_deployment.report_root,
+            preflight_only_summary.public_deployment.report_root
+        );
+
         evidence.capture_plan_root = root(&["test-public-deployment", "wrong-capture-plan"]);
         evidence.capture_contract_root =
             root(&["test-public-deployment", "wrong-capture-contract"]);

@@ -724,8 +724,9 @@ The verifier and public deployment report also compare the embedded
 `capture_plan_root`, `capture_contract_root`,
 `public_deployment_evidence_template_root`, and
 `deployment_preflight_checklist_root` against the current generated capture plan,
-require the embedded `public_launch_package_file_set_root` to match the current
-rooted package file set, require the embedded
+bind those actual/expected capture roots into the report root, require the
+embedded `public_launch_package_file_set_root` to match the current rooted
+package file set, require the embedded
 `public_launch_package_handoff_root` to match both the expected package handoff
 and the roots carried in the capture, require the embedded
 `public_launch_package_manifest_root` and
