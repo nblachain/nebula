@@ -22415,6 +22415,14 @@ fn ensure_public_launch_readiness_roots_match_report(
             ),
         )?;
     }
+    for check in checks {
+        let id = required_nested_str(check, "id", "public launch readiness check")?;
+        let status = required_nested_str(check, "status", "public launch readiness check")?;
+        ensure(
+            status == "pass" || status == "blocked",
+            &format!("public launch readiness check status must be pass or blocked for {id}"),
+        )?;
+    }
     let check_roots = checks
         .iter()
         .map(|check| {
@@ -36109,6 +36117,23 @@ mod tests {
             .expect_err("duplicate check id should fail safety checks");
         assert!(error.contains(
             "public launch readiness checks must not contain duplicate check id public-launch-no-mainnet-custody"
+        ));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_unknown_check_status() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["checks"][0]["status"] = json!("warn");
+
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("unknown check status should fail safety checks");
+        assert!(error.contains(
+            "public launch readiness check status must be pass or blocked for public-launch-no-mainnet-custody"
         ));
     }
 
