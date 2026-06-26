@@ -414,6 +414,54 @@ const PUBLIC_BOOTSTRAP_NODE_PROBE_FIELDS: &[&str] = &[
     "status_page_probe_root",
     "node_probe_root",
 ];
+const PUBLIC_PROBE_OBSERVER_FIELDS: &[&str] = &[
+    "status",
+    "chain_id",
+    "public_launch_bundle_root",
+    "public_status_manifest_root",
+    "deployment_run_id",
+    "attestor_registry_root",
+    "observer_id",
+    "observer_key_root",
+    "region",
+    "observed_at_unix_ms",
+    "status_probe_root",
+    "p2p_handshake_root",
+    "public_surface_probe_set_root",
+    "bootstrap_node_probe_set_root",
+    "health_probe_root",
+    "status_page_probe_root",
+    "metrics_probe_root",
+    "deployed_finality_probe_root",
+    "incident_contact_probe_root",
+    "faucet_probe_root",
+    "reset_runbook_probe_root",
+    "private_summary_probe_root",
+    "observer_attestation_root",
+    "signature_scheme",
+    "signature_payload_root",
+    "pq_signature_root",
+    "signature_verified",
+    "signature_verification",
+    "signature_verification_root",
+];
+const PUBLIC_PROBE_OBSERVER_SIGNATURE_VERIFICATION_FIELDS: &[&str] = &[
+    "status",
+    "verification_scope",
+    "chain_id",
+    "signature_scheme",
+    "observer_id",
+    "observer_key_root",
+    "deployment_run_id",
+    "attestor_registry_root",
+    "observer_attestation_root",
+    "signature_payload_root",
+    "pq_signature_root",
+    "verifier_id_root",
+    "verification_tool_root",
+    "verified_at_unix_ms",
+    "signature_verified",
+];
 const PICONERO_PER_XMR: u64 = 1_000_000_000_000;
 const ROOT_PLACEHOLDER: &str = "<64-hex-root>";
 const SENSITIVE_FIELD_MARKERS: [&str; 9] = [
@@ -31893,6 +31941,11 @@ fn validate_public_probe_observers(
     let mut observer_roots = Vec::new();
     let mut signature_roots = Vec::new();
     for observer in observers {
+        ensure_allowed_object_fields(
+            observer,
+            PUBLIC_PROBE_OBSERVER_FIELDS,
+            "public deployment probe observer",
+        )?;
         ensure(
             required_str(observer, "status")? == "ok",
             "public deployment probe observer status must be ok",
@@ -32123,6 +32176,11 @@ fn validate_public_probe_observer_signature_verification(
     expires_at_unix_ms: u64,
 ) -> Result<String, String> {
     let verification = required_section(observer, "signature_verification")?;
+    ensure_allowed_object_fields(
+        verification,
+        PUBLIC_PROBE_OBSERVER_SIGNATURE_VERIFICATION_FIELDS,
+        "public deployment probe observer signature verification",
+    )?;
     ensure(
         required_str(verification, "status")? == "valid",
         "public deployment probe observer signature verification status must be valid",
@@ -46602,6 +46660,52 @@ mod tests {
         let error = load_public_deployment_evidence(&bad_path)
             .expect_err("tampered signature verification transcript should be rejected");
         assert!(error.contains("signature verification root mismatch"));
+        let _ = fs::remove_file(bad_path);
+    }
+
+    #[test]
+    fn public_deployment_evidence_rejects_extra_probe_observer_field() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut value: Value =
+            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
+                .expect("deployment evidence json");
+        value["probe_observers"][0]["operator_note"] =
+            json!("uncommitted observer side-band claim");
+        let bad_path = write_public_deployment_evidence(
+            &serde_json::to_string_pretty(&value).expect("bad evidence json"),
+        );
+        let error = load_public_deployment_evidence(&bad_path)
+            .expect_err("extra probe observer field should be rejected");
+        assert!(error.contains(
+            "public deployment probe observer contains unexpected field 'operator_note'"
+        ));
+        let _ = fs::remove_file(bad_path);
+    }
+
+    #[test]
+    fn public_deployment_evidence_rejects_extra_probe_observer_signature_field() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut value: Value =
+            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
+                .expect("deployment evidence json");
+        value["probe_observers"][0]["signature_verification"]["operator_note"] =
+            json!("uncommitted signature verification side-band claim");
+        let bad_path = write_public_deployment_evidence(
+            &serde_json::to_string_pretty(&value).expect("bad evidence json"),
+        );
+        let error = load_public_deployment_evidence(&bad_path)
+            .expect_err("extra probe observer signature field should be rejected");
+        assert!(error.contains(
+            "public deployment probe observer signature verification contains unexpected field 'operator_note'"
+        ));
         let _ = fs::remove_file(bad_path);
     }
 

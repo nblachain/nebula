@@ -3602,8 +3602,9 @@ real XMR.
   bound to every captured probe root, `signature_scheme: ML-DSA-65`, canonical
   `signature_payload_root` values, `signature_verified: true`, typed
   `signature_verification` transcripts, and matching
-  `signature_verification_root` values; the verifier derives and checks
-  observer set, registry, and PQ-signature roots from those records. The
+  `signature_verification_root` values; unexpected observer and nested
+  signature-verification fields are rejected before the verifier derives and
+  checks observer set, registry, and PQ-signature roots from those records. The
   artifact also binds `public_probe_set_root` and `public_probe_count`, derived
   from the status, P2P, health, status-page, metrics, deployed-finality, incident-contact,
   faucet, reset-runbook, bootstrap-node reachability, and private-summary-denial probe roots. The
