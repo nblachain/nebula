@@ -8308,6 +8308,20 @@ fn public_launch_remediations(
         .collect()
 }
 
+const PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_EXPECTED_ARTIFACT: &str =
+    "nebula-public-launch-artifacts.json + nebula-public-deployment.json";
+const PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_EXPECTED_ARTIFACT_ID: &str =
+    "public-deployment-attestation";
+const PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_EXPECTED_ARTIFACT_PATH: &str =
+    "nebula-public-deployment.json";
+const PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_REMEDIATION_KIND: &str = "external-capture";
+const PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_PRIVACY_CLASSIFICATION: &str =
+    "operator-captured-redacted";
+
+fn public_launch_deployment_attestation_command() -> &'static str {
+    "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-artifact-manifest nebula-public-launch-artifacts.json --write-public-deployment-capture-plan nebula-public-deployment-capture-plan.json --write-public-capture-todo nebula-public-capture-todo.json --verify-public-capture-todo nebula-public-capture-todo.json --write-public-deployment-evidence-template nebula-public-deployment-template.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-package nebula-public-launch-package --verify-public-launch-package nebula-public-launch-package --write-public-deployment-capture-scaffold capture.json --verify-public-deployment-capture-scaffold capture.json --public-deployment-capture-scaffold-package nebula-public-launch-package --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --fail-on-public-launch-gaps --json"
+}
+
 fn public_launch_remediation_for_check(
     summary: &TestnetSummary,
     check: &ReadinessCheck,
@@ -8383,12 +8397,12 @@ fn public_launch_remediation_for_check(
                 false,
             ),
             "public-launch-deployment-attestation" => (
-                "nebula-public-launch-artifacts.json + nebula-public-deployment.json",
-                "public-deployment-attestation",
-                "nebula-public-deployment.json",
-                "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-artifact-manifest nebula-public-launch-artifacts.json --write-public-deployment-capture-plan nebula-public-deployment-capture-plan.json --write-public-capture-todo nebula-public-capture-todo.json --verify-public-capture-todo nebula-public-capture-todo.json --write-public-deployment-evidence-template nebula-public-deployment-template.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-package nebula-public-launch-package --verify-public-launch-package nebula-public-launch-package --write-public-deployment-capture-scaffold capture.json --verify-public-deployment-capture-scaffold capture.json --public-deployment-capture-scaffold-package nebula-public-launch-package --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --fail-on-public-launch-gaps --json",
-                "external-capture",
-                "operator-captured-redacted",
+                PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_EXPECTED_ARTIFACT,
+                PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_EXPECTED_ARTIFACT_ID,
+                PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_EXPECTED_ARTIFACT_PATH,
+                public_launch_deployment_attestation_command(),
+                PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_REMEDIATION_KIND,
+                PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_PRIVACY_CLASSIFICATION,
                 true,
                 true,
             ),
@@ -22093,6 +22107,44 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
         "public launch remediation command sequence root mismatch",
     )?;
     if blocker_id == "public-launch-deployment-attestation" {
+        ensure(
+            required_nested_str(remediation, "expected_artifact", label)?
+                == PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_EXPECTED_ARTIFACT,
+            "public launch deployment-attestation remediation expected artifact mismatch",
+        )?;
+        ensure(
+            required_nested_str(remediation, "expected_artifact_id", label)?
+                == PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_EXPECTED_ARTIFACT_ID,
+            "public launch deployment-attestation remediation expected artifact id mismatch",
+        )?;
+        ensure(
+            required_nested_str(remediation, "expected_artifact_path", label)?
+                == PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_EXPECTED_ARTIFACT_PATH,
+            "public launch deployment-attestation remediation expected artifact path mismatch",
+        )?;
+        ensure(
+            required_nested_str(remediation, "command", label)?
+                == public_launch_deployment_attestation_command(),
+            "public launch deployment-attestation remediation command mismatch",
+        )?;
+        ensure(
+            required_nested_str(remediation, "remediation_kind", label)?
+                == PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_REMEDIATION_KIND,
+            "public launch deployment-attestation remediation kind mismatch",
+        )?;
+        ensure(
+            required_nested_str(remediation, "privacy_classification", label)?
+                == PUBLIC_LAUNCH_DEPLOYMENT_ATTESTATION_PRIVACY_CLASSIFICATION,
+            "public launch deployment-attestation remediation privacy classification mismatch",
+        )?;
+        ensure(
+            required_nested_bool(remediation, "operator_private", label)?,
+            "public launch deployment-attestation remediation must remain operator private",
+        )?;
+        ensure(
+            required_nested_bool(remediation, "external_capture_required", label)?,
+            "public launch deployment-attestation remediation must require external capture",
+        )?;
         ensure(
             next_steps == &public_launch_deployment_attestation_next_steps(),
             "public launch deployment-attestation remediation next steps mismatch",
@@ -35900,6 +35952,50 @@ mod tests {
         let error = ensure_public_launch_readiness_report_artifact_safe(&value)
             .expect_err("tampered remediation command map should fail safety checks");
         assert!(error.contains("command map mismatch"));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_tampered_remediation_command_field() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["command"] =
+            json!("cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --json");
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("tampered remediation command should fail safety checks");
+        assert!(error.contains("deployment-attestation remediation command mismatch"));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_tampered_remediation_identity() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["expected_artifact_id"] =
+            json!("local-no-mainnet-custody-run-checkpoint");
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("tampered remediation identity should fail safety checks");
+        assert!(error.contains("deployment-attestation remediation expected artifact id mismatch"));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_tampered_remediation_privacy_boundary() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["operator_private"] = json!(false);
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("tampered remediation privacy boundary should fail safety checks");
+        assert!(error.contains("deployment-attestation remediation must remain operator private"));
     }
 
     #[test]
