@@ -11145,6 +11145,29 @@ fn verify_public_deployment_capture_audit(
         "public deployment capture audit has the wrong kind",
     )?;
     ensure(
+        actual.get("schema_version").and_then(Value::as_u64) == Some(1),
+        "public deployment capture audit schema_version mismatch",
+    )?;
+    ensure(
+        actual.get("chain_id").and_then(Value::as_str) == Some(CHAIN_ID),
+        "public deployment capture audit chain_id mismatch",
+    )?;
+    ensure(
+        actual.get("public_alpha_only").and_then(Value::as_bool) == Some(true),
+        "public deployment capture audit must remain public-alpha-only",
+    )?;
+    ensure(
+        actual.get("template_only").and_then(Value::as_bool) == Some(false),
+        "public deployment capture audit must not be template_only",
+    )?;
+    ensure(
+        actual
+            .get("operator_fill_required")
+            .and_then(Value::as_bool)
+            == Some(true),
+        "public deployment capture audit must require operator fill-in",
+    )?;
+    ensure(
         actual["usable_as_public_deployment_evidence"] == false
             && actual["usable_as_mainnet_custody_approval"] == false,
         "public deployment capture audit must remain non-evidence",
@@ -35665,6 +35688,26 @@ mod tests {
         let error = verify_public_deployment_capture_audit(&scaffold_path, &audit_path, &summary)
             .expect_err("command-sequence tampered capture audit should fail verification");
         assert!(error.contains("command sequence mismatch"));
+
+        write_public_deployment_capture_audit(&scaffold_path, &audit_path, &summary)
+            .expect("rewrite public deployment capture audit");
+        let mut audit: Value =
+            serde_json::from_slice(&fs::read(&audit_path).expect("read capture audit"))
+                .expect("capture audit json");
+        audit["chain_id"] = json!("nebula-wrong-chain");
+        if let Some(object) = audit.as_object_mut() {
+            object.remove("capture_audit_root");
+        }
+        let audit_root = value_root("public-deployment-capture-audit", &audit);
+        audit["capture_audit_root"] = json!(audit_root);
+        fs::write(
+            &audit_path,
+            serde_json::to_string_pretty(&audit).expect("capture audit json"),
+        )
+        .expect("write wrong-chain capture audit");
+        let error = verify_public_deployment_capture_audit(&scaffold_path, &audit_path, &summary)
+            .expect_err("wrong-chain capture audit should fail verification");
+        assert!(error.contains("chain_id mismatch"));
 
         write_public_deployment_capture_audit(&scaffold_path, &audit_path, &summary)
             .expect("rewrite public deployment capture audit");
