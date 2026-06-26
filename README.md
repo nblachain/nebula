@@ -3386,8 +3386,9 @@ real XMR.
   public-probe-set/operator-registry/observer/provenance/attestation root
   derivation rules. Templates remain rejected until every placeholder is
   replaced by captured deployment evidence. The paired
-  `--verify-public-deployment-evidence-template` command recomputes the
-  template root, checks the current status, launch-bundle, launch-artifact,
+  `--verify-public-deployment-evidence-template` command pins schema, chain,
+  and version identity, recomputes the template root, checks the current status,
+  launch-bundle, launch-artifact,
   package-file-set, release-template, runbook, bootstrap, policy-claim, local
   probe, and template roots, and rejects stale bindings before operators fill
   public endpoint evidence.

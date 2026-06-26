@@ -22730,6 +22730,14 @@ fn ensure_public_deployment_evidence_template_safe(value: &Value) -> Result<(), 
         "public deployment evidence template schema version mismatch",
     )?;
     ensure(
+        value.get("chain_id").and_then(Value::as_str) == Some(CHAIN_ID),
+        "public deployment evidence template chain_id mismatch",
+    )?;
+    ensure(
+        value.get("version").and_then(Value::as_str) == Some(VERSION),
+        "public deployment evidence template version mismatch",
+    )?;
+    ensure(
         value.get("template_only").and_then(Value::as_bool) == Some(true),
         "public deployment evidence template must remain template_only",
     )?;
@@ -38813,6 +38821,27 @@ mod tests {
             .expect_err("template must not be accepted as deployment evidence");
         assert!(error.contains("placeholders"));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_evidence_template_rejects_re_rooted_wrong_version() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_deployment_evidence_template(&summary);
+        value["version"] = json!("nebula-testnet-wrong-version");
+        value
+            .as_object_mut()
+            .expect("evidence template object")
+            .remove("template_root");
+        let template_root = value_root("public-deployment-evidence-template", &value);
+        value["template_root"] = json!(template_root);
+
+        let error = ensure_public_deployment_evidence_template_safe(&value)
+            .expect_err("re-rooted evidence template with wrong version should fail safety checks");
+        assert!(error.contains("public deployment evidence template version mismatch"));
     }
 
     #[test]
