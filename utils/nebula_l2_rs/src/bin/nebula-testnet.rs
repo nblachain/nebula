@@ -9327,34 +9327,41 @@ fn public_deployment_capture_command_sequence() -> Value {
     let steps = [
         (
             1_u64,
+            "write_capture_scaffold",
+            "nebula-public-launch-package",
+            "capture.json",
+            true,
+        ),
+        (
+            2_u64,
             "audit_capture",
             "capture.json",
             "capture-audit.json",
             true,
         ),
         (
-            2_u64,
+            3_u64,
             "verify_capture_audit",
             "capture.json + capture-audit.json",
             "verified capture audit",
             true,
         ),
         (
-            3_u64,
+            4_u64,
             "verify_capture",
             "capture.json",
             "strict public launch gate dry-run",
             true,
         ),
         (
-            4_u64,
+            5_u64,
             "assemble_public_deployment",
             "capture.json",
             "nebula-public-deployment.json",
             true,
         ),
         (
-            5_u64,
+            6_u64,
             "verify_public_launch",
             "nebula-public-deployment.json",
             "public-launch-ready gate result",
@@ -33260,10 +33267,10 @@ mod tests {
         );
         assert_eq!(
             capture_todo["command_sequence"][0]["command_key"],
-            "audit_capture"
+            "write_capture_scaffold"
         );
         assert_eq!(
-            capture_todo["command_sequence"][4]["command_key"],
+            capture_todo["command_sequence"][5]["command_key"],
             "verify_public_launch"
         );
         assert!(is_hex_root(
@@ -33916,7 +33923,7 @@ mod tests {
         let mut certification: Value =
             serde_json::from_slice(&fs::read(&certification_path).expect("read certification"))
                 .expect("certification json");
-        certification["command_sequence"][4]["command_key"] = json!("assemble_public_deployment");
+        certification["command_sequence"][5]["command_key"] = json!("assemble_public_deployment");
         if let Some(object) = certification.as_object_mut() {
             object.remove("certification_root");
         }

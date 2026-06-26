@@ -509,7 +509,7 @@ the deferred repair-root subcheck list/count/root and its capture-todo root
 binding, remediations, whether external capture is still required, and the
 exact package-bound scaffold, capture-audit, audit-verification, strict
 capture-verification, assemble, and launch-gate commands plus rooted next steps
-and a rooted command sequence for the strict verification order.
+and a rooted command sequence for that full scaffold-to-launch order.
 The certification artifact is
 operator-local, not public deployment evidence and not mainnet custody approval;
 it truthfully remains `public-launch-blocked` until a filled schema v5

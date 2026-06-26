@@ -3287,7 +3287,7 @@ real XMR.
   and its capture-todo root binding, blocking gaps, rooted remediation commands
   for capture scaffold creation, capture audit, audit verification, strict
   capture verification, assembly, and launch verification, a rooted command
-  sequence for the strict verification order, and whether
+  sequence for that full scaffold-to-launch order, and whether
   external capture is still required in
   `nebula-public-testnet-certification.json`. It is deliberately
   operator-local and remains blocked until the filled schema v5 deployment
