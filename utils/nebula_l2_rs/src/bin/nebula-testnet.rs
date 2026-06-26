@@ -22490,6 +22490,15 @@ fn ensure_public_launch_readiness_roots_match_report(
     )?;
     for check in checks {
         let id = required_nested_str(check, "id", "public launch readiness check")?;
+        let check_object = check
+            .as_object()
+            .ok_or_else(|| "public launch readiness check must be an object".to_string())?;
+        for key in check_object.keys() {
+            ensure(
+                matches!(key.as_str(), "id" | "status" | "detail" | "evidence_root"),
+                &format!("public launch readiness check contains unexpected field {key} for {id}"),
+            )?;
+        }
         let status = required_nested_str(check, "status", "public launch readiness check")?;
         let detail = required_nested_str(check, "detail", "public launch readiness check")?;
         let evidence_root =
@@ -36279,6 +36288,24 @@ mod tests {
             .expect_err("reordered check set should fail safety checks");
         assert!(error
             .contains("public launch readiness checks must match the canonical ordered check set"));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_extra_check_field() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["checks"][0]["operator_note"] =
+            json!("not part of the rooted check contract");
+
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("extra check field should fail safety checks");
+        assert!(error.contains(
+            "public launch readiness check contains unexpected field operator_note for public-launch-no-mainnet-custody"
+        ));
     }
 
     #[test]
