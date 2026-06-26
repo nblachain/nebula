@@ -13,6 +13,8 @@ cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > /tmp/nebula-attestation.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-deployment-attestation /tmp/nebula-attestation.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-validator-set > /tmp/nebula-validator-set.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-set /tmp/nebula-validator-set.json --json
 ```
 
 The readiness report keeps local testnet acceptance separate from public launch
@@ -25,3 +27,6 @@ with `90%` reserved for NBLA backing and `10%` credited to validator rewards.
 Fees and validator points are denominated in `nebulai`, where
 `1 NBLA = 1,000,000 nebulai` and the target reserve reference is
 `1 NBLA = 0.001 nXMR`.
+
+The validator-set verifier requires at least two validators, two operators, and
+two regions. Validator admission rewards are denominated in `nebulai`.

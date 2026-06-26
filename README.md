@@ -48,6 +48,8 @@ cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > /tmp/nebula-attestation.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-deployment-attestation /tmp/nebula-attestation.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-validator-set > /tmp/nebula-validator-set.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-set /tmp/nebula-validator-set.json --json
 cmp docs/NEBULA_LAYER2.md README.md
 ```
 
@@ -61,6 +63,7 @@ The public launch suite covers:
 - policy claim and public probe body exact-shape validation
 - preflight and runbook receipt exact-shape validation
 - bootstrap node/operator and observer attestation exact-shape validation
+- validator-set admission, reward-unit, uniqueness, and region-spread validation
 
 ## Hybrid Fees And Validator Rewards
 
@@ -91,7 +94,8 @@ The active GitHub Actions workflow is Nebula-owned:
 4. Run the Nebula test suite.
 5. Assert the current readiness contract.
 6. Generate and verify a deployment attestation sample.
-7. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
+7. Generate and verify a validator-set manifest sample.
+8. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
 
 Legacy upstream CI for daemon, wallet, Guix, depends, Docker daemon images, and
 source archives has been removed.
@@ -118,6 +122,23 @@ Operators can generate the required shape and verify a filled attestation with:
 ```bash
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > /tmp/nebula-attestation.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-deployment-attestation /tmp/nebula-attestation.json --json
+```
+
+## Validator Set Gate
+
+Public testnet admission also requires a validator-set manifest. The verifier
+requires at least two validators, two operators, and two regions. Validator IDs,
+node IDs, consensus keys, network keys, and P2P endpoints must be unique.
+Genesis power must be positive, commission must be at or below `10000` basis
+points, reward accounts must use the `nbla-reward-` prefix, and rewards must be
+denominated in `nebulai`.
+
+Operators can generate the required shape and verify a filled validator set
+with:
+
+```bash
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-validator-set > /tmp/nebula-validator-set.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-set /tmp/nebula-validator-set.json --json
 ```
 
 ## License

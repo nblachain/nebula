@@ -20,6 +20,10 @@ pub const FEE_BASIS_POINTS: u128 = 10_000;
 pub const NXMR_RESERVE_BACKING_BPS: u128 = 9_000;
 pub const NXMR_VALIDATOR_REWARD_BPS: u128 = 1_000;
 pub const TESTNET_POINTS_PER_NEBULAI: u128 = 1;
+pub const MIN_PUBLIC_TESTNET_VALIDATORS: usize = 2;
+pub const MIN_PUBLIC_TESTNET_OPERATORS: usize = 2;
+pub const MIN_PUBLIC_TESTNET_OBSERVERS: usize = 2;
+pub const MIN_PUBLIC_TESTNET_REGIONS: usize = 2;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Acceptance {
@@ -282,6 +286,49 @@ pub struct DeploymentAttestationReport {
     pub verified_region_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidatorSetManifest {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub epoch: u64,
+    pub reward_unit: String,
+    pub fee_policy_root: String,
+    pub minimum_validator_count: usize,
+    pub minimum_operator_count: usize,
+    pub minimum_region_count: usize,
+    pub validators: Vec<ValidatorAdmission>,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidatorAdmission {
+    pub validator_id: String,
+    pub operator_id: String,
+    pub node_id: String,
+    pub region: String,
+    pub consensus_public_key: String,
+    pub network_public_key: String,
+    pub p2p_endpoint: String,
+    pub reward_account: String,
+    pub commission_bps: u16,
+    pub genesis_power: u64,
+    pub signed_admission_root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ValidatorSetReport {
+    pub validator_set_ready: bool,
+    pub level: &'static str,
+    pub validator_set_root: String,
+    pub validator_count: usize,
+    pub operator_count: usize,
+    pub region_count: usize,
+    pub total_genesis_power: u64,
+    pub reward_unit: String,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum FeeError {
     ZeroGas,
@@ -411,9 +458,9 @@ pub fn readiness_report() -> NebulaReadiness {
     let remediation_root = stable_root(&json!({
         "required_gap": PUBLIC_LAUNCH_BLOCKER,
         "required_attestation": required_attestation,
-        "minimum_observer_count": 2,
-        "minimum_operator_count": 2,
-        "minimum_region_count": 2,
+        "minimum_observer_count": MIN_PUBLIC_TESTNET_OBSERVERS,
+        "minimum_operator_count": MIN_PUBLIC_TESTNET_OPERATORS,
+        "minimum_region_count": MIN_PUBLIC_TESTNET_REGIONS,
     }));
 
     let public_launch_readiness = PublicLaunchReadiness {
@@ -455,6 +502,15 @@ pub fn readiness_report() -> NebulaReadiness {
                 "nxmr_reserve_backing_bps": NXMR_RESERVE_BACKING_BPS,
                 "nxmr_validator_reward_bps": NXMR_VALIDATOR_REWARD_BPS,
                 "testnet_reward_unit": "non-transferable validator points",
+            })),
+            "validator_admission": stable_root(&json!({
+                "minimum_validator_count": MIN_PUBLIC_TESTNET_VALIDATORS,
+                "minimum_operator_count": MIN_PUBLIC_TESTNET_OPERATORS,
+                "minimum_region_count": MIN_PUBLIC_TESTNET_REGIONS,
+                "reward_unit": NEBULAI_UNIT,
+                "fee_policy_root_required": true,
+                "unique_consensus_keys_required": true,
+                "unique_p2p_endpoints_required": true,
             })),
             "guide": stable_root(&json!({
                 "root_readme": "README.md",
@@ -599,6 +655,172 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
     };
 
     serde_json::to_string_pretty(&attestation).expect("sample attestation serializes")
+}
+
+pub fn sample_validator_set_json_pretty() -> String {
+    let readiness = readiness_report();
+    let economics_root = readiness.status_roots["economics"]
+        .as_str()
+        .expect("economics root is a string")
+        .to_string();
+
+    let validators = vec![
+        ValidatorAdmission {
+            validator_id: "validator-a".to_string(),
+            operator_id: "operator-a".to_string(),
+            node_id: "bootstrap-us-east-1".to_string(),
+            region: "us-east".to_string(),
+            consensus_public_key: "nebula-consensus-key-a".to_string(),
+            network_public_key: "nebula-network-key-a".to_string(),
+            p2p_endpoint: "tcp://bootstrap-a.testnet.nebula.example:26656".to_string(),
+            reward_account: "nbla-reward-operator-a".to_string(),
+            commission_bps: 500,
+            genesis_power: 1,
+            signed_admission_root: hex_64("validator-a-admission"),
+        },
+        ValidatorAdmission {
+            validator_id: "validator-b".to_string(),
+            operator_id: "operator-b".to_string(),
+            node_id: "bootstrap-eu-west-1".to_string(),
+            region: "eu-west".to_string(),
+            consensus_public_key: "nebula-consensus-key-b".to_string(),
+            network_public_key: "nebula-network-key-b".to_string(),
+            p2p_endpoint: "tcp://bootstrap-b.testnet.nebula.example:26656".to_string(),
+            reward_account: "nbla-reward-operator-b".to_string(),
+            commission_bps: 500,
+            genesis_power: 1,
+            signed_admission_root: hex_64("validator-b-admission"),
+        },
+    ];
+
+    let mut manifest = ValidatorSetManifest {
+        chain_id: CHAIN_ID.to_string(),
+        runtime_version: VERSION.to_string(),
+        epoch: 0,
+        reward_unit: NEBULAI_UNIT.to_string(),
+        fee_policy_root: economics_root,
+        minimum_validator_count: MIN_PUBLIC_TESTNET_VALIDATORS,
+        minimum_operator_count: MIN_PUBLIC_TESTNET_OPERATORS,
+        minimum_region_count: MIN_PUBLIC_TESTNET_REGIONS,
+        validators,
+        root: String::new(),
+    };
+    manifest.root = validator_set_root(&manifest);
+
+    serde_json::to_string_pretty(&manifest).expect("sample validator set serializes")
+}
+
+pub fn verify_validator_set_json(input: &str) -> Result<ValidatorSetReport, AttestationError> {
+    let input = input.trim_start_matches('\u{feff}');
+    let value = serde_json::from_str::<Value>(input)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let manifest = serde_json::from_value::<ValidatorSetManifest>(value)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let mut errors = Vec::new();
+    let readiness = readiness_report();
+    let economics_root = readiness.status_roots["economics"]
+        .as_str()
+        .expect("economics root is a string");
+
+    require_eq(&mut errors, "chain_id", &manifest.chain_id, CHAIN_ID);
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &manifest.runtime_version,
+        VERSION,
+    );
+    require_eq(
+        &mut errors,
+        "reward_unit",
+        &manifest.reward_unit,
+        NEBULAI_UNIT,
+    );
+    require_eq(
+        &mut errors,
+        "fee_policy_root",
+        &manifest.fee_policy_root,
+        economics_root,
+    );
+    if manifest.minimum_validator_count < MIN_PUBLIC_TESTNET_VALIDATORS {
+        errors.push(format!(
+            "minimum_validator_count must be at least {MIN_PUBLIC_TESTNET_VALIDATORS}"
+        ));
+    }
+    if manifest.minimum_operator_count < MIN_PUBLIC_TESTNET_OPERATORS {
+        errors.push(format!(
+            "minimum_operator_count must be at least {MIN_PUBLIC_TESTNET_OPERATORS}"
+        ));
+    }
+    if manifest.minimum_region_count < MIN_PUBLIC_TESTNET_REGIONS {
+        errors.push(format!(
+            "minimum_region_count must be at least {MIN_PUBLIC_TESTNET_REGIONS}"
+        ));
+    }
+    require_root(
+        &mut errors,
+        "root",
+        &manifest.root,
+        &validator_set_root(&manifest),
+    );
+
+    let mut validator_ids = BTreeSet::new();
+    let mut operator_ids = BTreeSet::new();
+    let mut node_ids = BTreeSet::new();
+    let mut regions = BTreeSet::new();
+    let mut consensus_keys = BTreeSet::new();
+    let mut network_keys = BTreeSet::new();
+    let mut endpoints = BTreeSet::new();
+    let mut total_genesis_power = 0_u64;
+
+    for (index, validator) in manifest.validators.iter().enumerate() {
+        verify_validator_admission(
+            &mut errors,
+            index,
+            validator,
+            &mut validator_ids,
+            &mut operator_ids,
+            &mut node_ids,
+            &mut regions,
+            &mut consensus_keys,
+            &mut network_keys,
+            &mut endpoints,
+            &mut total_genesis_power,
+        );
+    }
+
+    if manifest.validators.len() < manifest.minimum_validator_count {
+        errors.push(format!(
+            "validators must include at least {} entries",
+            manifest.minimum_validator_count
+        ));
+    }
+    if operator_ids.len() < manifest.minimum_operator_count {
+        errors.push(format!(
+            "validators must include at least {} operators",
+            manifest.minimum_operator_count
+        ));
+    }
+    if regions.len() < manifest.minimum_region_count {
+        errors.push(format!(
+            "validators must cover at least {} regions",
+            manifest.minimum_region_count
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    Ok(ValidatorSetReport {
+        validator_set_ready: true,
+        level: "validator-set-attested",
+        validator_set_root: manifest.root,
+        validator_count: manifest.validators.len(),
+        operator_count: operator_ids.len(),
+        region_count: regions.len(),
+        total_genesis_power,
+        reward_unit: manifest.reward_unit,
+    })
 }
 
 pub fn verify_deployment_attestation_json(
@@ -1102,13 +1324,13 @@ fn verify_receipt(errors: &mut Vec<String>, label: &str, receipt: &Receipt, now:
 }
 
 fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAttestation) {
-    if attestation.bootstrap_nodes.len() < 2 {
+    if attestation.bootstrap_nodes.len() < MIN_PUBLIC_TESTNET_VALIDATORS {
         errors.push("bootstrap_nodes must include at least two nodes".to_string());
     }
-    if attestation.operators.len() < 2 {
+    if attestation.operators.len() < MIN_PUBLIC_TESTNET_OPERATORS {
         errors.push("operators must include at least two operators".to_string());
     }
-    if attestation.observers.len() < 2 {
+    if attestation.observers.len() < MIN_PUBLIC_TESTNET_OBSERVERS {
         errors.push("observers must include at least two observers".to_string());
     }
 
@@ -1128,7 +1350,7 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
                 .map(|observer| observer.region.as_str()),
         )
         .collect::<BTreeSet<_>>();
-    if regions.len() < 2 {
+    if regions.len() < MIN_PUBLIC_TESTNET_REGIONS {
         errors.push("operators and observers must cover at least two regions".to_string());
     }
 
@@ -1179,6 +1401,125 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             ));
         }
     }
+}
+
+fn verify_validator_admission(
+    errors: &mut Vec<String>,
+    index: usize,
+    validator: &ValidatorAdmission,
+    validator_ids: &mut BTreeSet<String>,
+    operator_ids: &mut BTreeSet<String>,
+    node_ids: &mut BTreeSet<String>,
+    regions: &mut BTreeSet<String>,
+    consensus_keys: &mut BTreeSet<String>,
+    network_keys: &mut BTreeSet<String>,
+    endpoints: &mut BTreeSet<String>,
+    total_genesis_power: &mut u64,
+) {
+    require_non_empty(
+        errors,
+        &format!("validators[{index}].validator_id"),
+        &validator.validator_id,
+    );
+    require_non_empty(
+        errors,
+        &format!("validators[{index}].operator_id"),
+        &validator.operator_id,
+    );
+    require_non_empty(
+        errors,
+        &format!("validators[{index}].node_id"),
+        &validator.node_id,
+    );
+    require_non_empty(
+        errors,
+        &format!("validators[{index}].region"),
+        &validator.region,
+    );
+    require_non_empty(
+        errors,
+        &format!("validators[{index}].consensus_public_key"),
+        &validator.consensus_public_key,
+    );
+    require_non_empty(
+        errors,
+        &format!("validators[{index}].network_public_key"),
+        &validator.network_public_key,
+    );
+    require_non_empty(
+        errors,
+        &format!("validators[{index}].p2p_endpoint"),
+        &validator.p2p_endpoint,
+    );
+    require_non_empty(
+        errors,
+        &format!("validators[{index}].reward_account"),
+        &validator.reward_account,
+    );
+    if !validator.reward_account.starts_with("nbla-reward-") {
+        errors.push(format!(
+            "validators[{index}].reward_account must use the nbla-reward- prefix"
+        ));
+    }
+    if !validator.p2p_endpoint.starts_with("tcp://") {
+        errors.push(format!(
+            "validators[{index}].p2p_endpoint must use a tcp:// endpoint"
+        ));
+    }
+    if validator.commission_bps > FEE_BASIS_POINTS as u16 {
+        errors.push(format!(
+            "validators[{index}].commission_bps must be <= {}",
+            FEE_BASIS_POINTS
+        ));
+    }
+    if validator.genesis_power == 0 {
+        errors.push(format!(
+            "validators[{index}].genesis_power must be greater than zero"
+        ));
+    }
+    match total_genesis_power.checked_add(validator.genesis_power) {
+        Some(total) => *total_genesis_power = total,
+        None => errors.push("total genesis power overflowed u64".to_string()),
+    }
+    require_hex_root(
+        errors,
+        &format!("validators[{index}].signed_admission_root"),
+        &validator.signed_admission_root,
+    );
+
+    insert_unique(
+        errors,
+        validator_ids,
+        &format!("validators[{index}].validator_id"),
+        &validator.validator_id,
+    );
+    insert_unique(
+        errors,
+        node_ids,
+        &format!("validators[{index}].node_id"),
+        &validator.node_id,
+    );
+    insert_unique(
+        errors,
+        consensus_keys,
+        &format!("validators[{index}].consensus_public_key"),
+        &validator.consensus_public_key,
+    );
+    insert_unique(
+        errors,
+        network_keys,
+        &format!("validators[{index}].network_public_key"),
+        &validator.network_public_key,
+    );
+    insert_unique(
+        errors,
+        endpoints,
+        &format!("validators[{index}].p2p_endpoint"),
+        &validator.p2p_endpoint,
+    );
+
+    operator_ids.insert(validator.operator_id.clone());
+    regions.insert(validator.region.clone());
 }
 
 fn verify_rollback_evidence(
@@ -1260,6 +1601,20 @@ fn receipt_root(receipt: &Receipt) -> String {
     }))
 }
 
+fn validator_set_root(manifest: &ValidatorSetManifest) -> String {
+    stable_root(&json!({
+        "chain_id": manifest.chain_id,
+        "runtime_version": manifest.runtime_version,
+        "epoch": manifest.epoch,
+        "reward_unit": manifest.reward_unit,
+        "fee_policy_root": manifest.fee_policy_root,
+        "minimum_validator_count": manifest.minimum_validator_count,
+        "minimum_operator_count": manifest.minimum_operator_count,
+        "minimum_region_count": manifest.minimum_region_count,
+        "validators": manifest.validators,
+    }))
+}
+
 fn require_eq(errors: &mut Vec<String>, label: &str, actual: &str, expected: &str) {
     if actual != expected {
         errors.push(format!("{label} expected {} but got {}", expected, actual));
@@ -1276,6 +1631,18 @@ fn require_root(errors: &mut Vec<String>, label: &str, actual: &str, expected: &
 fn require_hex_root(errors: &mut Vec<String>, label: &str, value: &str) {
     if value.len() != 64 || !value.chars().all(|c| c.is_ascii_hexdigit()) {
         errors.push(format!("{label} must be a 64-character hex root"));
+    }
+}
+
+fn require_non_empty(errors: &mut Vec<String>, label: &str, value: &str) {
+    if value.trim().is_empty() {
+        errors.push(format!("{label} must not be empty"));
+    }
+}
+
+fn insert_unique(errors: &mut Vec<String>, seen: &mut BTreeSet<String>, label: &str, value: &str) {
+    if !seen.insert(value.to_string()) {
+        errors.push(format!("{label} must be unique"));
     }
 }
 
@@ -1390,6 +1757,47 @@ mod public_launch {
             error,
             AttestationError::Invalid(vec!["expires_at_unix_ms is stale".to_string()])
         );
+    }
+
+    #[test]
+    fn sample_validator_set_verifies_public_testnet_admission() {
+        let report = verify_validator_set_json(&sample_validator_set_json_pretty()).unwrap();
+
+        assert!(report.validator_set_ready);
+        assert_eq!(report.level, "validator-set-attested");
+        assert_eq!(report.validator_count, 2);
+        assert_eq!(report.operator_count, 2);
+        assert_eq!(report.region_count, 2);
+        assert_eq!(report.reward_unit, NEBULAI_UNIT);
+        assert_eq!(report.total_genesis_power, 2);
+    }
+
+    #[test]
+    fn validator_set_rejects_unknown_fields() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["unexpected_field"] = json!(true);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        assert!(matches!(error, AttestationError::MalformedJson(_)));
+    }
+
+    #[test]
+    fn validator_set_rejects_duplicate_consensus_keys() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        let duplicate_key = value["validators"][0]["consensus_public_key"].clone();
+        value["validators"][1]["consensus_public_key"] = duplicate_key;
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "validators[1].consensus_public_key must be unique"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
     }
 }
 

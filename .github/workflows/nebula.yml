@@ -47,6 +47,7 @@ jobs:
           acceptance = payload["acceptance"]
           readiness = payload["public_launch_readiness"]
           economics = payload["economics"]
+          roots = payload["status_roots"]
           assert acceptance["testnet_ready"] is True
           assert readiness["public_launch_ready"] is False
           assert readiness["level"] == "public-launch-blocked"
@@ -62,6 +63,7 @@ jobs:
           assert economics["target_nxmr_to_nbla_rate_nebulai_per_unit"] == 1
           assert economics["nxmr_reserve_backing_bps"] == 9000
           assert economics["nxmr_validator_reward_bps"] == 1000
+          assert roots["validator_admission"]
           PY
 
       - name: Verify deployment attestation gate
@@ -82,6 +84,28 @@ jobs:
           assert payload["verified_operator_count"] >= 2
           assert payload["verified_observer_count"] >= 2
           assert payload["verified_region_count"] >= 2
+          PY
+
+      - name: Verify validator set gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          sample="$(mktemp)"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-validator-set > "$sample"
+          output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-set "$sample" --json)"
+          NEBULA_VALIDATOR_SET_JSON="$output" python3 - <<'PY'
+          import json
+          import os
+
+          payload = json.loads(os.environ["NEBULA_VALIDATOR_SET_JSON"])
+          assert payload["validator_set_ready"] is True
+          assert payload["level"] == "validator-set-attested"
+          assert len(payload["validator_set_root"]) == 64
+          assert payload["validator_count"] >= 2
+          assert payload["operator_count"] >= 2
+          assert payload["region_count"] >= 2
+          assert payload["total_genesis_power"] > 0
+          assert payload["reward_unit"] == "nebulai"
           PY
 
       - name: Verify Nebula guide mirror
