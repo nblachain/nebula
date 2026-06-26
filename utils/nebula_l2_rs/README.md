@@ -658,7 +658,8 @@ checks, current capture-plan/contract/preflight root matches, expected
 capture-plan, capture-contract, evidence-template, and preflight roots, the
 expected package file-set root, expected package handoff root, package
 schema/version/chain/run identity matches, file-set/handoff root matches, and
-`structural_failed_checks`/`failed_checks` arrays with counts for CI routing,
+`structural_failed_checks`/`failed_checks` arrays that include package
+identity/root mismatches with counts for CI routing,
 rooted command map, rooted `next_steps`, the rooted capture command sequence, and an
 `assembler_ready` boolean. It is diagnostic only:
 `usable_as_public_deployment_evidence` is false, so it helps deployment CI

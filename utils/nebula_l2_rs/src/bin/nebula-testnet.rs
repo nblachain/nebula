@@ -11970,6 +11970,11 @@ fn public_deployment_capture_audit(
         && public_launch_package_file_set_root_matches
         && public_launch_package_handoff_root_matches
         && public_launch_package_manifest_root_matches
+        && public_launch_package_schema_version_matches
+        && public_launch_package_chain_id_matches
+        && public_launch_package_version_matches
+        && public_launch_package_manifest_id_matches
+        && public_launch_package_testnet_id_matches
         && public_launch_readiness_artifact_root_matches
         && release_approval_template_root_matches
         && release_authority_registry_template_root_matches;
@@ -12106,6 +12111,21 @@ fn public_deployment_capture_audit(
     }
     if !public_launch_package_manifest_root_matches {
         structural_failed_checks.push("public_launch_package_manifest_root_matches".to_string());
+    }
+    if !public_launch_package_schema_version_matches {
+        structural_failed_checks.push("public_launch_package_schema_version_matches".to_string());
+    }
+    if !public_launch_package_chain_id_matches {
+        structural_failed_checks.push("public_launch_package_chain_id_matches".to_string());
+    }
+    if !public_launch_package_version_matches {
+        structural_failed_checks.push("public_launch_package_version_matches".to_string());
+    }
+    if !public_launch_package_manifest_id_matches {
+        structural_failed_checks.push("public_launch_package_manifest_id_matches".to_string());
+    }
+    if !public_launch_package_testnet_id_matches {
+        structural_failed_checks.push("public_launch_package_testnet_id_matches".to_string());
     }
     if !public_launch_readiness_artifact_root_matches {
         structural_failed_checks.push("public_launch_readiness_artifact_root_matches".to_string());
@@ -37944,6 +37964,62 @@ mod tests {
                 .as_str()
                 .expect("expected package handoff root")
         ));
+        let _ = fs::remove_file(capture_path);
+    }
+
+    #[test]
+    fn public_deployment_capture_audit_reports_package_identity_mismatches() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        capture["public_launch_package_schema_version"] = json!(2);
+        capture["public_launch_package_chain_id"] = json!("wrong-chain-id");
+        capture["public_launch_package_version"] = json!("wrong-package-version");
+        capture["public_launch_package_manifest_id"] = json!(root(&[
+            "test-public-deployment",
+            "wrong-package-manifest-id"
+        ]));
+        capture["public_launch_package_testnet_id"] = json!(root(&[
+            "test-public-deployment",
+            "wrong-package-testnet-id"
+        ]));
+        let capture_path = write_public_deployment_evidence(&capture.to_string());
+        let audit = public_deployment_capture_audit(&capture_path, &base_summary)
+            .expect("audit package identity mismatches");
+        assert_eq!(audit["structural_ready"], false);
+        assert_eq!(audit["strict_verifier_passed"], false);
+        assert_eq!(audit["strict_verifier_error"], Value::Null);
+        assert_eq!(audit["assembler_ready"], false);
+        assert_eq!(audit["public_launch_package_schema_version_matches"], false);
+        assert_eq!(audit["public_launch_package_chain_id_matches"], false);
+        assert_eq!(audit["public_launch_package_version_matches"], false);
+        assert_eq!(audit["public_launch_package_manifest_id_matches"], false);
+        assert_eq!(audit["public_launch_package_testnet_id_matches"], false);
+        assert_eq!(
+            audit["structural_failed_checks"],
+            json!([
+                "public_launch_package_schema_version_matches",
+                "public_launch_package_chain_id_matches",
+                "public_launch_package_version_matches",
+                "public_launch_package_manifest_id_matches",
+                "public_launch_package_testnet_id_matches"
+            ])
+        );
+        assert_eq!(
+            audit["failed_checks"],
+            json!([
+                "public_launch_package_schema_version_matches",
+                "public_launch_package_chain_id_matches",
+                "public_launch_package_version_matches",
+                "public_launch_package_manifest_id_matches",
+                "public_launch_package_testnet_id_matches"
+            ])
+        );
         let _ = fs::remove_file(capture_path);
     }
 

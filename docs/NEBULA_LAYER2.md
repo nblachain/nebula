@@ -3499,7 +3499,7 @@ real XMR.
   observer quorums, insufficient observer region coverage, malformed observer
   regions, duplicate observer ids or keys, unsigned or unverified observer
   signatures/transcripts, placeholders, sensitive markers, public-forbidden
-  keys, current capture-plan and package file-set root mismatches, structural
+  keys, current capture-plan and package identity/root mismatches, structural
   readiness, machine-readable
   structural and full failed-check lists, strict verifier status, the first
   nested verifier error, rooted command map, rooted next steps, and the rooted
