@@ -576,7 +576,8 @@ rooted work order for this run. The capture-plan guard recomputes the preflight
 checklist, capture contract, and plan roots before export/package verification.
 It also includes a `package_handoff_capture` section that names
 `nebula-public-launch-package.json` as the source of
-`public_launch_package_manifest_root` and
+`public_launch_package_manifest_root` plus package schema/version/chain/run
+identity fields and
 `nebula-public-launch-readiness-report.json` as the source of
 `public_launch_readiness_artifact_root`, plus
 `nebula-release-approval-template.json` and

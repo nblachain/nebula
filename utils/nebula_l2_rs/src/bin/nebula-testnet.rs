@@ -16311,6 +16311,36 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
                 "capture_field": "public_launch_package_manifest_root"
             },
             {
+                "artifact_id": "public-launch-package-manifest",
+                "file_name": "nebula-public-launch-package.json",
+                "root_field": "schema_version",
+                "capture_field": "public_launch_package_schema_version"
+            },
+            {
+                "artifact_id": "public-launch-package-manifest",
+                "file_name": "nebula-public-launch-package.json",
+                "root_field": "chain_id",
+                "capture_field": "public_launch_package_chain_id"
+            },
+            {
+                "artifact_id": "public-launch-package-manifest",
+                "file_name": "nebula-public-launch-package.json",
+                "root_field": "version",
+                "capture_field": "public_launch_package_version"
+            },
+            {
+                "artifact_id": "public-launch-package-manifest",
+                "file_name": "nebula-public-launch-package.json",
+                "root_field": "manifest_id",
+                "capture_field": "public_launch_package_manifest_id"
+            },
+            {
+                "artifact_id": "public-launch-package-manifest",
+                "file_name": "nebula-public-launch-package.json",
+                "root_field": "testnet_id",
+                "capture_field": "public_launch_package_testnet_id"
+            },
+            {
                 "artifact_id": "public-launch-readiness-report",
                 "file_name": "nebula-public-launch-readiness-report.json",
                 "root_field": "public_launch_readiness_artifact_root",
@@ -16329,7 +16359,7 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
                 "capture_field": "release_authority_registry_template_root"
             }
         ],
-        "validation_rule": "copy-package-manifest-root-readiness-artifact-root-and-release-template-roots-from-the-pre-capture-package-before-assembling-public-deployment-evidence",
+        "validation_rule": "copy-package-manifest-root-identity-readiness-artifact-root-and-release-template-roots-from-the-pre-capture-package-before-assembling-public-deployment-evidence",
     });
     let capture_contract = json!({
         "required_capture_fields": REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS,
@@ -16349,9 +16379,24 @@ fn public_deployment_capture_plan(summary: &TestnetSummary) -> Value {
         "deployment_run_id_must_match_nested_records": true,
         "public_launch_package_manifest_root_required": true,
         "public_launch_package_handoff_root_required": true,
+        "public_launch_package_schema_version_required": true,
+        "public_launch_package_chain_id_required": true,
+        "public_launch_package_version_required": true,
+        "public_launch_package_manifest_id_required": true,
+        "public_launch_package_testnet_id_required": true,
         "public_launch_readiness_artifact_root_required": true,
         "public_launch_package_manifest_root_source_file": "nebula-public-launch-package.json",
         "public_launch_package_manifest_root_source_field": "public_launch_package_manifest_root",
+        "public_launch_package_schema_version_source_file": "nebula-public-launch-package.json",
+        "public_launch_package_schema_version_source_field": "schema_version",
+        "public_launch_package_chain_id_source_file": "nebula-public-launch-package.json",
+        "public_launch_package_chain_id_source_field": "chain_id",
+        "public_launch_package_version_source_file": "nebula-public-launch-package.json",
+        "public_launch_package_version_source_field": "version",
+        "public_launch_package_manifest_id_source_file": "nebula-public-launch-package.json",
+        "public_launch_package_manifest_id_source_field": "manifest_id",
+        "public_launch_package_testnet_id_source_file": "nebula-public-launch-package.json",
+        "public_launch_package_testnet_id_source_field": "testnet_id",
         "public_launch_readiness_artifact_root_source_file": "nebula-public-launch-readiness-report.json",
         "public_launch_readiness_artifact_root_source_field": "public_launch_readiness_artifact_root",
         "release_approval_template_root": release_approval_template_root,
@@ -20363,6 +20408,21 @@ fn ensure_public_deployment_capture_plan_redacted(value: &Value) -> Result<(), S
             == Some(true),
         "public deployment capture contract package handoff root requirement mismatch",
     )?;
+    for field in [
+        "public_launch_package_schema_version",
+        "public_launch_package_chain_id",
+        "public_launch_package_version",
+        "public_launch_package_manifest_id",
+        "public_launch_package_testnet_id",
+    ] {
+        ensure(
+            capture_contract
+                .get(format!("{field}_required"))
+                .and_then(Value::as_bool)
+                == Some(true),
+            &format!("public deployment capture contract {field} requirement mismatch"),
+        )?;
+    }
     ensure(
         capture_contract
             .get("public_launch_package_handoff_root_derivation")
@@ -20382,82 +20442,70 @@ fn ensure_public_deployment_capture_plan_redacted(value: &Value) -> Result<(), S
         .ok_or_else(|| {
             "public deployment package handoff capture missing required_source_files".to_string()
         })?;
+    let expected_handoff_sources = [
+        (
+            "nebula-public-launch-package.json",
+            "public_launch_package_manifest_root",
+            "public_launch_package_manifest_root",
+        ),
+        (
+            "nebula-public-launch-package.json",
+            "schema_version",
+            "public_launch_package_schema_version",
+        ),
+        (
+            "nebula-public-launch-package.json",
+            "chain_id",
+            "public_launch_package_chain_id",
+        ),
+        (
+            "nebula-public-launch-package.json",
+            "version",
+            "public_launch_package_version",
+        ),
+        (
+            "nebula-public-launch-package.json",
+            "manifest_id",
+            "public_launch_package_manifest_id",
+        ),
+        (
+            "nebula-public-launch-package.json",
+            "testnet_id",
+            "public_launch_package_testnet_id",
+        ),
+        (
+            "nebula-public-launch-readiness-report.json",
+            "public_launch_readiness_artifact_root",
+            "public_launch_readiness_artifact_root",
+        ),
+        (
+            "nebula-release-approval-template.json",
+            "release_approval_template_root",
+            "release_approval_template_root",
+        ),
+        (
+            "nebula-release-authority-registry-template.json",
+            "release_authority_registry_template_root",
+            "release_authority_registry_template_root",
+        ),
+    ];
     ensure(
-        handoff_sources.len() == 4,
+        handoff_sources.len() == expected_handoff_sources.len(),
         "public deployment package handoff capture source count mismatch",
     )?;
-    ensure(
-        handoff_sources
-            .first()
-            .and_then(|source| source.get("file_name"))
-            .and_then(Value::as_str)
-            == Some("nebula-public-launch-package.json")
-            && handoff_sources
-                .first()
-                .and_then(|source| source.get("root_field"))
-                .and_then(Value::as_str)
-                == Some("public_launch_package_manifest_root")
-            && handoff_sources
-                .first()
-                .and_then(|source| source.get("capture_field"))
-                .and_then(Value::as_str)
-                == Some("public_launch_package_manifest_root"),
-        "public deployment package handoff manifest source mismatch",
-    )?;
-    ensure(
-        handoff_sources
-            .get(1)
-            .and_then(|source| source.get("file_name"))
-            .and_then(Value::as_str)
-            == Some("nebula-public-launch-readiness-report.json")
-            && handoff_sources
-                .get(1)
-                .and_then(|source| source.get("root_field"))
-                .and_then(Value::as_str)
-                == Some("public_launch_readiness_artifact_root")
-            && handoff_sources
-                .get(1)
-                .and_then(|source| source.get("capture_field"))
-                .and_then(Value::as_str)
-                == Some("public_launch_readiness_artifact_root"),
-        "public deployment package handoff readiness source mismatch",
-    )?;
-    ensure(
-        handoff_sources
-            .get(2)
-            .and_then(|source| source.get("file_name"))
-            .and_then(Value::as_str)
-            == Some("nebula-release-approval-template.json")
-            && handoff_sources
-                .get(2)
-                .and_then(|source| source.get("root_field"))
-                .and_then(Value::as_str)
-                == Some("release_approval_template_root")
-            && handoff_sources
-                .get(2)
-                .and_then(|source| source.get("capture_field"))
-                .and_then(Value::as_str)
-                == Some("release_approval_template_root"),
-        "public deployment package handoff release approval template source mismatch",
-    )?;
-    ensure(
-        handoff_sources
-            .get(3)
-            .and_then(|source| source.get("file_name"))
-            .and_then(Value::as_str)
-            == Some("nebula-release-authority-registry-template.json")
-            && handoff_sources
-                .get(3)
-                .and_then(|source| source.get("root_field"))
-                .and_then(Value::as_str)
-                == Some("release_authority_registry_template_root")
-            && handoff_sources
-                .get(3)
-                .and_then(|source| source.get("capture_field"))
-                .and_then(Value::as_str)
-                == Some("release_authority_registry_template_root"),
-        "public deployment package handoff release authority registry source mismatch",
-    )?;
+    for (index, (file_name, root_field, capture_field)) in
+        expected_handoff_sources.iter().enumerate()
+    {
+        let source = handoff_sources.get(index).ok_or_else(|| {
+            "public deployment package handoff capture missing expected source".to_string()
+        })?;
+        ensure(
+            source.get("file_name").and_then(Value::as_str) == Some(*file_name)
+                && source.get("root_field").and_then(Value::as_str) == Some(*root_field)
+                && source.get("capture_field").and_then(Value::as_str) == Some(*capture_field),
+            &format!("public deployment package handoff source {index} mismatch"),
+        )?;
+    }
     let expected_contract_root = value_root("public-deployment-capture-contract", capture_contract);
     ensure(
         value.get("capture_contract_root").and_then(Value::as_str)
@@ -35289,42 +35337,117 @@ mod tests {
         );
         assert_eq!(
             value["package_handoff_capture"]["required_source_files"][1]["file_name"],
-            "nebula-public-launch-readiness-report.json"
+            "nebula-public-launch-package.json"
         );
         assert_eq!(
             value["package_handoff_capture"]["required_source_files"][1]["root_field"],
-            "public_launch_readiness_artifact_root"
+            "schema_version"
         );
         assert_eq!(
             value["package_handoff_capture"]["required_source_files"][1]["capture_field"],
-            "public_launch_readiness_artifact_root"
+            "public_launch_package_schema_version"
         );
         assert_eq!(
             value["package_handoff_capture"]["required_source_files"][2]["file_name"],
-            "nebula-release-approval-template.json"
+            "nebula-public-launch-package.json"
         );
         assert_eq!(
             value["package_handoff_capture"]["required_source_files"][2]["root_field"],
-            "release_approval_template_root"
+            "chain_id"
         );
         assert_eq!(
             value["package_handoff_capture"]["required_source_files"][2]["capture_field"],
-            "release_approval_template_root"
+            "public_launch_package_chain_id"
         );
         assert_eq!(
             value["package_handoff_capture"]["required_source_files"][3]["file_name"],
-            "nebula-release-authority-registry-template.json"
+            "nebula-public-launch-package.json"
         );
         assert_eq!(
             value["package_handoff_capture"]["required_source_files"][3]["root_field"],
-            "release_authority_registry_template_root"
+            "version"
         );
         assert_eq!(
             value["package_handoff_capture"]["required_source_files"][3]["capture_field"],
+            "public_launch_package_version"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][4]["file_name"],
+            "nebula-public-launch-package.json"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][4]["root_field"],
+            "manifest_id"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][4]["capture_field"],
+            "public_launch_package_manifest_id"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][5]["file_name"],
+            "nebula-public-launch-package.json"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][5]["root_field"],
+            "testnet_id"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][5]["capture_field"],
+            "public_launch_package_testnet_id"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][6]["file_name"],
+            "nebula-public-launch-readiness-report.json"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][6]["root_field"],
+            "public_launch_readiness_artifact_root"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][6]["capture_field"],
+            "public_launch_readiness_artifact_root"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][7]["file_name"],
+            "nebula-release-approval-template.json"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][7]["root_field"],
+            "release_approval_template_root"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][7]["capture_field"],
+            "release_approval_template_root"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][8]["file_name"],
+            "nebula-release-authority-registry-template.json"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][8]["root_field"],
+            "release_authority_registry_template_root"
+        );
+        assert_eq!(
+            value["package_handoff_capture"]["required_source_files"][8]["capture_field"],
             "release_authority_registry_template_root"
         );
         assert!(value["package_handoff_capture"]
             .get("public_launch_package_manifest_root")
+            .is_none());
+        assert!(value["package_handoff_capture"]
+            .get("public_launch_package_schema_version")
+            .is_none());
+        assert!(value["package_handoff_capture"]
+            .get("public_launch_package_chain_id")
+            .is_none());
+        assert!(value["package_handoff_capture"]
+            .get("public_launch_package_version")
+            .is_none());
+        assert!(value["package_handoff_capture"]
+            .get("public_launch_package_manifest_id")
+            .is_none());
+        assert!(value["package_handoff_capture"]
+            .get("public_launch_package_testnet_id")
             .is_none());
         assert!(value["package_handoff_capture"]
             .get("public_launch_readiness_artifact_root")

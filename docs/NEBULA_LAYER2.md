@@ -3379,13 +3379,14 @@ real XMR.
   typed public deployment runbook root, and step-set root, and includes a
   `package_handoff_capture` section that tells operators to copy
   `public_launch_package_manifest_root` from `nebula-public-launch-package.json`
+  plus its package schema/version/chain/run identity fields,
   and `public_launch_readiness_artifact_root` from
   `nebula-public-launch-readiness-report.json`, plus the release-template roots
   from `nebula-release-approval-template.json` and
   `nebula-release-authority-registry-template.json`, into the deployment capture.
   The plan requires, but does not embed, `public_launch_package_handoff_root` so
-  the filled capture can later bind the package file-set, manifest, readiness,
-  and release-template roots with one aggregate checksum without creating a
+  the filled capture can later bind the package file-set, manifest, package
+  identity, readiness, and release-template roots with one aggregate checksum without creating a
   circular package manifest root. The plan names those required source files and
   capture fields while keeping the operator handoff aligned with the same status,
   bootstrap, launch, package, and evidence-template roots, with the
