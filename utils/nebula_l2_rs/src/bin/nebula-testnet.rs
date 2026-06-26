@@ -19321,6 +19321,22 @@ fn ensure_public_launch_readiness_report_artifact_safe(value: &Value) -> Result<
         "public launch readiness report kind mismatch",
     )?;
     ensure(
+        value.get("schema_version").and_then(Value::as_u64) == Some(1),
+        "public launch readiness report schema version mismatch",
+    )?;
+    ensure(
+        value.get("chain_id").and_then(Value::as_str) == Some(CHAIN_ID),
+        "public launch readiness report chain id mismatch",
+    )?;
+    ensure(
+        value.get("version").and_then(Value::as_str) == Some(VERSION),
+        "public launch readiness report version mismatch",
+    )?;
+    ensure(
+        value.get("public_alpha_only").and_then(Value::as_bool) == Some(true),
+        "public launch readiness report must remain public-alpha-only",
+    )?;
+    ensure(
         value.get("local_operator_only").and_then(Value::as_bool) == Some(true),
         "public launch readiness report must remain operator-local",
     )?;
@@ -33010,6 +33026,27 @@ mod tests {
         let error = ensure_public_launch_readiness_report_artifact_safe(&value)
             .expect_err("tampered remediation command map should fail safety checks");
         assert!(error.contains("command map mismatch"));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_re_rooted_wrong_chain() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["chain_id"] = json!("nebula-wrong-chain");
+        let mut rootless = value.clone();
+        rootless
+            .as_object_mut()
+            .expect("readiness report object")
+            .remove("public_launch_readiness_artifact_root");
+        value["public_launch_readiness_artifact_root"] =
+            json!(value_root("public-launch-readiness-report-artifact", &rootless));
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("wrong-chain readiness report should fail safety checks");
+        assert!(error.contains("chain id mismatch"));
     }
 
     #[test]

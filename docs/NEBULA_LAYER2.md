@@ -3323,8 +3323,9 @@ real XMR.
   readiness root subchecks, and a report artifact
   root. It is marked unusable as public deployment evidence or mainnet custody
   approval. The paired `--verify-public-launch-readiness-report` command
+  pins the schema, chain, version, and public-alpha/operator-local boundary,
   recomputes the nested check, remediation, canonical command-map, command-sequence,
-  report, and artifact roots against the current run, rejecting stale
+  report, and artifact roots against the current run, and rejects stale
   package-root, status, bundle, capture-plan, capture-contract, evidence-template,
   preflight, or deployment-evidence bindings before deployment CI consumes the
   report root.

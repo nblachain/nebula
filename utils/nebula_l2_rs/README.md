@@ -446,6 +446,7 @@ root. The report is not a public deployment attestation and has both
 `usable_as_public_deployment_evidence` and
 `usable_as_mainnet_custody_approval` set to false.
 `--verify-public-launch-readiness-report path\to\launch-report.json`
+pins the schema, chain, version, and public-alpha/operator-local boundary,
 recomputes the report, nested check/remediation roots, canonical command-map and
 command-sequence roots, and artifact root against the current run, rejecting
 stale package-root, status, bundle, capture-plan, capture-contract,
