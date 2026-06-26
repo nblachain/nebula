@@ -22271,6 +22271,67 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
     ]))
 }
 
+fn ensure_public_launch_missing_evidence_repair_roots(
+    report: &Value,
+    remediation: &Value,
+) -> Result<(), String> {
+    let label = "public launch remediation";
+    if required_nested_str(remediation, "blocker_id", label)?
+        != "public-launch-deployment-attestation"
+        || report
+            .get("public_deployment_evidence_root")
+            .and_then(Value::as_str)
+            != Some("missing-public-deployment-evidence")
+    {
+        return Ok(());
+    }
+    let failed_subchecks = required_nested_string_list(remediation, "failed_subchecks", label)?;
+    let failed_subchecks = failed_subcheck_set(&failed_subchecks);
+    let repair_roots = remediation
+        .get("repair_roots")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "public launch remediation missing repair_roots".to_string())?;
+    for (subcheck, report_key) in [
+        (
+            "public_launch_bundle_root_bound",
+            "public_launch_bundle_root",
+        ),
+        (
+            "public_launch_package_file_set_root_bound",
+            "public_launch_package_file_set_root",
+        ),
+        ("status_manifest_root_bound", "public_status_manifest_root"),
+        (
+            "public_status_manifest_root_bound",
+            "public_status_manifest_root",
+        ),
+        (
+            "public_status_manifest_payload_bound",
+            "public_status_manifest_root",
+        ),
+        ("capture_plan_root_bound", "capture_plan_root"),
+        ("capture_contract_root_bound", "capture_contract_root"),
+        (
+            "public_deployment_evidence_template_root_bound",
+            "public_deployment_evidence_template_root",
+        ),
+        (
+            "deployment_preflight_checklist_root_bound",
+            "deployment_preflight_checklist_root",
+        ),
+    ] {
+        if failed_subchecks.contains(subcheck) {
+            let expected_root =
+                required_nested_str(report, report_key, "public launch readiness report")?;
+            ensure(
+                repair_roots.get(subcheck).and_then(Value::as_str) == Some(expected_root),
+                &format!("public launch remediation repair root mismatch for {subcheck}"),
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn ensure_public_launch_readiness_roots_match_report(
     report: &Value,
     readiness: &Value,
@@ -22346,6 +22407,7 @@ fn ensure_public_launch_readiness_roots_match_report(
     let remediation_roots = remediations
         .iter()
         .map(|remediation| {
+            ensure_public_launch_missing_evidence_repair_roots(report, remediation)?;
             let expected_root = public_launch_remediation_root_from_value(remediation)?;
             ensure(
                 remediation.get("remediation_root").and_then(Value::as_str)
@@ -36086,6 +36148,24 @@ mod tests {
     }
 
     #[test]
+    fn public_launch_readiness_report_rejects_tampered_missing_evidence_repair_root() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["repair_roots"]
+            ["public_launch_package_file_set_root_bound"] =
+            json!(root(&["wrong-public-launch-package-file-set-root"]));
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("tampered missing-evidence repair root should fail safety checks");
+        assert!(error.contains(
+            "public launch remediation repair root mismatch for public_launch_package_file_set_root_bound"
+        ));
+    }
+
+    #[test]
     fn public_launch_readiness_report_rejects_extra_deferred_repair_subcheck() {
         let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
             .expect("mainnet readiness should parse");
@@ -36270,6 +36350,37 @@ mod tests {
             "tampered-public-launch-package-file-set",
             &summary.manifest_id
         ]));
+        stale["public_launch_readiness"]["remediations"][0]["repair_roots"]
+            ["public_launch_package_file_set_root_bound"] =
+            stale["public_launch_package_file_set_root"].clone();
+        let remediation_root = public_launch_remediation_root_from_value(
+            &stale["public_launch_readiness"]["remediations"][0],
+        )
+        .expect("recompute remediation root");
+        stale["public_launch_readiness"]["remediations"][0]["remediation_root"] =
+            json!(remediation_root.clone());
+        let remediation_set_root =
+            collection_root("public-launch-remediations", vec![remediation_root]);
+        stale["public_launch_readiness"]["remediation_root"] = json!(remediation_set_root.clone());
+        stale["public_launch_readiness_remediation_root"] = json!(remediation_set_root.clone());
+        let report_root = root(&[
+            "public-launch-readiness-report",
+            CHAIN_ID,
+            stale["manifest_id"]
+                .as_str()
+                .expect("stale report manifest id"),
+            stale["public_launch_readiness"]["check_root"]
+                .as_str()
+                .expect("stale report check root"),
+            &remediation_set_root,
+            bool_str(
+                stale["public_launch_readiness"]["public_launch_ready"]
+                    .as_bool()
+                    .expect("stale report ready flag"),
+            ),
+        ]);
+        stale["public_launch_readiness"]["report_root"] = json!(report_root.clone());
+        stale["public_launch_readiness_report_root"] = json!(report_root);
         let mut rootless = stale.clone();
         if let Some(map) = rootless.as_object_mut() {
             map.remove("public_launch_readiness_artifact_root");
@@ -36291,7 +36402,7 @@ mod tests {
 
         let error = verify_public_launch_readiness_report(&path, &summary)
             .expect_err("re-rooted stale report should fail exact verification");
-        assert!(error.contains("public_launch_package_file_set_root mismatch"));
+        assert!(error.contains("public_launch_readiness_report_root mismatch"));
         let _ = fs::remove_file(path);
     }
 
