@@ -9352,7 +9352,42 @@ fn public_deployment_static_expected_values(
         bool_str(true).to_string(),
         "no-mainnet-custody".to_string(),
     ];
-    public_deployment_identity_expected_values(failed_subchecks, &expected_identity)
+    let mut expected_values =
+        public_deployment_identity_expected_values(failed_subchecks, &expected_identity);
+    let failed = failed_subcheck_set(failed_subchecks);
+    let static_expected_values = [
+        (
+            "public_launch_package_schema_version_bound",
+            "1".to_string(),
+        ),
+        ("public_launch_package_chain_id_bound", CHAIN_ID.to_string()),
+        ("public_launch_package_version_bound", VERSION.to_string()),
+        (
+            "deployment_preflight_phase_count_bound",
+            (REQUIRED_PUBLIC_DEPLOYMENT_PREFLIGHT_PHASES.len() as u64).to_string(),
+        ),
+        (
+            "public_deployment_runbook_step_receipt_count_bound",
+            (PUBLIC_DEPLOYMENT_RUNBOOK_STEPS.len() as u64).to_string(),
+        ),
+        (
+            "tls_endpoint_pin_count_sufficient",
+            (PUBLIC_TLS_ENDPOINT_PIN_ROLES.len() as u64).to_string(),
+        ),
+        (
+            "public_surface_probe_count_bound",
+            REQUIRED_PUBLIC_SURFACE_PROBE_COUNT.to_string(),
+        ),
+        (
+            "public_probe_count_bound",
+            (REQUIRED_PUBLIC_DEPLOYMENT_PROBE_ROOT_FIELDS.len() as u64).to_string(),
+        ),
+    ];
+    for (subcheck, expected_value) in static_expected_values {
+        insert_expected_value(&mut expected_values, &failed, subcheck, expected_value);
+    }
+    insert_boolean_expected_values(&mut expected_values, &failed);
+    expected_values
 }
 
 fn public_deployment_identity_expected_values(
@@ -35841,6 +35876,23 @@ mod tests {
             .expect_err("tampered remediation expected values should fail safety checks");
         assert!(error.contains(
             "public launch remediation expected value mismatch for evidence_version_bound"
+        ));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_tampered_remediation_expected_counts() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["expected_values"]
+            ["public_probe_count_bound"] = json!("999");
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("tampered remediation expected count should fail safety checks");
+        assert!(error.contains(
+            "public launch remediation expected value mismatch for public_probe_count_bound"
         ));
     }
 
