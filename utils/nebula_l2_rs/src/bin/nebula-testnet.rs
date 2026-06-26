@@ -374,6 +374,23 @@ const PUBLIC_DEPLOYMENT_EVIDENCE_TOP_LEVEL_FIELDS: &[&str] = &[
     "mainnet_custody_disabled",
     "placeholders_absent",
 ];
+const PUBLIC_SURFACE_PROBE_FIELDS: &[&str] = &[
+    "status",
+    "chain_id",
+    "probe_role",
+    "endpoint",
+    "transport",
+    "transcript_kind",
+    "http_status",
+    "transcript_root",
+    "probe_root",
+    "public_launch_bundle_root",
+    "public_status_manifest_root",
+    "deployment_run_id",
+    "observed_at_unix_ms",
+    "endpoint_publicly_routable",
+    "surface_probe_root",
+];
 const PICONERO_PER_XMR: u64 = 1_000_000_000_000;
 const ROOT_PLACEHOLDER: &str = "<64-hex-root>";
 const SENSITIVE_FIELD_MARKERS: [&str; 9] = [
@@ -30174,6 +30191,11 @@ fn validate_public_surface_probes(
     let mut roles = BTreeSet::new();
     let mut probe_roots = Vec::new();
     for probe in probes {
+        ensure_allowed_object_fields(
+            probe,
+            PUBLIC_SURFACE_PROBE_FIELDS,
+            "public deployment surface probe",
+        )?;
         ensure(
             required_str(probe, "status")? == "ok" || required_str(probe, "status")? == "blocked",
             "public deployment surface probe status must be ok or blocked",
@@ -30274,6 +30296,29 @@ fn public_surface_probe_root(probe: &Value) -> Result<String, String> {
         &required_u64(probe, "observed_at_unix_ms")?.to_string(),
         bool_str(required_bool(probe, "endpoint_publicly_routable")?),
     ]))
+}
+
+fn ensure_allowed_object_fields(
+    value: &Value,
+    allowed_fields: &[&str],
+    description: &str,
+) -> Result<(), String> {
+    let Some(map) = value.as_object() else {
+        return Err(format!("{description} must be an object"));
+    };
+    for key in map.keys() {
+        ensure(
+            allowed_fields.contains(&key.as_str()),
+            &format!("{description} contains unexpected field '{key}'"),
+        )?;
+    }
+    for key in allowed_fields {
+        ensure(
+            map.contains_key(*key),
+            &format!("{description} missing field '{key}'"),
+        )?;
+    }
+    Ok(())
 }
 
 fn public_deployment_probe_root_pairs_from_value(
@@ -46438,6 +46483,28 @@ mod tests {
         let error = load_public_deployment_evidence(&bad_path)
             .expect_err("tampered public surface probe set should be rejected");
         assert!(error.contains("public deployment surface probe roots mismatch"));
+        let _ = fs::remove_file(bad_path);
+    }
+
+    #[test]
+    fn public_deployment_evidence_rejects_extra_public_surface_probe_field() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut value: Value =
+            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
+                .expect("deployment evidence json");
+        value["public_surface_probes"][0]["operator_note"] =
+            json!("uncommitted surface probe side-band claim");
+        let bad_path = write_public_deployment_evidence(
+            &serde_json::to_string_pretty(&value).expect("bad evidence json"),
+        );
+        let error = load_public_deployment_evidence(&bad_path)
+            .expect_err("extra public surface probe field should be rejected");
+        assert!(error
+            .contains("public deployment surface probe contains unexpected field 'operator_note'"));
         let _ = fs::remove_file(bad_path);
     }
 

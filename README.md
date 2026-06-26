@@ -3588,7 +3588,8 @@ real XMR.
   surfaces exactly once. Each record must bind the public endpoint, transport,
   transcript kind/status, transcript root, probe root, launch bundle root,
   status-manifest root, `deployment_run_id`, `observed_at_unix_ms`, and
-  public-routability claim; the derived `public_surface_probe_set_root` is
+  public-routability claim, and unexpected record fields are rejected before the
+  derived `public_surface_probe_set_root` is
   included in observer attestations, provenance, the final attestation, and the
   canonical `public_probe_set_root`. A typed bootstrap operator registry must cover every
   committed operator exactly once, require unique entity/control-plane/
