@@ -3299,7 +3299,9 @@ real XMR.
   external-capture work without scraping prose: capture-plan, capture-contract,
   preflight, readiness, status, launch-bundle, package file-set, required
   endpoint, TLS, probe, observer, operator-registry, runbook-step, freshness,
-  and no-mainnet-custody inputs. It is required before public capture,
+  no-mainnet-custody inputs, plus a top-level deferred repair-root subcheck
+  list/count/root for self-referential package handoff, package manifest, and
+  readiness artifact roots. It is required before public capture,
   operator-fill-required, and explicitly not deployment evidence or custody
   approval; it avoids embedding the package manifest root to keep package roots
   acyclic. The same rooted todo can be written standalone with

@@ -476,7 +476,9 @@ tampered, swapped, cross-run, or extra handoff files.
 The package also includes `nebula-public-capture-todo.json`, a rooted
 machine-readable work order for the exact endpoint, TLS, probe, observer,
 operator-registry, runbook, preflight, freshness, package, and
-no-mainnet-custody fields deployment CI must capture. The todo artifact is
+no-mainnet-custody fields deployment CI must capture. It also carries a
+top-level deferred repair-root subcheck list/count/root for the self-referential
+package handoff, package manifest, and readiness artifact roots. The todo artifact is
 operator-fill-required, not public deployment evidence, and not custody
 approval.
 

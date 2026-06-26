@@ -7987,6 +7987,18 @@ fn public_launch_deferred_repair_root_subchecks(
     .collect()
 }
 
+fn public_launch_deferred_repair_root_subchecks_for_remediations(
+    remediations: &[PublicLaunchRemediation],
+) -> Vec<String> {
+    remediations
+        .iter()
+        .flat_map(|remediation| remediation.deferred_repair_root_subchecks.iter())
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 fn public_deployment_missing_evidence_repair_roots(
     summary: &TestnetSummary,
     failed_subchecks: &[String],
@@ -9511,6 +9523,14 @@ fn public_capture_todo_artifact(summary: &TestnetSummary) -> Value {
         .remediations
         .iter()
         .any(|remediation| remediation.external_capture_required);
+    let deferred_repair_root_subchecks =
+        public_launch_deferred_repair_root_subchecks_for_remediations(
+            &summary.public_launch_readiness.remediations,
+        );
+    let deferred_repair_root_subcheck_root = collection_root(
+        "public-capture-todo-deferred-repair-root-subchecks",
+        deferred_repair_root_subchecks.clone(),
+    );
     let mut todo = json!({
         "kind": "nebula-public-capture-todo",
         "schema_version": 1,
@@ -9527,6 +9547,9 @@ fn public_capture_todo_artifact(summary: &TestnetSummary) -> Value {
         "public_launch_ready": summary.public_launch_readiness.public_launch_ready,
         "blocking_gaps": &summary.public_launch_readiness.blocking_gaps,
         "remediations": &summary.public_launch_readiness.remediations,
+        "deferred_repair_root_subchecks": deferred_repair_root_subchecks.clone(),
+        "deferred_repair_root_subcheck_count": deferred_repair_root_subchecks.len(),
+        "deferred_repair_root_subcheck_root": deferred_repair_root_subcheck_root,
         "public_status_manifest_root": public_status_manifest_root,
         "public_launch_bundle_root": public_launch_bundle_root,
         "public_launch_artifact_manifest_root": public_launch_artifact_manifest_root,
@@ -9658,6 +9681,42 @@ fn ensure_public_capture_todo_artifact(value: &Value) -> Result<(), String> {
             .and_then(Value::as_object)
             .is_some(),
         "public capture todo missing deployment_preflight",
+    )?;
+    let deferred_repair_root_subchecks = value
+        .get("deferred_repair_root_subchecks")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "public capture todo missing deferred_repair_root_subchecks".to_string())?;
+    let deferred_repair_root_subcheck_count = value
+        .get("deferred_repair_root_subcheck_count")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            "public capture todo missing deferred_repair_root_subcheck_count".to_string()
+        })?;
+    ensure(
+        deferred_repair_root_subchecks.len() as u64 == deferred_repair_root_subcheck_count,
+        "public capture todo deferred repair root subcheck count mismatch",
+    )?;
+    let deferred_subchecks = deferred_repair_root_subchecks
+        .iter()
+        .map(|subcheck| {
+            subcheck
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    "public capture todo deferred repair root subcheck must be a string".to_string()
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let expected_deferred_root = collection_root(
+        "public-capture-todo-deferred-repair-root-subchecks",
+        deferred_subchecks,
+    );
+    ensure(
+        value
+            .get("deferred_repair_root_subcheck_root")
+            .and_then(Value::as_str)
+            == Some(expected_deferred_root.as_str()),
+        "public capture todo deferred repair root subcheck root mismatch",
     )?;
     let mut rootless = value.clone();
     if let Some(map) = rootless.as_object_mut() {
@@ -32798,6 +32857,26 @@ mod tests {
             value["blocking_gaps"][0],
             "public-launch-deployment-attestation"
         );
+        assert_eq!(
+            value["deferred_repair_root_subchecks"],
+            json!([
+                "public_launch_package_handoff_root_bound",
+                "public_launch_package_manifest_root_bound",
+                "public_launch_readiness_artifact_root_bound"
+            ])
+        );
+        assert_eq!(value["deferred_repair_root_subcheck_count"], 3);
+        assert_eq!(
+            value["deferred_repair_root_subcheck_root"],
+            collection_root(
+                "public-capture-todo-deferred-repair-root-subchecks",
+                vec![
+                    "public_launch_package_handoff_root_bound".to_string(),
+                    "public_launch_package_manifest_root_bound".to_string(),
+                    "public_launch_readiness_artifact_root_bound".to_string()
+                ],
+            )
+        );
         assert!(is_hex_root(
             value["public_capture_todo_root"]
                 .as_str()
@@ -32809,6 +32888,11 @@ mod tests {
         let error = ensure_public_capture_todo_artifact(&tampered)
             .expect_err("tampered capture todo should fail");
         assert!(error.contains("required_capture_fields"));
+        let mut deferred_tampered = value.clone();
+        deferred_tampered["deferred_repair_root_subcheck_count"] = json!(2);
+        let error = ensure_public_capture_todo_artifact(&deferred_tampered)
+            .expect_err("deferred-root-tampered capture todo should fail");
+        assert!(error.contains("deferred repair root subcheck count"));
         let mut command_tampered = value.clone();
         command_tampered["commands"]["verify_public_launch"] = json!("tampered-command");
         let error = ensure_public_capture_todo_artifact(&command_tampered)
