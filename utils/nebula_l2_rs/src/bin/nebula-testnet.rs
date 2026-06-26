@@ -201,6 +201,11 @@ const REQUIRED_PUBLIC_DEPLOYMENT_CAPTURE_FIELDS: &[&str] = &[
     "public_launch_package_file_set_root",
     "public_launch_package_handoff_root",
     "public_launch_package_manifest_root",
+    "public_launch_package_schema_version",
+    "public_launch_package_chain_id",
+    "public_launch_package_version",
+    "public_launch_package_manifest_id",
+    "public_launch_package_testnet_id",
     "public_launch_readiness_artifact_root",
     "release_approval_template_root",
     "release_authority_registry_template_root",
@@ -1075,6 +1080,11 @@ struct PublicDeploymentEvidence {
     public_launch_package_file_set_root: String,
     public_launch_package_handoff_root: String,
     public_launch_package_manifest_root: String,
+    public_launch_package_schema_version: u64,
+    public_launch_package_chain_id: String,
+    public_launch_package_version: String,
+    public_launch_package_manifest_id: String,
+    public_launch_package_testnet_id: String,
     public_launch_readiness_artifact_root: String,
     release_approval_template_root: String,
     release_authority_registry_template_root: String,
@@ -14227,6 +14237,16 @@ fn write_public_deployment_evidence_from_capture(
         required_root(&value, "public_launch_package_handoff_root")?;
     let capture_package_manifest_root =
         required_root(&value, "public_launch_package_manifest_root")?;
+    let capture_package_schema_version =
+        required_u64(&value, "public_launch_package_schema_version")?;
+    let capture_package_chain_id =
+        required_str(&value, "public_launch_package_chain_id")?.to_string();
+    let capture_package_version =
+        required_str(&value, "public_launch_package_version")?.to_string();
+    let capture_package_manifest_id =
+        required_root(&value, "public_launch_package_manifest_id")?;
+    let capture_package_testnet_id =
+        required_str(&value, "public_launch_package_testnet_id")?.to_string();
     let capture_readiness_artifact_root =
         required_root(&value, "public_launch_readiness_artifact_root")?;
     let capture_release_approval_template_root =
@@ -14261,6 +14281,26 @@ fn write_public_deployment_evidence_from_capture(
     ensure(
         capture_package_manifest_root == public_launch_package_manifest_root,
         "public deployment public_launch_package_manifest_root mismatch",
+    )?;
+    ensure(
+        capture_package_schema_version == 1,
+        "public deployment public_launch_package_schema_version mismatch",
+    )?;
+    ensure(
+        capture_package_chain_id == CHAIN_ID,
+        "public deployment public_launch_package_chain_id mismatch",
+    )?;
+    ensure(
+        capture_package_version == VERSION,
+        "public deployment public_launch_package_version mismatch",
+    )?;
+    ensure(
+        capture_package_manifest_id == summary.manifest_id,
+        "public deployment public_launch_package_manifest_id mismatch",
+    )?;
+    ensure(
+        capture_package_testnet_id == summary.testnet_id,
+        "public deployment public_launch_package_testnet_id mismatch",
     )?;
     ensure(
         capture_readiness_artifact_root == public_launch_readiness_artifact_root,
@@ -22508,6 +22548,16 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
         required_root(&value, "public_launch_package_handoff_root")?;
     let public_launch_package_manifest_root =
         required_root(&value, "public_launch_package_manifest_root")?;
+    let public_launch_package_schema_version =
+        required_u64(&value, "public_launch_package_schema_version")?;
+    let public_launch_package_chain_id =
+        required_str(&value, "public_launch_package_chain_id")?.to_string();
+    let public_launch_package_version =
+        required_str(&value, "public_launch_package_version")?.to_string();
+    let public_launch_package_manifest_id =
+        required_root(&value, "public_launch_package_manifest_id")?;
+    let public_launch_package_testnet_id =
+        required_str(&value, "public_launch_package_testnet_id")?.to_string();
     let public_launch_readiness_artifact_root =
         required_root(&value, "public_launch_readiness_artifact_root")?;
     let release_approval_template_root = required_root(&value, "release_approval_template_root")?;
@@ -22524,7 +22574,23 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
             ),
         "public deployment evidence public_launch_package_handoff_root mismatch",
     )?;
+    ensure(
+        public_launch_package_schema_version == 1,
+        "public deployment evidence public_launch_package_schema_version mismatch",
+    )?;
+    ensure(
+        public_launch_package_chain_id == CHAIN_ID,
+        "public deployment evidence public_launch_package_chain_id mismatch",
+    )?;
+    ensure(
+        public_launch_package_version == VERSION,
+        "public deployment evidence public_launch_package_version mismatch",
+    )?;
     let testnet_manifest_id = required_root(&value, "testnet_manifest_id")?;
+    ensure(
+        public_launch_package_manifest_id == testnet_manifest_id,
+        "public deployment evidence public_launch_package_manifest_id mismatch",
+    )?;
     let public_status_manifest_root = required_root(&value, "public_status_manifest_root")?;
     let public_status_manifest = required_section(&value, "public_status_manifest")?.clone();
     let computed_status_manifest_root =
@@ -22534,6 +22600,10 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
         "public deployment evidence public_status_manifest_root mismatch",
     )?;
     let public_status_testnet_id = required_str(&public_status_manifest, "testnet_id")?.to_string();
+    ensure(
+        public_launch_package_testnet_id == public_status_testnet_id,
+        "public deployment evidence public_launch_package_testnet_id mismatch",
+    )?;
     let public_bootstrap_profile_root = required_root(&value, "public_bootstrap_profile_root")?;
     let public_bootstrap_profile_report_root =
         required_root(&value, "public_bootstrap_profile_report_root")?;
@@ -23161,6 +23231,11 @@ fn load_public_deployment_evidence(path: &str) -> Result<PublicDeploymentEvidenc
         public_launch_package_file_set_root,
         public_launch_package_handoff_root,
         public_launch_package_manifest_root,
+        public_launch_package_schema_version,
+        public_launch_package_chain_id,
+        public_launch_package_version,
+        public_launch_package_manifest_id,
+        public_launch_package_testnet_id,
         public_launch_readiness_artifact_root,
         release_approval_template_root,
         release_authority_registry_template_root,
@@ -28787,6 +28862,11 @@ fn public_deployment_provenance_root_from_value(value: &Value) -> Result<String,
         required_root(value, "public_launch_package_file_set_root")?.as_str(),
         required_root(value, "public_launch_package_handoff_root")?.as_str(),
         required_root(value, "public_launch_package_manifest_root")?.as_str(),
+        &required_u64(value, "public_launch_package_schema_version")?.to_string(),
+        required_str(value, "public_launch_package_chain_id")?,
+        required_str(value, "public_launch_package_version")?,
+        required_root(value, "public_launch_package_manifest_id")?.as_str(),
+        required_str(value, "public_launch_package_testnet_id")?,
         required_root(value, "public_launch_readiness_artifact_root")?.as_str(),
         required_root(value, "release_approval_template_root")?.as_str(),
         required_root(value, "release_authority_registry_template_root")?.as_str(),
@@ -28859,6 +28939,11 @@ fn public_deployment_attestation_root_from_value(value: &Value) -> Result<String
         required_root(value, "public_launch_package_file_set_root")?.as_str(),
         required_root(value, "public_launch_package_handoff_root")?.as_str(),
         required_root(value, "public_launch_package_manifest_root")?.as_str(),
+        &required_u64(value, "public_launch_package_schema_version")?.to_string(),
+        required_str(value, "public_launch_package_chain_id")?,
+        required_str(value, "public_launch_package_version")?,
+        required_root(value, "public_launch_package_manifest_id")?.as_str(),
+        required_str(value, "public_launch_package_testnet_id")?,
         required_root(value, "public_launch_readiness_artifact_root")?.as_str(),
         required_root(value, "release_approval_template_root")?.as_str(),
         required_root(value, "release_authority_registry_template_root")?.as_str(),
@@ -29002,6 +29087,11 @@ fn public_deployment_provenance_root(evidence: &PublicDeploymentEvidence) -> Str
         &evidence.public_launch_package_file_set_root,
         &evidence.public_launch_package_handoff_root,
         &evidence.public_launch_package_manifest_root,
+        &evidence.public_launch_package_schema_version.to_string(),
+        &evidence.public_launch_package_chain_id,
+        &evidence.public_launch_package_version,
+        &evidence.public_launch_package_manifest_id,
+        &evidence.public_launch_package_testnet_id,
         &evidence.public_launch_readiness_artifact_root,
         &evidence.release_approval_template_root,
         &evidence.release_authority_registry_template_root,
@@ -29067,6 +29157,11 @@ fn public_deployment_attestation_root(evidence: &PublicDeploymentEvidence) -> St
         &evidence.public_launch_package_file_set_root,
         &evidence.public_launch_package_handoff_root,
         &evidence.public_launch_package_manifest_root,
+        &evidence.public_launch_package_schema_version.to_string(),
+        &evidence.public_launch_package_chain_id,
+        &evidence.public_launch_package_version,
+        &evidence.public_launch_package_manifest_id,
+        &evidence.public_launch_package_testnet_id,
         &evidence.public_launch_readiness_artifact_root,
         &evidence.release_approval_template_root,
         &evidence.release_authority_registry_template_root,
@@ -38799,6 +38894,32 @@ mod tests {
     }
 
     #[test]
+    fn public_deployment_evidence_assembler_rejects_wrong_package_identity() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut capture: Value =
+            serde_json::from_str(&valid_public_deployment_capture(&base_summary))
+                .expect("deployment capture json");
+        capture["public_launch_package_version"] = json!("wrong-package-version");
+        let capture_path = write_public_deployment_evidence(
+            &serde_json::to_string_pretty(&capture).expect("capture json"),
+        );
+        let output_path = temp_json_path("nebula-public-deployment-wrong-package-identity");
+        let error = write_public_deployment_evidence_from_capture(
+            &capture_path,
+            &output_path,
+            &base_summary,
+        )
+        .expect_err("wrong package identity should be rejected");
+        assert!(error.contains("public_launch_package_version mismatch"));
+        let _ = fs::remove_file(capture_path);
+        let _ = fs::remove_file(output_path);
+    }
+
+    #[test]
     fn public_deployment_evidence_assembler_rejects_unsigned_probe_observer() {
         let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
             .expect("mainnet readiness should parse");
@@ -38900,6 +39021,30 @@ mod tests {
         let error = load_public_deployment_evidence(&bad_path)
             .expect_err("inflated observer region count should be rejected");
         assert!(error.contains("probe observer provenance mismatch"));
+        let _ = fs::remove_file(bad_path);
+    }
+
+    #[test]
+    fn public_deployment_evidence_rejects_re_rooted_wrong_package_identity() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let mut value: Value =
+            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
+                .expect("deployment evidence json");
+        value["public_launch_package_version"] = json!("wrong-package-version");
+        value["provenance_root"] =
+            json!(public_deployment_provenance_root_from_value(&value).expect("provenance root"));
+        value["evidence_root"] =
+            json!(public_deployment_attestation_root_from_value(&value).expect("evidence root"));
+        let bad_path = write_public_deployment_evidence(
+            &serde_json::to_string_pretty(&value).expect("bad evidence json"),
+        );
+        let error = load_public_deployment_evidence(&bad_path)
+            .expect_err("re-rooted wrong package identity should be rejected");
+        assert!(error.contains("public_launch_package_version mismatch"));
         let _ = fs::remove_file(bad_path);
     }
 
@@ -44488,6 +44633,11 @@ mod tests {
             public_launch_package_file_set_root,
             public_launch_package_handoff_root,
             public_launch_package_manifest_root,
+            public_launch_package_schema_version: 1,
+            public_launch_package_chain_id: CHAIN_ID.to_string(),
+            public_launch_package_version: VERSION.to_string(),
+            public_launch_package_manifest_id: summary.manifest_id.clone(),
+            public_launch_package_testnet_id: summary.testnet_id.clone(),
             public_launch_readiness_artifact_root,
             release_approval_template_root,
             release_authority_registry_template_root,

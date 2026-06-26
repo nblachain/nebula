@@ -743,7 +743,8 @@ set, require the embedded
 and the roots carried in the capture, require the embedded
 `public_launch_package_manifest_root` and
 `public_launch_readiness_artifact_root` to match the pre-capture launch package
-handoff, require the embedded `release_approval_template_root` and
+handoff, require the embedded package schema/version/chain/run identity to match
+the current package, require the embedded `release_approval_template_root` and
 `release_authority_registry_template_root` to match the release handoff
 templates in the verified package, seal the embedded public bootstrap profile
 root, profile report root, and rate-limit policy root against the current
@@ -773,7 +774,8 @@ checklist root generated for the same run.
 It also must bind the current `public_launch_package_file_set_root`,
 the aggregate `public_launch_package_handoff_root`, the pre-capture
 `public_launch_package_manifest_root`, the pre-capture
-`public_launch_readiness_artifact_root`, the package-derived
+`public_launch_readiness_artifact_root`, the package schema/version/chain/run
+identity, the package-derived
 `release_approval_template_root`, the package-derived
 `release_authority_registry_template_root`,
 `deployment_preflight_receipt`,

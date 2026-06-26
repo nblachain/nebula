@@ -3463,8 +3463,9 @@ real XMR.
   handoff and the roots carried in the capture, requires the embedded
   `public_launch_package_manifest_root` and
   `public_launch_readiness_artifact_root` to match the pre-capture launch
-  package handoff, requires the embedded `release_approval_template_root`
-  and `release_authority_registry_template_root` to match the release
+  package handoff, requires the embedded package schema/version/chain/run
+  identity to match the current package, requires the embedded
+  `release_approval_template_root` and `release_authority_registry_template_root` to match the release
   handoff templates in the verified package, seals the embedded public
   bootstrap profile root, profile report root, and rate-limit policy root
   against the current bootstrap profile in the report root, seals the bootstrap
@@ -3512,8 +3513,8 @@ real XMR.
 - Filled public deployment attestations bind the launch bundle to publicly
   routable HTTPS endpoints, the exact capture plan root, capture contract root,
   public deployment evidence-template root, deployment preflight checklist
-  root, package file-set root, release approval template root,
-  release-authority registry template root, completed
+  root, package file-set root, package schema/version/chain/run identity,
+  release approval template root, release-authority registry template root, completed
   preflight receipt root and phase-set root, completed runbook receipt root and
   step-receipt-set root, typed TLS endpoint-pin records for public RPC,
   status-page, health, metrics, incident-contact, faucet, and reset-runbook surfaces, typed bootstrap node
