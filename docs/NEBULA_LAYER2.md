@@ -3323,10 +3323,11 @@ real XMR.
   readiness root subchecks, and a report artifact
   root. It is marked unusable as public deployment evidence or mainnet custody
   approval. The paired `--verify-public-launch-readiness-report` command
-  recomputes the report and artifact root against the current run, rejecting
-  stale package-root, status, bundle, capture-plan, capture-contract,
-  evidence-template, preflight, or deployment-evidence bindings before
-  deployment CI consumes the report root.
+  recomputes the nested check, remediation, canonical command-map, command-sequence,
+  report, and artifact roots against the current run, rejecting stale
+  package-root, status, bundle, capture-plan, capture-contract, evidence-template,
+  preflight, or deployment-evidence bindings before deployment CI consumes the
+  report root.
 - Public launch automation consumes a redacted
   `nebula-public-testnet-launch-bundle` that binds the status manifest,
   bootstrap profile, proxy policy, typed bootstrap-node commitment manifest,

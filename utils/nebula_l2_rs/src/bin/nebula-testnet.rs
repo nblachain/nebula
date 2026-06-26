@@ -19421,6 +19421,7 @@ fn ensure_public_launch_readiness_report_artifact_safe(value: &Value) -> Result<
             == readiness.get("level").and_then(Value::as_str),
         "public launch readiness level mismatch",
     )?;
+    ensure_public_launch_readiness_roots_match_report(value, readiness)?;
     let mut rootless = value.clone();
     let Some(map) = rootless.as_object_mut() else {
         return Err("public launch readiness report must be an object".to_string());
@@ -19433,6 +19434,200 @@ fn ensure_public_launch_readiness_report_artifact_safe(value: &Value) -> Result<
             .and_then(Value::as_str)
             == Some(expected_root.as_str()),
         "public launch readiness report artifact root mismatch",
+    )
+}
+
+fn required_nested_str<'a>(value: &'a Value, key: &str, label: &str) -> Result<&'a str, String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{label} missing {key}"))
+}
+
+fn required_nested_bool(value: &Value, key: &str, label: &str) -> Result<bool, String> {
+    value
+        .get(key)
+        .and_then(Value::as_bool)
+        .ok_or_else(|| format!("{label} missing {key}"))
+}
+
+fn required_nested_string_list(
+    value: &Value,
+    key: &str,
+    label: &str,
+) -> Result<Vec<String>, String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("{label} missing {key}"))?
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| format!("{label} {key} must contain only strings"))
+        })
+        .collect()
+}
+
+fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<String, String> {
+    let label = "public launch remediation";
+    let blocker_id = required_nested_str(remediation, "blocker_id", label)?;
+    let next_steps = remediation
+        .get("next_steps")
+        .ok_or_else(|| "public launch remediation missing next_steps".to_string())?;
+    let expected_next_steps_root = public_deployment_capture_next_steps_root(next_steps);
+    ensure(
+        remediation.get("next_steps_root").and_then(Value::as_str)
+            == Some(expected_next_steps_root.as_str()),
+        "public launch remediation next steps root mismatch",
+    )?;
+    let commands = remediation
+        .get("commands")
+        .ok_or_else(|| "public launch remediation missing commands".to_string())?;
+    let expected_commands_root = public_deployment_capture_commands_root(commands);
+    ensure(
+        remediation.get("commands_root").and_then(Value::as_str)
+            == Some(expected_commands_root.as_str()),
+        "public launch remediation commands root mismatch",
+    )?;
+    let command_sequence = remediation
+        .get("command_sequence")
+        .ok_or_else(|| "public launch remediation missing command_sequence".to_string())?;
+    let expected_command_sequence_root =
+        public_deployment_capture_command_sequence_root(command_sequence);
+    ensure(
+        remediation
+            .get("command_sequence_root")
+            .and_then(Value::as_str)
+            == Some(expected_command_sequence_root.as_str()),
+        "public launch remediation command sequence root mismatch",
+    )?;
+    if blocker_id == "public-launch-deployment-attestation" {
+        ensure(
+            commands == &public_deployment_capture_commands(),
+            "public launch deployment-attestation remediation command map mismatch",
+        )?;
+        ensure(
+            command_sequence == &public_deployment_capture_command_sequence(),
+            "public launch deployment-attestation remediation command sequence mismatch",
+        )?;
+    }
+    let failed_subchecks = required_nested_string_list(remediation, "failed_subchecks", label)?;
+    let failed_subcheck_root =
+        collection_root("public-launch-remediation-failed-subchecks", failed_subchecks);
+    let repair_roots = remediation
+        .get("repair_roots")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "public launch remediation missing repair_roots".to_string())?
+        .iter()
+        .map(|(subcheck, expected_root)| {
+            let expected_root = expected_root
+                .as_str()
+                .ok_or_else(|| "public launch remediation repair root must be a string".to_string())?;
+            Ok(root(&[
+                "public-launch-remediation-repair-root",
+                subcheck,
+                expected_root,
+            ]))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let repair_root = collection_root("public-launch-remediation-repair-roots", repair_roots);
+    let deferred_repair_root_subchecks =
+        required_nested_string_list(remediation, "deferred_repair_root_subchecks", label)?;
+    let deferred_repair_root = collection_root(
+        "public-launch-remediation-deferred-repair-roots",
+        deferred_repair_root_subchecks,
+    );
+    Ok(root(&[
+        "public-launch-remediation",
+        CHAIN_ID,
+        blocker_id,
+        required_nested_str(remediation, "expected_artifact", label)?,
+        required_nested_str(remediation, "expected_artifact_id", label)?,
+        required_nested_str(remediation, "expected_artifact_path", label)?,
+        required_nested_str(remediation, "command", label)?,
+        required_nested_str(remediation, "remediation_kind", label)?,
+        required_nested_str(remediation, "expected_evidence_root", label)?,
+        &failed_subcheck_root,
+        &repair_root,
+        &deferred_repair_root,
+        required_nested_str(remediation, "next_steps_root", label)?,
+        required_nested_str(remediation, "commands_root", label)?,
+        required_nested_str(remediation, "command_sequence_root", label)?,
+        required_nested_str(remediation, "privacy_classification", label)?,
+        bool_str(required_nested_bool(remediation, "operator_private", label)?),
+        bool_str(required_nested_bool(
+            remediation,
+            "external_capture_required",
+            label,
+        )?),
+    ]))
+}
+
+fn ensure_public_launch_readiness_roots_match_report(
+    report: &Value,
+    readiness: &Value,
+) -> Result<(), String> {
+    let checks = readiness
+        .get("checks")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "public launch readiness missing checks".to_string())?;
+    let check_roots = checks
+        .iter()
+        .map(|check| {
+            Ok(root(&[
+                "public-launch-readiness-check",
+                required_nested_str(check, "id", "public launch readiness check")?,
+                required_nested_str(check, "status", "public launch readiness check")?,
+                required_nested_str(check, "evidence_root", "public launch readiness check")?,
+            ]))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let expected_check_root = collection_root("public-launch-readiness-checks", check_roots);
+    ensure(
+        readiness.get("check_root").and_then(Value::as_str) == Some(expected_check_root.as_str()),
+        "public launch readiness nested check root mismatch",
+    )?;
+
+    let remediations = readiness
+        .get("remediations")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "public launch readiness missing remediations".to_string())?;
+    let remediation_roots = remediations
+        .iter()
+        .map(|remediation| {
+            let expected_root = public_launch_remediation_root_from_value(remediation)?;
+            ensure(
+                remediation.get("remediation_root").and_then(Value::as_str)
+                    == Some(expected_root.as_str()),
+                "public launch remediation root mismatch",
+            )?;
+            Ok(expected_root)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let expected_remediation_root =
+        collection_root("public-launch-remediations", remediation_roots);
+    ensure(
+        readiness.get("remediation_root").and_then(Value::as_str)
+            == Some(expected_remediation_root.as_str()),
+        "public launch readiness nested remediation root mismatch",
+    )?;
+
+    let public_launch_ready = readiness
+        .get("public_launch_ready")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "public launch readiness missing public_launch_ready".to_string())?;
+    let expected_report_root = root(&[
+        "public-launch-readiness-report",
+        CHAIN_ID,
+        required_nested_str(report, "manifest_id", "public launch readiness report")?,
+        &expected_check_root,
+        &expected_remediation_root,
+        bool_str(public_launch_ready),
+    ]);
+    ensure(
+        readiness.get("report_root").and_then(Value::as_str) == Some(expected_report_root.as_str()),
+        "public launch readiness nested report root mismatch",
     )
 }
 
@@ -32797,6 +32992,24 @@ mod tests {
         ));
         ensure_public_launch_readiness_report_artifact_safe(&value)
             .expect("safe public launch readiness report");
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_tampered_remediation_command_map() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["commands"]["verify_public_launch"] =
+            json!("cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --json");
+        let commands = value["public_launch_readiness"]["remediations"][0]["commands"].clone();
+        value["public_launch_readiness"]["remediations"][0]["commands_root"] =
+            json!(public_deployment_capture_commands_root(&commands));
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("tampered remediation command map should fail safety checks");
+        assert!(error.contains("command map mismatch"));
     }
 
     #[test]
