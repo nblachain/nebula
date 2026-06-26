@@ -863,7 +863,8 @@ includes `public_launch_readiness` with check roots, blocker ids, machine-action
 `public-launch-blocked` level. Each remediation names the stable expected
 artifact id/path, expected artifact, remediation kind, relevant command,
 expected evidence root, granular failed subchecks, root-specific `repair_roots`
-for failed capture/preflight/package/runbook receipt/status/bootstrap topology and policy bindings, privacy
+for failed capture/preflight/package file-set/runbook receipt/status/bootstrap topology and policy bindings, deferred
+self-referential package handoff/manifest/readiness root subchecks, privacy
 classification, and whether external deployment capture is required.
 Deployment-attestation remediations
 also list failed subchecks, including capture-plan, launch-bundle, package
@@ -876,7 +877,8 @@ mempool accountability, bridge release safety, privacy-denial, and custody
 bindings. When deployment evidence is still absent, the remediation still seeds
 the current capture-plan, package file-set, status, runbook, and bootstrap
 topology roots so deployment CI can begin external capture from deterministic expected
-bindings; the redacted public status manifest does not include that local
+bindings; package handoff/manifest/readiness roots are listed as deferred
+self-referential subchecks until the readiness report root is finalized. The redacted public status manifest does not include that local
 operator report.
 
 `--fail-on-readiness-gaps` also requires `--mainnet-readiness` and turns the

@@ -3313,8 +3313,9 @@ real XMR.
   capture-contract root, evidence-template root, preflight-checklist root,
   package file-set root, deployment evidence root if present,
   deployment-attestation failed subchecks such as package file-set, package
-  manifest, and readiness artifact binding mismatches, expected package file-set,
-  package manifest, and readiness artifact repair roots, and a report artifact
+  handoff, package manifest, and readiness artifact binding mismatches, expected package
+  file-set repair root, deferred self-referential package handoff/manifest/
+  readiness root subchecks, and a report artifact
   root. It is marked unusable as public deployment evidence or mainnet custody
   approval. The paired `--verify-public-launch-readiness-report` command
   recomputes the report and artifact root against the current run, rejecting
@@ -3579,8 +3580,9 @@ real XMR.
   machine-actionable remediation entries, and a remediation root. Each
   remediation names the stable expected artifact id/path, expected artifact,
   remediation kind, relevant command, expected evidence root, granular failed
-  subchecks, root-specific `repair_roots` for failed capture/preflight/package/
+  subchecks, root-specific `repair_roots` for failed capture/preflight/package file-set/
   runbook receipt/status/bootstrap topology and policy bindings, and capture roots, bootstrap profile/report/rate-limit roots,
+  deferred self-referential package handoff/manifest/readiness root subchecks,
   bootstrap topology/count/registry/probe bindings, aggregate probe repair roots/counts,
   endpoint publicness, TLS pin repair roots/counts,
   proxy/firewall/rate-limit policy repair roots, status-manifest root/payload

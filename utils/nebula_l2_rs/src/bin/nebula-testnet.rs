@@ -1517,6 +1517,7 @@ struct PublicLaunchRemediation {
     expected_evidence_root: String,
     failed_subchecks: Vec<String>,
     repair_roots: BTreeMap<String, String>,
+    deferred_repair_root_subchecks: Vec<String>,
     privacy_classification: String,
     operator_private: bool,
     external_capture_required: bool,
@@ -7920,6 +7921,12 @@ fn public_launch_remediation_for_check(
             })
             .collect::<Vec<_>>(),
     );
+    let deferred_repair_root_subchecks =
+        public_launch_deferred_repair_root_subchecks(summary, check, &failed_subchecks);
+    let deferred_repair_root = collection_root(
+        "public-launch-remediation-deferred-repair-roots",
+        deferred_repair_root_subchecks.clone(),
+    );
     let remediation_root = root(&[
         "public-launch-remediation",
         CHAIN_ID,
@@ -7932,6 +7939,7 @@ fn public_launch_remediation_for_check(
         &check.evidence_root,
         &failed_subcheck_root,
         &repair_root,
+        &deferred_repair_root,
         privacy_classification,
         bool_str(operator_private),
         bool_str(external_capture_required),
@@ -7946,11 +7954,37 @@ fn public_launch_remediation_for_check(
         expected_evidence_root: check.evidence_root.clone(),
         failed_subchecks,
         repair_roots,
+        deferred_repair_root_subchecks,
         privacy_classification: privacy_classification.to_string(),
         operator_private,
         external_capture_required,
         remediation_root,
     }
+}
+
+fn public_launch_deferred_repair_root_subchecks(
+    summary: &TestnetSummary,
+    check: &ReadinessCheck,
+    failed_subchecks: &[String],
+) -> Vec<String> {
+    if check.id != "public-launch-deployment-attestation"
+        || summary.public_deployment.evidence_root.is_some()
+    {
+        return Vec::new();
+    }
+    let failed = failed_subchecks
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    [
+        "public_launch_package_handoff_root_bound",
+        "public_launch_package_manifest_root_bound",
+        "public_launch_readiness_artifact_root_bound",
+    ]
+    .iter()
+    .filter(|subcheck| failed.contains(**subcheck))
+    .map(|subcheck| (*subcheck).to_string())
+    .collect()
 }
 
 fn public_deployment_missing_evidence_repair_roots(
@@ -7965,6 +7999,8 @@ fn public_deployment_missing_evidence_repair_roots(
     let public_bundle = public_launch_bundle(summary);
     let capture_plan = public_deployment_capture_plan(summary);
     let deployment_runbook = public_deployment_runbook(summary);
+    let public_launch_package_file_set_root =
+        public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
     let mut candidates = BTreeMap::new();
     candidates.insert(
         "public_launch_bundle_root_bound",
@@ -7975,7 +8011,7 @@ fn public_deployment_missing_evidence_repair_roots(
     );
     candidates.insert(
         "public_launch_package_file_set_root_bound",
-        public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id),
+        public_launch_package_file_set_root,
     );
     candidates.insert(
         "public_bootstrap_profile_root_bound",
@@ -41199,10 +41235,21 @@ mod tests {
         );
         assert!(!remediation
             .repair_roots
+            .contains_key("public_launch_package_handoff_root_bound"));
+        assert!(!remediation
+            .repair_roots
             .contains_key("public_launch_package_manifest_root_bound"));
         assert!(!remediation
             .repair_roots
             .contains_key("public_launch_readiness_artifact_root_bound"));
+        assert_eq!(
+            remediation.deferred_repair_root_subchecks,
+            vec![
+                "public_launch_package_handoff_root_bound".to_string(),
+                "public_launch_package_manifest_root_bound".to_string(),
+                "public_launch_readiness_artifact_root_bound".to_string()
+            ]
+        );
         assert_eq!(
             remediation
                 .repair_roots
