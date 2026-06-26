@@ -11821,6 +11821,7 @@ fn public_testnet_certification_artifact(
         launch_report == &expected_launch_report,
         "public testnet certification launch report does not match this run",
     )?;
+    ensure_public_testnet_certification_package_manifest_current(package_manifest, summary)?;
     let package_file_set_root = required_root(package_manifest, "package_file_set_root")?;
     let package_manifest_root = required_root(package_manifest, "package_manifest_root")?;
     let package_release_approval_template_root =
@@ -11980,6 +11981,236 @@ fn public_testnet_certification_artifact(
     let certification_root = value_root("public-testnet-certification", &certification);
     certification["certification_root"] = json!(certification_root);
     Ok(certification)
+}
+
+fn ensure_public_testnet_certification_package_manifest_current(
+    package_manifest: &Value,
+    summary: &TestnetSummary,
+) -> Result<(), String> {
+    ensure(
+        required_str(package_manifest, "kind")? == "nebula-public-launch-package",
+        "public testnet certification package manifest has the wrong kind",
+    )?;
+    ensure(
+        required_u64(package_manifest, "schema_version")? == 1,
+        "public testnet certification package schema_version mismatch",
+    )?;
+    ensure(
+        required_str(package_manifest, "chain_id")? == CHAIN_ID,
+        "public testnet certification package chain_id mismatch",
+    )?;
+    ensure(
+        required_str(package_manifest, "version")? == VERSION,
+        "public testnet certification package version mismatch",
+    )?;
+    ensure(
+        required_str(package_manifest, "manifest_id")? == summary.manifest_id,
+        "public testnet certification package manifest_id does not match this run",
+    )?;
+    ensure(
+        required_str(package_manifest, "testnet_id")? == summary.testnet_id,
+        "public testnet certification package testnet_id does not match this run",
+    )?;
+    ensure(
+        required_bool(package_manifest, "public_alpha_only")?,
+        "public testnet certification package must stay public-alpha only",
+    )?;
+    ensure(
+        required_bool(package_manifest, "package_only")?,
+        "public testnet certification package must be marked package_only",
+    )?;
+    ensure(
+        required_bool(package_manifest, "operator_fill_required")?,
+        "public testnet certification package must require operator-filled deployment evidence",
+    )?;
+    ensure(
+        !required_bool(package_manifest, "usable_as_public_deployment_evidence")?,
+        "public testnet certification package must not claim deployment evidence status",
+    )?;
+    ensure(
+        !required_bool(package_manifest, "usable_as_mainnet_custody_approval")?,
+        "public testnet certification package must not claim mainnet custody approval",
+    )?;
+    ensure(
+        required_str(package_manifest, "custody_mode")? == "no-mainnet-custody",
+        "public testnet certification package custody_mode mismatch",
+    )?;
+    ensure_public_deployment_capture_command_sequence(
+        package_manifest,
+        "public testnet certification package",
+        true,
+    )?;
+    ensure_public_deployment_capture_next_steps(
+        package_manifest,
+        "public testnet certification package",
+        public_launch_package_next_steps(),
+    )?;
+    ensure(
+        required_str(package_manifest, "public_launch_level")?
+            == summary.public_launch_readiness.level,
+        "public testnet certification package launch level mismatch",
+    )?;
+    ensure(
+        required_bool(package_manifest, "public_launch_ready")?
+            == summary.public_launch_readiness.public_launch_ready,
+        "public testnet certification package launch readiness mismatch",
+    )?;
+    ensure(
+        required_u64(package_manifest, "blocking_gap_count")?
+            == summary.public_launch_readiness.blocking_gaps.len() as u64,
+        "public testnet certification package blocking gap count mismatch",
+    )?;
+    ensure(
+        required_u64(package_manifest, "remediation_count")?
+            == summary.public_launch_readiness.remediations.len() as u64,
+        "public testnet certification package remediation count mismatch",
+    )?;
+    ensure(
+        required_root(package_manifest, "public_launch_readiness_report_root")?
+            == summary.public_launch_readiness.report_root,
+        "public testnet certification package readiness report root mismatch",
+    )?;
+    let expected_readiness_report = public_launch_readiness_report_artifact(summary);
+    let expected_readiness_artifact_root = required_root(
+        &expected_readiness_report,
+        "public_launch_readiness_artifact_root",
+    )?;
+    ensure(
+        required_root(package_manifest, "public_launch_readiness_artifact_root")?
+            == expected_readiness_artifact_root,
+        "public testnet certification package readiness artifact root mismatch",
+    )?;
+    let records = package_manifest
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "public testnet certification package missing artifacts".to_string())?;
+    ensure(
+        records.len() == PUBLIC_LAUNCH_PACKAGE_ARTIFACTS.len(),
+        "public testnet certification package artifact count mismatch",
+    )?;
+    ensure(
+        required_u64(package_manifest, "artifact_count")?
+            == PUBLIC_LAUNCH_PACKAGE_ARTIFACTS.len() as u64,
+        "public testnet certification package artifact_count mismatch",
+    )?;
+    let mut record_roots = Vec::new();
+    for (index, (artifact_id, file_name, root_field)) in
+        PUBLIC_LAUNCH_PACKAGE_ARTIFACTS.iter().enumerate()
+    {
+        let record = records.get(index).ok_or_else(|| {
+            "public testnet certification package missing artifact record".to_string()
+        })?;
+        ensure(
+            record.get("order").and_then(Value::as_u64) == Some((index + 1) as u64),
+            "public testnet certification package artifact order mismatch",
+        )?;
+        ensure(
+            record.get("artifact_id").and_then(Value::as_str) == Some(*artifact_id),
+            "public testnet certification package artifact id mismatch",
+        )?;
+        ensure(
+            record.get("file_name").and_then(Value::as_str) == Some(*file_name),
+            "public testnet certification package artifact filename mismatch",
+        )?;
+        ensure(
+            record.get("root_field").and_then(Value::as_str) == Some(*root_field),
+            "public testnet certification package artifact root_field mismatch",
+        )?;
+        ensure(
+            record
+                .get("required_before_public_capture")
+                .and_then(Value::as_bool)
+                == Some(public_launch_package_required_before_capture(artifact_id)),
+            "public testnet certification package artifact capture requirement mismatch",
+        )?;
+        ensure(
+            record
+                .get("operator_fill_required")
+                .and_then(Value::as_bool)
+                == Some(public_launch_package_operator_fill_required(artifact_id)),
+            "public testnet certification package artifact operator-fill requirement mismatch",
+        )?;
+        ensure(
+            record
+                .get("usable_as_public_deployment_evidence")
+                .and_then(Value::as_bool)
+                == Some(false),
+            "public testnet certification package artifact must not claim deployment evidence status",
+        )?;
+        ensure(
+            record
+                .get("usable_as_mainnet_custody_approval")
+                .and_then(Value::as_bool)
+                == Some(false),
+            "public testnet certification package artifact must not claim custody approval status",
+        )?;
+        let expected_artifact = public_launch_package_artifact_value(artifact_id, summary)?;
+        let expected_root = expected_artifact
+            .get(*root_field)
+            .and_then(Value::as_str)
+            .filter(|candidate| is_hex_root(candidate))
+            .map(str::to_string)
+            .unwrap_or_else(|| public_launch_package_value_root(artifact_id, &expected_artifact));
+        ensure(
+            record.get("root").and_then(Value::as_str) == Some(expected_root.as_str()),
+            "public testnet certification package artifact root mismatch",
+        )?;
+        let expected_record_root = public_launch_package_artifact_record_root(
+            &summary.manifest_id,
+            artifact_id,
+            file_name,
+            root_field,
+            &expected_root,
+            index + 1,
+            public_launch_package_required_before_capture(artifact_id),
+            public_launch_package_operator_fill_required(artifact_id),
+        );
+        ensure(
+            record.get("artifact_record_root").and_then(Value::as_str)
+                == Some(expected_record_root.as_str()),
+            "public testnet certification package artifact record root mismatch",
+        )?;
+        record_roots.push(expected_record_root);
+    }
+    let expected_artifact_set_root =
+        collection_root("public-launch-package-artifacts", record_roots);
+    ensure(
+        required_root(package_manifest, "artifact_set_root")? == expected_artifact_set_root,
+        "public testnet certification package artifact_set_root mismatch",
+    )?;
+    let expected_package_file_set_root =
+        public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
+    ensure(
+        required_root(package_manifest, "package_file_set_root")? == expected_package_file_set_root,
+        "public testnet certification package file_set_root mismatch",
+    )?;
+    let expected_commands = public_deployment_capture_commands();
+    let expected_commands_root = public_deployment_capture_commands_root(&expected_commands);
+    let expected_next_steps = public_launch_package_next_steps();
+    let expected_next_steps_root = public_deployment_capture_next_steps_root(&expected_next_steps);
+    let expected_command_sequence = public_deployment_capture_command_sequence();
+    let expected_command_sequence_root =
+        public_deployment_capture_command_sequence_root(&expected_command_sequence);
+    let expected_package_manifest_root = public_launch_package_manifest_root(
+        &summary.manifest_id,
+        &summary.testnet_id,
+        &expected_artifact_set_root,
+        &expected_package_file_set_root,
+        &summary.public_launch_readiness.level,
+        summary.public_launch_readiness.public_launch_ready,
+        summary.public_launch_readiness.blocking_gaps.len() as u64,
+        summary.public_launch_readiness.remediations.len() as u64,
+        &summary.public_launch_readiness.report_root,
+        &expected_readiness_artifact_root,
+        summary.acceptance.no_mainnet_custody,
+        &expected_commands_root,
+        &expected_next_steps_root,
+        &expected_command_sequence_root,
+    );
+    ensure(
+        required_root(package_manifest, "package_manifest_root")? == expected_package_manifest_root,
+        "public testnet certification package manifest root mismatch",
+    )
 }
 
 fn public_launch_package_artifact_root(
@@ -36187,6 +36418,78 @@ mod tests {
         assert!(
             error.contains("public testnet certification launch report does not match this run")
         );
+        let _ = fs::remove_dir_all(package_dir);
+    }
+
+    #[test]
+    fn public_testnet_certification_artifact_rejects_stale_package_manifest() {
+        let counter = TEST_FILE_COUNTER.fetch_add(1, AtomicOrdering::SeqCst);
+        let package_dir = env::temp_dir().join(format!(
+            "nebula-cert-stale-package-manifest-{}",
+            root(&["test-cert-stale-package-manifest", &counter.to_string()])
+        ));
+        let package_dir_string = package_dir.to_string_lossy().into_owned();
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness cli should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        write_public_launch_package(&package_dir_string, &summary)
+            .expect("write public launch package");
+        let mut package_manifest: Value = serde_json::from_slice(
+            &fs::read(package_dir.join("nebula-public-launch-package.json"))
+                .expect("read package manifest"),
+        )
+        .expect("package manifest json");
+        let launch_report = public_launch_readiness_report_artifact(&summary);
+
+        package_manifest["public_launch_ready"] =
+            json!(!summary.public_launch_readiness.public_launch_ready);
+        package_manifest["package_manifest_root"] = json!(public_launch_package_manifest_root(
+            package_manifest["manifest_id"]
+                .as_str()
+                .expect("manifest id"),
+            package_manifest["testnet_id"].as_str().expect("testnet id"),
+            package_manifest["artifact_set_root"]
+                .as_str()
+                .expect("artifact set root"),
+            package_manifest["package_file_set_root"]
+                .as_str()
+                .expect("package file-set root"),
+            package_manifest["public_launch_level"]
+                .as_str()
+                .expect("launch level"),
+            package_manifest["public_launch_ready"]
+                .as_bool()
+                .expect("launch ready"),
+            package_manifest["blocking_gap_count"]
+                .as_u64()
+                .expect("blocking gap count"),
+            package_manifest["remediation_count"]
+                .as_u64()
+                .expect("remediation count"),
+            package_manifest["public_launch_readiness_report_root"]
+                .as_str()
+                .expect("readiness report root"),
+            package_manifest["public_launch_readiness_artifact_root"]
+                .as_str()
+                .expect("readiness artifact root"),
+            true,
+            package_manifest["commands_root"]
+                .as_str()
+                .expect("commands root"),
+            package_manifest["next_steps_root"]
+                .as_str()
+                .expect("next steps root"),
+            package_manifest["command_sequence_root"]
+                .as_str()
+                .expect("command sequence root"),
+        ));
+
+        let error =
+            public_testnet_certification_artifact(&summary, &package_manifest, &launch_report)
+                .expect_err("stale package manifest should not mint certification");
+        assert!(error.contains("public testnet certification package launch readiness mismatch"));
         let _ = fs::remove_dir_all(package_dir);
     }
 

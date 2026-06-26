@@ -3233,8 +3233,8 @@ real XMR.
   rollback/reset communications, and no-mainnet-custody confirmation. The
   launch bundle and capture plan both freeze the runbook root and step-set
   root, while standalone bootstrap, status, runbook, and launch-bundle
-  verification recompute the public payloads, so deployment CI can detect stale
-  or mismatched operator handoffs.
+  verification recompute the public payloads and check current-run source
+  bindings, so deployment CI can detect stale or mismatched operator handoffs.
 - A public launch artifact manifest export gives operators a rooted
   `nebula-public-launch-artifact-manifest` before public probe capture starts.
   It freezes the pre-capture handoff set: redacted public status manifest,
@@ -3245,7 +3245,10 @@ real XMR.
   non-evidence/non-custody flags, and record root, plus a collection
   `artifact_set_root`, without embedding operator-private evidence. The
   manifest guard recomputes those record, set, and manifest roots before export,
-  standalone manifest verification, or package verification. The evidence
+  standalone manifest verification, or package verification. Standalone
+  verification checks the current run's status, bootstrap, runbook,
+  launch-bundle, release-template, readiness, and artifact-set roots before the
+  full manifest comparison. The evidence
   worksheet and capture plan bind
   `public_launch_artifact_manifest_root` and
   `public_launch_artifact_set_root` so CI can detect swapped or stale launch
@@ -3261,15 +3264,17 @@ real XMR.
   filename, root field, artifact
   root, record root, required-before-capture flag, operator-fill flag,
   non-evidence/non-custody flags, package `artifact_set_root`, package
-  `package_file_set_root`, release-candidate manifest id, launch level,
-  ready/blocker counts, readiness report/artifact roots, no-mainnet-custody
-  boundary, rooted `next_steps`, and rooted capture command sequence so
+  `package_file_set_root`, schema/version identity, release-candidate manifest id,
+  launch level, ready/blocker counts, readiness report/artifact roots,
+  no-mainnet-custody boundary, rooted command map, rooted `next_steps` that include package-bound
+  capture scaffold creation, and rooted capture command sequence so
   deployment automation can reject stale, swapped, cross-run, extra, or
   metadata-tampered handoff files before public endpoint evidence is assembled.
   When combined with the export step in the same runner invocation,
-  `--verify-public-launch-package` recomputes each package artifact and the
-  package manifest root against the current release-candidate summary, enforces
-  the exact top-level package file set and package-level readiness summary, and
+  `--verify-public-launch-package` pins the package schema/version identity,
+  recomputes each package artifact and the package manifest root against the
+  current release-candidate summary, checks nested artifact current-run
+  bindings before full artifact comparison, enforces the exact top-level package file set and package-level readiness summary, and
   fails on stale, tampered, swapped, cross-run, shape-tampered, or extra-file
   package directories before public evidence capture begins.
 - A public testnet certification export writes and verifies the rooted launch
@@ -3284,17 +3289,21 @@ real XMR.
   and capture-todo roots, the capture-contract root, binding booleans for those
   capture handoff artifacts, the deferred repair-root subcheck list/count/root
   and its capture-todo root binding, blocking gaps, rooted remediation commands
-  for capture audit, audit verification, strict capture verification, assembly,
-  and launch verification, a rooted command sequence for that order, and whether
+  for capture scaffold creation, capture audit, audit verification, strict
+  capture verification, assembly, and launch verification, a rooted command
+  map plus rooted command sequence for that full scaffold-to-launch order, and whether
   external capture is still required in
   `nebula-public-testnet-certification.json`. It is deliberately
   operator-local and remains blocked until the filled schema v5 deployment
   attestation passes.
   The paired `--verify-public-testnet-certification` command verifies the nested
   package, recomputes the launch report, certification file-set root, and
-  certification root, verifies both release handoff templates, enforces the
-  exact top-level directory shape, and rejects stale, tampered, cross-run,
-  extra-file, or swapped package/report/template/cert roots.
+  certification root, verifies both release handoff templates, pins the rooted
+  next steps, command map, and command sequence, checks the current launch
+  status, package/report/template, package handoff, capture-plan,
+  capture-contract, capture-todo, repair-root, and command roots individually,
+  enforces the exact top-level directory shape, and rejects stale, tampered,
+  cross-run, extra-file, or swapped package/report/template/cert roots.
 - The package-level public capture todo export gives CI a rooted
   `nebula-public-capture-todo` artifact that repeats the exact remaining
   external-capture work without scraping prose: capture-plan, capture-contract,
@@ -3302,14 +3311,19 @@ real XMR.
   endpoint, TLS, probe, observer, operator-registry, runbook-step, freshness,
   no-mainnet-custody inputs, plus a top-level deferred repair-root subcheck
   list/count/root for self-referential package handoff, package manifest, and
-  readiness artifact roots. It is required before public capture,
+  readiness artifact roots, and canonical rooted `next_steps`, command map, and
+  command sequence. It is required before public capture,
   operator-fill-required, and explicitly not deployment evidence or custody
   approval; it avoids embedding the package manifest root to keep package roots
   acyclic. The same rooted todo can be written standalone with
   `--write-public-capture-todo` and verified with
   `--verify-public-capture-todo` for deployment CI that does not need the full
-  package directory. The verifier recomputes the current run's todo and rejects
-  stale, tampered, or cross-run work orders.
+  package directory. The verifier pins the schema, chain, version, public-alpha
+  identity, non-evidence boundary, rooted `next_steps`, command map, command sequence, and
+  todo root, then recomputes the current run's todo, checks the current status,
+  launch, artifact, package, readiness, capture-plan, preflight, runbook,
+  repair-root, and command roots, and rejects stale, tampered, or cross-run work
+  orders.
 - A local operator-only public launch readiness report export gives CI a
   standalone `nebula-public-launch-readiness-report` with the launch level,
   blocker ids, remediation commands, public status/bundle/capture-plan roots,
@@ -3321,10 +3335,12 @@ real XMR.
   readiness root subchecks, and a report artifact
   root. It is marked unusable as public deployment evidence or mainnet custody
   approval. The paired `--verify-public-launch-readiness-report` command
-  recomputes the report and artifact root against the current run, rejecting
-  stale package-root, status, bundle, capture-plan, capture-contract,
-  evidence-template, preflight, or deployment-evidence bindings before
-  deployment CI consumes the report root.
+  pins the schema, chain, version, and public-alpha/operator-local boundary,
+  recomputes the nested check, remediation, canonical next-step map, command-map, command-sequence,
+  report, and artifact roots against the current run, and rejects stale
+  package-root, readiness-root, status, bundle, capture-plan, capture-contract,
+  evidence-template, preflight, artifact-root, or deployment-evidence bindings
+  before deployment CI consumes the report root.
 - Public launch automation consumes a redacted
   `nebula-public-testnet-launch-bundle` that binds the status manifest,
   bootstrap profile, proxy policy, typed bootstrap-node commitment manifest,
@@ -3336,7 +3352,10 @@ real XMR.
   per committed operator before deployment evidence can clear the public launch
   gate. The bundle is explicitly unusable as public deployment evidence or
   mainnet custody approval, and its guard recomputes the bundle root before
-  export or package verification.
+  export, standalone verification, or package verification. Standalone
+  verification checks the current run's status, bootstrap, runbook, readiness,
+  operations, reserve, privacy, wallet-recovery, watchtower, and bundle roots
+  before the full bundle comparison.
 - Public deployment evidence templates give deployment automation a schema v5
   worksheet with the canonical public status manifest, launch bundle root,
   launch artifact manifest roots, package file-set root, placeholder package
@@ -3353,9 +3372,10 @@ real XMR.
   derivation rules. Templates remain rejected until every placeholder is
   replaced by captured deployment evidence. The paired
   `--verify-public-deployment-evidence-template` command recomputes the
-  template root and rejects stale status, launch-bundle, launch-artifact,
-  package-file-set, package-handoff, release-template, runbook, bootstrap, or
-  local probe roots before operators fill public endpoint evidence.
+  template root, checks the current status, launch-bundle, launch-artifact,
+  package-file-set, release-template, runbook, bootstrap, policy-claim, local
+  probe, and template roots, and rejects stale bindings before operators fill
+  public endpoint evidence.
 - A public deployment capture-plan export gives deployment CI a rooted
   `nebula-public-deployment-capture-plan` work order before capture starts. It
   is not evidence; it lists the exact required capture fields, public endpoint
@@ -3373,13 +3393,14 @@ real XMR.
   typed public deployment runbook root, and step-set root, and includes a
   `package_handoff_capture` section that tells operators to copy
   `public_launch_package_manifest_root` from `nebula-public-launch-package.json`
+  plus its package schema/version/chain/run identity fields,
   and `public_launch_readiness_artifact_root` from
   `nebula-public-launch-readiness-report.json`, plus the release-template roots
   from `nebula-release-approval-template.json` and
   `nebula-release-authority-registry-template.json`, into the deployment capture.
   The plan requires, but does not embed, `public_launch_package_handoff_root` so
-  the filled capture can later bind the package file-set, manifest, readiness,
-  and release-template roots with one aggregate checksum without creating a
+  the filled capture can later bind the package file-set, manifest, package
+  identity, readiness, and release-template roots with one aggregate checksum without creating a
   circular package manifest root. The plan names those required source files and
   capture fields while keeping the operator handoff aligned with the same status,
   bootstrap, launch, package, and evidence-template roots, with the
@@ -3390,16 +3411,19 @@ real XMR.
   ordered public deployment runbook step. This keeps the remaining
   public-launch blocker operationally precise without letting the local runner
   invent external reachability, TLS, or observer-signature evidence. The paired
-  capture-plan verifier recomputes the current work order and rejects stale,
-  tampered, or cross-run plans before public endpoint evidence is filled.
+  capture-plan verifier recomputes the current work order, checks the current
+  run's status, launch, artifact, package, evidence-template, release-template,
+  and runbook roots individually, and rejects stale, tampered, or cross-run
+  plans before public endpoint evidence is filled.
 - A package-bound capture scaffold export lets deployment CI start from a
   verified `nebula-public-launch-package` directory and write a schema v5
   capture worksheet with the current capture-plan root, capture-contract root,
   public deployment evidence-template root, deployment preflight checklist
   root, package file-set root, package handoff root, package manifest root,
-  readiness artifact root, release-template roots, and matching
-  preflight/runbook receipt bindings already filled. The release-template roots
-  are copied from the verified package's release approval and release-authority
+  package schema/version/chain/run identity, readiness artifact root,
+  release-template roots, and matching preflight/runbook receipt bindings
+  already filled. The release-template roots are copied from the verified
+  package's release approval and release-authority
   registry template files. The scaffold is still marked operator-fill-required
   and unusable as public deployment evidence; live endpoints, TLS pins, public
   probes, bootstrap/operator records, observer signatures, freshness, and the
@@ -3448,6 +3472,8 @@ real XMR.
   `deployment_preflight_checklist_root` against the current generated capture
   plan, binds those actual/expected capture roots into the report root, exposes
   individual root-binding booleans plus expected repair roots,
+  binds observer-set, attestor-registry, PQ-signature, observer-count, and
+  region-count provenance into the public launch report and remediation roots,
   seals the public RPC, P2P, status, health, metrics, incident, faucet, and
   reset-runbook endpoint strings into the report root,
   requires the embedded `public_launch_package_file_set_root` to match
@@ -3456,8 +3482,9 @@ real XMR.
   handoff and the roots carried in the capture, requires the embedded
   `public_launch_package_manifest_root` and
   `public_launch_readiness_artifact_root` to match the pre-capture launch
-  package handoff, requires the embedded `release_approval_template_root`
-  and `release_authority_registry_template_root` to match the release
+  package handoff, requires the embedded package schema/version/chain/run
+  identity to match the current package, requires the embedded
+  `release_approval_template_root` and `release_authority_registry_template_root` to match the release
   handoff templates in the verified package, seals the embedded public
   bootstrap profile root, profile report root, and rate-limit policy root
   against the current bootstrap profile in the report root, seals the bootstrap
@@ -3476,7 +3503,8 @@ real XMR.
   invalid deployment run ids, malformed preflight receipt fields or phases,
   malformed runbook receipt fields or steps, expected capture-plan,
   capture-contract, evidence-template, preflight, package-manifest,
-  readiness-artifact, release-approval-template, and
+  package schema/version/chain/run identity, readiness-artifact,
+  release-approval-template, and
   release-authority-registry-template roots, mismatched frozen launch/status
   roots,
   missing or extra TLS endpoint pin roles,
@@ -3489,13 +3517,14 @@ real XMR.
   observer quorums, insufficient observer region coverage, malformed observer
   regions, duplicate observer ids or keys, unsigned or unverified observer
   signatures/transcripts, placeholders, sensitive markers, public-forbidden
-  keys, current capture-plan and package file-set root mismatches, structural
+  keys, current capture-plan and package identity/root mismatches, structural
   readiness, machine-readable
   structural and full failed-check lists, strict verifier status, the first
-  nested verifier error, rooted next steps, and the rooted capture command
-  sequence. CI can verify the audit report itself against the capture and
-  current release-candidate summary to reject stale, tampered, cross-run, or
-  capture-mismatched diagnostics, then run
+  nested verifier error, rooted command map, rooted next steps, and the rooted
+  capture command sequence. CI can verify the audit report itself, including its
+  schema, chain, public-alpha identity, non-evidence boundary, root, next steps,
+  command map, and command sequence, against the capture and current release-candidate summary
+  to reject stale, tampered, cross-run, or capture-mismatched diagnostics, then run
   `--verify-public-deployment-capture` to dry-run the same assembler/verifier
   path and feed the resulting temporary attestation into
   `--fail-on-public-launch-gaps` before writing the final public deployment
@@ -3503,8 +3532,8 @@ real XMR.
 - Filled public deployment attestations bind the launch bundle to publicly
   routable HTTPS endpoints, the exact capture plan root, capture contract root,
   public deployment evidence-template root, deployment preflight checklist
-  root, package file-set root, release approval template root,
-  release-authority registry template root, completed
+  root, package file-set root, package schema/version/chain/run identity,
+  release approval template root, release-authority registry template root, completed
   preflight receipt root and phase-set root, completed runbook receipt root and
   step-receipt-set root, typed TLS endpoint-pin records for public RPC,
   status-page, health, metrics, incident-contact, faucet, and reset-runbook surfaces, typed bootstrap node
@@ -3585,7 +3614,10 @@ real XMR.
   remediation names the stable expected artifact id/path, expected artifact,
   remediation kind, relevant command, expected evidence root, granular failed
   subchecks, root-specific `repair_roots` for failed capture/preflight/package file-set/
-  runbook receipt/status/bootstrap topology and policy bindings, and capture roots, bootstrap profile/report/rate-limit roots,
+  runbook receipt/status/bootstrap topology and policy bindings, bootstrap
+  operator-registry/signature, node-probe, P2P endpoint-set, status-page
+  endpoint-set, live-probe leaf, evidence/provenance, and package-identity
+  repair roots, and capture roots, bootstrap profile/report/rate-limit roots,
   deferred self-referential package handoff/manifest/readiness root subchecks,
   bootstrap topology/count/registry/probe bindings, aggregate probe repair roots/counts,
   endpoint publicness, TLS pin repair roots/counts,
@@ -3597,9 +3629,9 @@ real XMR.
   required. When the deployment attestation is still absent, the remediation
   still seeds the current capture-plan, package file-set, status, runbook, and
   bootstrap topology roots so deployment CI can start capture from deterministic
-  expected bindings, and it carries rooted next steps plus the audit,
-  audit-verification, strict-verification, assembly, and final launch-gate
-  command sequence. That private operator report is intentionally absent from the public status
+  expected bindings, and it carries canonical rooted next steps, a rooted command map, plus
+  scaffold creation, audit, audit-verification, strict-verification, assembly,
+  and final launch-gate commands. That private operator report is intentionally absent from the public status
   manifest and launch bundle.
 - External review evidence must bind the release-candidate manifest id, latest
   height, and local run-profile, Wasm runtime, crypto-inventory,
