@@ -68,6 +68,8 @@ jobs:
           assert roots["launch_package"]
           assert roots["public_status_surface"]
           assert roots["public_probe_surface"]
+          assert roots["preflight_receipt"]
+          assert roots["runbook_receipt"]
           PY
 
       - name: Verify public status and probe surface
@@ -97,6 +99,36 @@ jobs:
           assert probe["endpoint_url"] == status["endpoint_url"]
           assert probe["launch_bundle_root"] == status["launch_bundle_root"]
           assert len(probe["fee_policy_root"]) == 64
+          PY
+
+      - name: Verify preflight and runbook receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          preflight="$(mktemp)"
+          runbook="$(mktemp)"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-preflight-receipt > "$preflight"
+          preflight_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-preflight-receipt "$preflight" --json)"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-runbook-receipt > "$runbook"
+          runbook_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-runbook-receipt "$runbook" --json)"
+          NEBULA_PREFLIGHT_JSON="$preflight_output" NEBULA_RUNBOOK_JSON="$runbook_output" python3 - <<'PY'
+          import json
+          import os
+
+          preflight = json.loads(os.environ["NEBULA_PREFLIGHT_JSON"])
+          runbook = json.loads(os.environ["NEBULA_RUNBOOK_JSON"])
+          assert preflight["receipt_ready"] is True
+          assert preflight["level"] == "receipt-attested"
+          assert preflight["receipt_id"] == "preflight-receipt"
+          assert len(preflight["receipt_root"]) == 64
+          assert preflight["phase_count"] >= 1
+          assert preflight["step_count"] >= 1
+          assert runbook["receipt_ready"] is True
+          assert runbook["level"] == "receipt-attested"
+          assert runbook["receipt_id"] == "runbook-receipt"
+          assert len(runbook["receipt_root"]) == 64
+          assert runbook["phase_count"] >= 1
+          assert runbook["step_count"] >= 1
           PY
 
       - name: Verify deployment attestation gate

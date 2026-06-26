@@ -21,6 +21,8 @@ fn main() {
     let wants_verify_launch_package = args.iter().any(|arg| arg == "--verify-launch-package");
     let wants_sample_public_status = args.iter().any(|arg| arg == "--sample-public-status");
     let wants_sample_public_probe = args.iter().any(|arg| arg == "--sample-public-probe");
+    let wants_sample_preflight_receipt = args.iter().any(|arg| arg == "--sample-preflight-receipt");
+    let wants_sample_runbook_receipt = args.iter().any(|arg| arg == "--sample-runbook-receipt");
 
     if wants_sample_attestation {
         println!(
@@ -38,12 +40,20 @@ fn main() {
         );
     } else if wants_sample_public_probe {
         println!("{}", nebula_testnet::sample_public_probe_json_pretty());
+    } else if wants_sample_preflight_receipt {
+        println!("{}", nebula_testnet::sample_preflight_receipt_json_pretty());
+    } else if wants_sample_runbook_receipt {
+        println!("{}", nebula_testnet::sample_runbook_receipt_json_pretty());
     } else if let Some(path) = arg_value(&args, "--verify-deployment-attestation") {
         verify_attestation(path, wants_json);
     } else if let Some(path) = arg_value(&args, "--verify-public-status") {
         verify_public_status(path, wants_json);
     } else if let Some(path) = arg_value(&args, "--verify-public-probe") {
         verify_public_probe(path, wants_json);
+    } else if let Some(path) = arg_value(&args, "--verify-preflight-receipt") {
+        verify_preflight_receipt(path, wants_json);
+    } else if let Some(path) = arg_value(&args, "--verify-runbook-receipt") {
+        verify_runbook_receipt(path, wants_json);
     } else if let Some(path) = arg_value(&args, "--verify-validator-set") {
         verify_validator_set(path, wants_json);
     } else if wants_build_genesis_manifest {
@@ -125,6 +135,50 @@ fn verify_public_probe(path: &str, wants_json: bool) {
         }
         Err(nebula_testnet::AttestationError::Invalid(errors)) => {
             print_public_probe_error(wants_json, &errors);
+            process::exit(1);
+        }
+    }
+}
+
+fn verify_preflight_receipt(path: &str, wants_json: bool) {
+    let input = match fs::read_to_string(path) {
+        Ok(input) => input,
+        Err(error) => {
+            print_receipt_error(wants_json, &[format!("failed to read {path}: {error}")]);
+            process::exit(1);
+        }
+    };
+
+    match nebula_testnet::verify_preflight_receipt_json(&input) {
+        Ok(report) => print_receipt_report(&report, wants_json),
+        Err(nebula_testnet::AttestationError::MalformedJson(error)) => {
+            print_receipt_error(wants_json, &[error]);
+            process::exit(1);
+        }
+        Err(nebula_testnet::AttestationError::Invalid(errors)) => {
+            print_receipt_error(wants_json, &errors);
+            process::exit(1);
+        }
+    }
+}
+
+fn verify_runbook_receipt(path: &str, wants_json: bool) {
+    let input = match fs::read_to_string(path) {
+        Ok(input) => input,
+        Err(error) => {
+            print_receipt_error(wants_json, &[format!("failed to read {path}: {error}")]);
+            process::exit(1);
+        }
+    };
+
+    match nebula_testnet::verify_runbook_receipt_json(&input) {
+        Ok(report) => print_receipt_report(&report, wants_json),
+        Err(nebula_testnet::AttestationError::MalformedJson(error)) => {
+            print_receipt_error(wants_json, &[error]);
+            process::exit(1);
+        }
+        Err(nebula_testnet::AttestationError::Invalid(errors)) => {
+            print_receipt_error(wants_json, &errors);
             process::exit(1);
         }
     }
@@ -409,6 +463,35 @@ fn print_public_probe_error(wants_json: bool, errors: &[String]) {
     }
 }
 
+fn print_receipt_report(report: &nebula_testnet::ReceiptReport, wants_json: bool) {
+    if wants_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(report).expect("receipt report serializes")
+        );
+    } else {
+        println!("Receipt verified at {}.", report.receipt_root);
+    }
+}
+
+fn print_receipt_error(wants_json: bool, errors: &[String]) {
+    if wants_json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "receipt_ready": false,
+                "level": "receipt-rejected",
+                "errors": errors,
+            })
+        );
+    } else {
+        eprintln!("Receipt rejected:");
+        for error in errors {
+            eprintln!("- {error}");
+        }
+    }
+}
+
 fn print_validator_set_error(wants_json: bool, errors: &[String]) {
     if wants_json {
         println!(
@@ -465,6 +548,6 @@ fn print_launch_package_error(wants_json: bool, errors: &[String]) {
 
 fn print_help() {
     println!(
-        "nebula-testnet\n\nUSAGE:\n    nebula-testnet [--mainnet-readiness] [--json]\n    nebula-testnet --sample-public-status\n    nebula-testnet --verify-public-status <path> [--json]\n    nebula-testnet --sample-public-probe\n    nebula-testnet --verify-public-probe <path> [--json]\n    nebula-testnet --sample-deployment-attestation\n    nebula-testnet --verify-deployment-attestation <path> [--json]\n    nebula-testnet --sample-validator-set\n    nebula-testnet --verify-validator-set <path> [--json]\n    nebula-testnet --sample-genesis-manifest\n    nebula-testnet --build-genesis-manifest --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-genesis-manifest <path> [--json]\n    nebula-testnet --verify-launch-package --deployment-attestation <path> --validator-set <path> --genesis-manifest <path> [--json]\n\nOPTIONS:\n    --mainnet-readiness              Emit the public launch readiness contract\n    --sample-public-status           Emit a public status manifest sample\n    --verify-public-status           Verify a public status manifest file\n    --sample-public-probe            Emit a public probe sample\n    --verify-public-probe            Verify a public probe file\n    --sample-deployment-attestation  Emit a fillable deployment attestation sample\n    --verify-deployment-attestation  Verify a deployment attestation file\n    --sample-validator-set           Emit a fillable validator-set manifest sample\n    --verify-validator-set           Verify a validator-set manifest file\n    --sample-genesis-manifest        Emit a sample genesis manifest built from samples\n    --build-genesis-manifest         Build genesis manifest from attestation and validator set\n    --deployment-attestation         Deployment attestation input for genesis build/package verification\n    --validator-set                  Validator-set input for genesis build/package verification\n    --genesis-manifest               Genesis manifest input for launch package verification\n    --verify-genesis-manifest        Verify a genesis manifest file\n    --verify-launch-package          Verify deployment, validator set, and genesis agree\n    --json                           Emit JSON output\n    -h, --help                       Show this help"
+        "nebula-testnet\n\nUSAGE:\n    nebula-testnet [--mainnet-readiness] [--json]\n    nebula-testnet --sample-public-status\n    nebula-testnet --verify-public-status <path> [--json]\n    nebula-testnet --sample-public-probe\n    nebula-testnet --verify-public-probe <path> [--json]\n    nebula-testnet --sample-preflight-receipt\n    nebula-testnet --verify-preflight-receipt <path> [--json]\n    nebula-testnet --sample-runbook-receipt\n    nebula-testnet --verify-runbook-receipt <path> [--json]\n    nebula-testnet --sample-deployment-attestation\n    nebula-testnet --verify-deployment-attestation <path> [--json]\n    nebula-testnet --sample-validator-set\n    nebula-testnet --verify-validator-set <path> [--json]\n    nebula-testnet --sample-genesis-manifest\n    nebula-testnet --build-genesis-manifest --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-genesis-manifest <path> [--json]\n    nebula-testnet --verify-launch-package --deployment-attestation <path> --validator-set <path> --genesis-manifest <path> [--json]\n\nOPTIONS:\n    --mainnet-readiness              Emit the public launch readiness contract\n    --sample-public-status           Emit a public status manifest sample\n    --verify-public-status           Verify a public status manifest file\n    --sample-public-probe            Emit a public probe sample\n    --verify-public-probe            Verify a public probe file\n    --sample-preflight-receipt       Emit a preflight receipt sample\n    --verify-preflight-receipt       Verify a preflight receipt file\n    --sample-runbook-receipt         Emit a runbook receipt sample\n    --verify-runbook-receipt         Verify a runbook receipt file\n    --sample-deployment-attestation  Emit a fillable deployment attestation sample\n    --verify-deployment-attestation  Verify a deployment attestation file\n    --sample-validator-set           Emit a fillable validator-set manifest sample\n    --verify-validator-set           Verify a validator-set manifest file\n    --sample-genesis-manifest        Emit a sample genesis manifest built from samples\n    --build-genesis-manifest         Build genesis manifest from attestation and validator set\n    --deployment-attestation         Deployment attestation input for genesis build/package verification\n    --validator-set                  Validator-set input for genesis build/package verification\n    --genesis-manifest               Genesis manifest input for launch package verification\n    --verify-genesis-manifest        Verify a genesis manifest file\n    --verify-launch-package          Verify deployment, validator set, and genesis agree\n    --json                           Emit JSON output\n    -h, --help                       Show this help"
     );
 }

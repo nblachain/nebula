@@ -391,6 +391,16 @@ pub struct PublicProbeReport {
     pub fee_policy_root: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ReceiptReport {
+    pub receipt_ready: bool,
+    pub level: &'static str,
+    pub receipt_id: String,
+    pub receipt_root: String,
+    pub phase_count: usize,
+    pub step_count: usize,
+}
+
 struct PublicSurfaceSample {
     endpoint_url: String,
     launch_bundle_root: String,
@@ -614,6 +624,20 @@ pub fn readiness_report() -> NebulaReadiness {
                 "body_fee_policy_root_required": true,
                 "unexpected_fields_rejected": true,
             })),
+            "preflight_receipt": stable_root(&json!({
+                "receipt_id": "preflight-receipt",
+                "all_phases_passed": true,
+                "all_steps_passed": true,
+                "step_evidence_roots_required": true,
+                "root_required": true,
+            })),
+            "runbook_receipt": stable_root(&json!({
+                "receipt_id": "runbook-receipt",
+                "all_phases_passed": true,
+                "all_steps_passed": true,
+                "step_evidence_roots_required": true,
+                "root_required": true,
+            })),
             "guide": stable_root(&json!({
                 "root_readme": "README.md",
                 "guide": "docs/NEBULA_LAYER2.md",
@@ -821,6 +845,24 @@ pub fn verify_public_probe_json(input: &str) -> Result<PublicProbeReport, Attest
         launch_bundle_root: probe.body.launch_bundle_root,
         fee_policy_root: probe.body.fee_policy_root,
     })
+}
+
+pub fn sample_preflight_receipt_json_pretty() -> String {
+    let receipt = sample_receipt("preflight-receipt", unix_ms());
+    serde_json::to_string_pretty(&receipt).expect("sample preflight receipt serializes")
+}
+
+pub fn sample_runbook_receipt_json_pretty() -> String {
+    let receipt = sample_receipt("runbook-receipt", unix_ms());
+    serde_json::to_string_pretty(&receipt).expect("sample runbook receipt serializes")
+}
+
+pub fn verify_preflight_receipt_json(input: &str) -> Result<ReceiptReport, AttestationError> {
+    verify_receipt_json(input, "preflight-receipt", "preflight-receipt")
+}
+
+pub fn verify_runbook_receipt_json(input: &str) -> Result<ReceiptReport, AttestationError> {
+    verify_receipt_json(input, "runbook-receipt", "runbook-receipt")
 }
 
 pub fn sample_validator_set_json_pretty() -> String {
@@ -1669,6 +1711,45 @@ fn verify_public_probe(
     );
 }
 
+fn verify_receipt_json(
+    input: &str,
+    expected_receipt_id: &str,
+    label: &str,
+) -> Result<ReceiptReport, AttestationError> {
+    let input = input.trim_start_matches('\u{feff}');
+    let receipt = serde_json::from_str::<Receipt>(input)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let mut errors = Vec::new();
+    let now = unix_ms();
+
+    require_eq(
+        &mut errors,
+        "receipt_id",
+        &receipt.receipt_id,
+        expected_receipt_id,
+    );
+    verify_receipt(&mut errors, label, &receipt, now);
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    let step_count = receipt
+        .phases
+        .iter()
+        .map(|phase| phase.steps.len())
+        .sum::<usize>();
+
+    Ok(ReceiptReport {
+        receipt_ready: true,
+        level: "receipt-attested",
+        receipt_id: receipt.receipt_id,
+        receipt_root: receipt.root,
+        phase_count: receipt.phases.len(),
+        step_count,
+    })
+}
+
 fn verify_receipt(errors: &mut Vec<String>, label: &str, receipt: &Receipt, now: u128) {
     if receipt.completed_at_unix_ms > now + 300_000 {
         errors.push(format!(
@@ -2183,6 +2264,63 @@ mod public_launch {
         value["body"]["unexpected_field"] = json!(true);
 
         let error = verify_public_probe_json(&value.to_string()).unwrap_err();
+
+        assert!(matches!(error, AttestationError::MalformedJson(_)));
+    }
+
+    #[test]
+    fn sample_preflight_receipt_verifies() {
+        let report =
+            verify_preflight_receipt_json(&sample_preflight_receipt_json_pretty()).unwrap();
+
+        assert!(report.receipt_ready);
+        assert_eq!(report.level, "receipt-attested");
+        assert_eq!(report.receipt_id, "preflight-receipt");
+        assert_eq!(report.receipt_root.len(), 64);
+        assert_eq!(report.phase_count, 1);
+        assert_eq!(report.step_count, 2);
+    }
+
+    #[test]
+    fn sample_runbook_receipt_verifies() {
+        let report = verify_runbook_receipt_json(&sample_runbook_receipt_json_pretty()).unwrap();
+
+        assert!(report.receipt_ready);
+        assert_eq!(report.level, "receipt-attested");
+        assert_eq!(report.receipt_id, "runbook-receipt");
+        assert_eq!(report.receipt_root.len(), 64);
+        assert_eq!(report.phase_count, 1);
+        assert_eq!(report.step_count, 2);
+    }
+
+    #[test]
+    fn preflight_receipt_rejects_wrong_id() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_preflight_receipt_json_pretty()).unwrap();
+        value["receipt_id"] = json!("runbook-receipt");
+        value["root"] = json!(receipt_root(
+            &serde_json::from_value::<Receipt>(value.clone()).unwrap()
+        ));
+
+        let error = verify_preflight_receipt_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "receipt_id expected preflight-receipt but got runbook-receipt"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn runbook_receipt_rejects_unexpected_fields() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_runbook_receipt_json_pretty()).unwrap();
+        value["unexpected_field"] = json!(true);
+
+        let error = verify_runbook_receipt_json(&value.to_string()).unwrap_err();
 
         assert!(matches!(error, AttestationError::MalformedJson(_)));
     }
