@@ -3333,8 +3333,9 @@ real XMR.
   handoff, package manifest, readiness artifact binding mismatches, and
   attestation identity mismatches, expected package file-set repair root,
   rooted expected-value targets for identity, package-identity, count, and boolean safety subchecks, deferred
-  self-referential package handoff/manifest/readiness root subchecks, and a report artifact
-  root. It is marked unusable as public deployment evidence or mainnet custody
+  self-referential package handoff/manifest/readiness root subchecks, remediation
+  maps constrained to failed subchecks, and a report artifact root. It is marked
+  unusable as public deployment evidence or mainnet custody
   approval. The paired `--verify-public-launch-readiness-report` command
   pins the schema, chain, version, and public-alpha/operator-local boundary,
   recomputes the nested check, remediation, canonical next-step map, command-map, command-sequence,

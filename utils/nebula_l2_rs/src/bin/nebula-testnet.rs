@@ -22107,6 +22107,7 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
         )?;
     }
     let failed_subchecks = required_nested_string_list(remediation, "failed_subchecks", label)?;
+    let failed_subcheck_names = failed_subcheck_set(&failed_subchecks);
     let failed_subcheck_root = collection_root(
         "public-launch-remediation-failed-subchecks",
         failed_subchecks.clone(),
@@ -22117,6 +22118,12 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
         .ok_or_else(|| "public launch remediation missing repair_roots".to_string())?
         .iter()
         .map(|(subcheck, expected_root)| {
+            ensure(
+                failed_subcheck_names.contains(subcheck.as_str()),
+                &format!(
+                    "public launch remediation repair root for unexpected subcheck {subcheck}"
+                ),
+            )?;
             let expected_root = expected_root.as_str().ok_or_else(|| {
                 "public launch remediation repair root must be a string".to_string()
             })?;
@@ -22134,6 +22141,12 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
         .ok_or_else(|| "public launch remediation missing expected_values".to_string())?
         .iter()
         .map(|(subcheck, expected_value)| {
+            ensure(
+                failed_subcheck_names.contains(subcheck.as_str()),
+                &format!(
+                    "public launch remediation expected value for unexpected subcheck {subcheck}"
+                ),
+            )?;
             let expected_value = expected_value.as_str().ok_or_else(|| {
                 "public launch remediation expected value must be a string".to_string()
             })?;
@@ -22163,6 +22176,14 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
         collection_root("public-launch-remediation-expected-values", expected_values);
     let deferred_repair_root_subchecks =
         required_nested_string_list(remediation, "deferred_repair_root_subchecks", label)?;
+    for subcheck in &deferred_repair_root_subchecks {
+        ensure(
+            failed_subcheck_names.contains(subcheck.as_str()),
+            &format!(
+                "public launch remediation deferred repair root for unexpected subcheck {subcheck}"
+            ),
+        )?;
+    }
     let deferred_repair_root = collection_root(
         "public-launch-remediation-deferred-repair-roots",
         deferred_repair_root_subchecks,
@@ -35893,6 +35914,59 @@ mod tests {
             .expect_err("tampered remediation expected count should fail safety checks");
         assert!(error.contains(
             "public launch remediation expected value mismatch for public_probe_count_bound"
+        ));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_extra_remediation_expected_value() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["expected_values"]
+            ["not_a_failed_subcheck"] = json!("bogus");
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("extra expected value should fail safety checks");
+        assert!(error.contains(
+            "public launch remediation expected value for unexpected subcheck not_a_failed_subcheck"
+        ));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_extra_remediation_repair_root() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["repair_roots"]
+            ["not_a_failed_subcheck"] = json!(root(&["bogus", "repair-root"]));
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("extra repair root should fail safety checks");
+        assert!(error.contains(
+            "public launch remediation repair root for unexpected subcheck not_a_failed_subcheck"
+        ));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_extra_deferred_repair_subcheck() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["deferred_repair_root_subchecks"]
+            .as_array_mut()
+            .expect("deferred repair subchecks")
+            .push(json!("not_a_failed_subcheck"));
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("extra deferred subcheck should fail safety checks");
+        assert!(error.contains(
+            "public launch remediation deferred repair root for unexpected subcheck not_a_failed_subcheck"
         ));
     }
 
