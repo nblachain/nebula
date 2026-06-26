@@ -3337,7 +3337,8 @@ real XMR.
   maps constrained to failed subchecks, and a report artifact root. It is marked
   unusable as public deployment evidence or mainnet custody
   approval. The paired `--verify-public-launch-readiness-report` command
-  pins the schema, chain, version, and public-alpha/operator-local boundary,
+  pins the schema, chain, version, public-alpha/operator-local boundary, and
+  nested dry-run readiness boundary,
   recomputes the nested check, remediation, canonical next-step map, command-map, command-sequence,
   report, and artifact roots against the current run, requires the deployment-
   attestation remediation artifact id/path, command, kind, privacy boundary, and

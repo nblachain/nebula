@@ -21960,6 +21960,10 @@ fn ensure_public_launch_readiness_report_artifact_safe(value: &Value) -> Result<
         readiness.as_object().is_some(),
         "public launch readiness report must include the operator launch report",
     )?;
+    ensure(
+        readiness.get("dry_run").and_then(Value::as_bool) == Some(true),
+        "public launch readiness report must remain a dry-run readiness report",
+    )?;
     for key in PUBLIC_STATUS_FORBIDDEN_KEYS {
         if key == "public_launch_readiness" {
             continue;
@@ -36053,6 +36057,23 @@ mod tests {
         ));
         ensure_public_launch_readiness_report_artifact_safe(&value)
             .expect("safe public launch readiness report");
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_tampered_nested_dry_run() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["dry_run"] = json!(false);
+
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("tampered nested dry-run boundary should fail safety checks");
+        assert!(
+            error.contains("public launch readiness report must remain a dry-run readiness report")
+        );
     }
 
     #[test]
