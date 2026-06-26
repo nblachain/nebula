@@ -329,6 +329,37 @@ pub struct ValidatorSetReport {
     pub reward_unit: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenesisManifest {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub genesis_time_unix_ms: u128,
+    pub activation_height: u64,
+    pub deployment_attestation_root: String,
+    pub validator_set_root: String,
+    pub fee_policy_root: String,
+    pub validator_admission_root: String,
+    pub initial_validator_count: usize,
+    pub initial_total_power: u64,
+    pub native_fee_token: String,
+    pub native_base_unit: String,
+    pub bridged_fee_token: String,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GenesisManifestReport {
+    pub genesis_ready: bool,
+    pub level: &'static str,
+    pub genesis_root: String,
+    pub deployment_attestation_root: String,
+    pub validator_set_root: String,
+    pub initial_validator_count: usize,
+    pub initial_total_power: u64,
+    pub activation_height: u64,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum FeeError {
     ZeroGas,
@@ -511,6 +542,15 @@ pub fn readiness_report() -> NebulaReadiness {
                 "fee_policy_root_required": true,
                 "unique_consensus_keys_required": true,
                 "unique_p2p_endpoints_required": true,
+            })),
+            "genesis_manifest": stable_root(&json!({
+                "deployment_attestation_root_required": true,
+                "validator_set_root_required": true,
+                "fee_policy_root_required": true,
+                "validator_admission_root_required": true,
+                "native_fee_token": NBLA_SYMBOL,
+                "native_base_unit": NEBULAI_UNIT,
+                "bridged_fee_token": NXMR_SYMBOL,
             })),
             "guide": stable_root(&json!({
                 "root_readme": "README.md",
@@ -820,6 +860,152 @@ pub fn verify_validator_set_json(input: &str) -> Result<ValidatorSetReport, Atte
         region_count: regions.len(),
         total_genesis_power,
         reward_unit: manifest.reward_unit,
+    })
+}
+
+pub fn sample_genesis_manifest_json_pretty() -> String {
+    build_genesis_manifest_json_pretty(
+        &sample_deployment_attestation_json_pretty(),
+        &sample_validator_set_json_pretty(),
+    )
+    .expect("sample genesis manifest builds")
+}
+
+pub fn build_genesis_manifest_json_pretty(
+    deployment_attestation_json: &str,
+    validator_set_json: &str,
+) -> Result<String, AttestationError> {
+    let deployment_report = verify_deployment_attestation_json(deployment_attestation_json)?;
+    let validator_set_report = verify_validator_set_json(validator_set_json)?;
+    let readiness = readiness_report();
+    let fee_policy_root = readiness.status_roots["economics"]
+        .as_str()
+        .expect("economics root is a string")
+        .to_string();
+    let validator_admission_root = readiness.status_roots["validator_admission"]
+        .as_str()
+        .expect("validator admission root is a string")
+        .to_string();
+
+    let mut manifest = GenesisManifest {
+        chain_id: CHAIN_ID.to_string(),
+        runtime_version: VERSION.to_string(),
+        genesis_time_unix_ms: unix_ms(),
+        activation_height: 1,
+        deployment_attestation_root: deployment_report.evidence_root,
+        validator_set_root: validator_set_report.validator_set_root,
+        fee_policy_root,
+        validator_admission_root,
+        initial_validator_count: validator_set_report.validator_count,
+        initial_total_power: validator_set_report.total_genesis_power,
+        native_fee_token: NBLA_SYMBOL.to_string(),
+        native_base_unit: NEBULAI_UNIT.to_string(),
+        bridged_fee_token: NXMR_SYMBOL.to_string(),
+        root: String::new(),
+    };
+    manifest.root = genesis_manifest_root(&manifest);
+
+    serde_json::to_string_pretty(&manifest)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+pub fn verify_genesis_manifest_json(
+    input: &str,
+) -> Result<GenesisManifestReport, AttestationError> {
+    let input = input.trim_start_matches('\u{feff}');
+    let manifest = serde_json::from_str::<GenesisManifest>(input)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let mut errors = Vec::new();
+    let now = unix_ms();
+    let readiness = readiness_report();
+    let fee_policy_root = readiness.status_roots["economics"]
+        .as_str()
+        .expect("economics root is a string");
+    let validator_admission_root = readiness.status_roots["validator_admission"]
+        .as_str()
+        .expect("validator admission root is a string");
+
+    require_eq(&mut errors, "chain_id", &manifest.chain_id, CHAIN_ID);
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &manifest.runtime_version,
+        VERSION,
+    );
+    if manifest.genesis_time_unix_ms > now + 300_000 {
+        errors.push("genesis_time_unix_ms is more than five minutes in the future".to_string());
+    }
+    if manifest.activation_height == 0 {
+        errors.push("activation_height must be greater than zero".to_string());
+    }
+    require_hex_root(
+        &mut errors,
+        "deployment_attestation_root",
+        &manifest.deployment_attestation_root,
+    );
+    require_hex_root(
+        &mut errors,
+        "validator_set_root",
+        &manifest.validator_set_root,
+    );
+    require_eq(
+        &mut errors,
+        "fee_policy_root",
+        &manifest.fee_policy_root,
+        fee_policy_root,
+    );
+    require_eq(
+        &mut errors,
+        "validator_admission_root",
+        &manifest.validator_admission_root,
+        validator_admission_root,
+    );
+    if manifest.initial_validator_count < MIN_PUBLIC_TESTNET_VALIDATORS {
+        errors.push(format!(
+            "initial_validator_count must be at least {MIN_PUBLIC_TESTNET_VALIDATORS}"
+        ));
+    }
+    if manifest.initial_total_power == 0 {
+        errors.push("initial_total_power must be greater than zero".to_string());
+    }
+    require_eq(
+        &mut errors,
+        "native_fee_token",
+        &manifest.native_fee_token,
+        NBLA_SYMBOL,
+    );
+    require_eq(
+        &mut errors,
+        "native_base_unit",
+        &manifest.native_base_unit,
+        NEBULAI_UNIT,
+    );
+    require_eq(
+        &mut errors,
+        "bridged_fee_token",
+        &manifest.bridged_fee_token,
+        NXMR_SYMBOL,
+    );
+    require_root(
+        &mut errors,
+        "root",
+        &manifest.root,
+        &genesis_manifest_root(&manifest),
+    );
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    Ok(GenesisManifestReport {
+        genesis_ready: true,
+        level: "genesis-manifest-attested",
+        genesis_root: manifest.root,
+        deployment_attestation_root: manifest.deployment_attestation_root,
+        validator_set_root: manifest.validator_set_root,
+        initial_validator_count: manifest.initial_validator_count,
+        initial_total_power: manifest.initial_total_power,
+        activation_height: manifest.activation_height,
     })
 }
 
@@ -1615,6 +1801,24 @@ fn validator_set_root(manifest: &ValidatorSetManifest) -> String {
     }))
 }
 
+fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
+    stable_root(&json!({
+        "chain_id": manifest.chain_id,
+        "runtime_version": manifest.runtime_version,
+        "genesis_time_unix_ms": manifest.genesis_time_unix_ms,
+        "activation_height": manifest.activation_height,
+        "deployment_attestation_root": manifest.deployment_attestation_root,
+        "validator_set_root": manifest.validator_set_root,
+        "fee_policy_root": manifest.fee_policy_root,
+        "validator_admission_root": manifest.validator_admission_root,
+        "initial_validator_count": manifest.initial_validator_count,
+        "initial_total_power": manifest.initial_total_power,
+        "native_fee_token": manifest.native_fee_token,
+        "native_base_unit": manifest.native_base_unit,
+        "bridged_fee_token": manifest.bridged_fee_token,
+    }))
+}
+
 fn require_eq(errors: &mut Vec<String>, label: &str, actual: &str, expected: &str) {
     if actual != expected {
         errors.push(format!("{label} expected {} but got {}", expected, actual));
@@ -1795,6 +1999,63 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "validators[1].consensus_public_key must be unique"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn sample_genesis_manifest_verifies_launch_roots() {
+        let report = verify_genesis_manifest_json(&sample_genesis_manifest_json_pretty()).unwrap();
+
+        assert!(report.genesis_ready);
+        assert_eq!(report.level, "genesis-manifest-attested");
+        assert_eq!(report.initial_validator_count, 2);
+        assert_eq!(report.initial_total_power, 2);
+        assert_eq!(report.activation_height, 1);
+        assert_eq!(report.genesis_root.len(), 64);
+        assert_eq!(report.deployment_attestation_root.len(), 64);
+        assert_eq!(report.validator_set_root.len(), 64);
+    }
+
+    #[test]
+    fn genesis_manifest_builds_from_verified_inputs() {
+        let genesis = build_genesis_manifest_json_pretty(
+            &sample_deployment_attestation_json_pretty(),
+            &sample_validator_set_json_pretty(),
+        )
+        .unwrap();
+
+        let report = verify_genesis_manifest_json(&genesis).unwrap();
+
+        assert!(report.genesis_ready);
+        assert_eq!(report.initial_validator_count, 2);
+    }
+
+    #[test]
+    fn genesis_manifest_rejects_unknown_fields() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_genesis_manifest_json_pretty()).unwrap();
+        value["unexpected_field"] = json!(true);
+
+        let error = verify_genesis_manifest_json(&value.to_string()).unwrap_err();
+
+        assert!(matches!(error, AttestationError::MalformedJson(_)));
+    }
+
+    #[test]
+    fn genesis_manifest_rejects_zero_activation_height() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_genesis_manifest_json_pretty()).unwrap();
+        value["activation_height"] = json!(0);
+
+        let error = verify_genesis_manifest_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "activation_height must be greater than zero"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }

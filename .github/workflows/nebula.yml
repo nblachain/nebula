@@ -64,6 +64,7 @@ jobs:
           assert economics["nxmr_reserve_backing_bps"] == 9000
           assert economics["nxmr_validator_reward_bps"] == 1000
           assert roots["validator_admission"]
+          assert roots["genesis_manifest"]
           PY
 
       - name: Verify deployment attestation gate
@@ -106,6 +107,32 @@ jobs:
           assert payload["region_count"] >= 2
           assert payload["total_genesis_power"] > 0
           assert payload["reward_unit"] == "nebulai"
+          PY
+
+      - name: Verify genesis manifest gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          attestation="$(mktemp)"
+          validators="$(mktemp)"
+          genesis="$(mktemp)"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > "$attestation"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-validator-set > "$validators"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation "$attestation" --validator-set "$validators" > "$genesis"
+          output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-genesis-manifest "$genesis" --json)"
+          NEBULA_GENESIS_JSON="$output" python3 - <<'PY'
+          import json
+          import os
+
+          payload = json.loads(os.environ["NEBULA_GENESIS_JSON"])
+          assert payload["genesis_ready"] is True
+          assert payload["level"] == "genesis-manifest-attested"
+          assert len(payload["genesis_root"]) == 64
+          assert len(payload["deployment_attestation_root"]) == 64
+          assert len(payload["validator_set_root"]) == 64
+          assert payload["initial_validator_count"] >= 2
+          assert payload["initial_total_power"] > 0
+          assert payload["activation_height"] > 0
           PY
 
       - name: Verify Nebula guide mirror
