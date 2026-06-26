@@ -3310,6 +3310,7 @@ real XMR.
 - A local operator-only public launch readiness report export gives CI a
   standalone `nebula-public-launch-readiness-report` with the launch level,
   blocker ids, remediation commands, public status/bundle/capture-plan roots,
+  capture-contract root, evidence-template root, preflight-checklist root,
   package file-set root, deployment evidence root if present,
   deployment-attestation failed subchecks such as package file-set, package
   manifest, and readiness artifact binding mismatches, expected package file-set,
@@ -3317,8 +3318,9 @@ real XMR.
   root. It is marked unusable as public deployment evidence or mainnet custody
   approval. The paired `--verify-public-launch-readiness-report` command
   recomputes the report and artifact root against the current run, rejecting
-  stale package-root, status, bundle, capture-plan, or deployment-evidence
-  bindings before deployment CI consumes the report root.
+  stale package-root, status, bundle, capture-plan, capture-contract,
+  evidence-template, preflight, or deployment-evidence bindings before
+  deployment CI consumes the report root.
 - Public launch automation consumes a redacted
   `nebula-public-testnet-launch-bundle` that binds the status manifest,
   bootstrap profile, proxy policy, typed bootstrap-node commitment manifest,

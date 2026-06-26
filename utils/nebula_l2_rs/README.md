@@ -440,14 +440,16 @@ package verification.
 requires `--mainnet-readiness` and writes a local operator-only
 `nebula-public-launch-readiness-report`. It archives the public launch gate
 level, blocker ids, remediation commands, public status/bundle/capture-plan
-roots, package file-set root, deployment evidence root if present, and its own
-artifact root. The report is not a public deployment attestation and has both
+roots, capture-contract root, evidence-template root, preflight-checklist root,
+package file-set root, deployment evidence root if present, and its own artifact
+root. The report is not a public deployment attestation and has both
 `usable_as_public_deployment_evidence` and
 `usable_as_mainnet_custody_approval` set to false.
 `--verify-public-launch-readiness-report path\to\launch-report.json`
 recomputes the report and artifact root against the current run, rejecting
-stale package-root, status, bundle, capture-plan, or deployment-evidence
-bindings before deployment CI consumes the report root.
+stale package-root, status, bundle, capture-plan, capture-contract,
+evidence-template, preflight, or deployment-evidence bindings before deployment
+CI consumes the report root.
 
 `--write-public-launch-package path\to\package-dir` also requires
 `--mainnet-readiness` and writes the full redacted public-alpha handoff set into

@@ -9113,6 +9113,16 @@ fn public_launch_readiness_report_artifact(summary: &TestnetSummary) -> Value {
         .as_str()
         .unwrap_or("missing-capture-contract-root")
         .to_string();
+    let public_deployment_evidence_template_root = capture_plan
+        ["public_deployment_evidence_template_root"]
+        .as_str()
+        .unwrap_or("missing-public-deployment-evidence-template-root")
+        .to_string();
+    let deployment_preflight_checklist_root = capture_plan["deployment_preflight"]
+        ["checklist_root"]
+        .as_str()
+        .unwrap_or("missing-deployment-preflight-checklist-root")
+        .to_string();
     let public_launch_package_file_set_root =
         public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
     let public_deployment_evidence_root = summary
@@ -9144,6 +9154,8 @@ fn public_launch_readiness_report_artifact(summary: &TestnetSummary) -> Value {
         "public_launch_bundle_root": public_launch_bundle_root,
         "capture_plan_root": capture_plan_root,
         "capture_contract_root": capture_contract_root,
+        "public_deployment_evidence_template_root": public_deployment_evidence_template_root,
+        "deployment_preflight_checklist_root": deployment_preflight_checklist_root,
         "public_launch_package_file_set_root": public_launch_package_file_set_root,
         "public_deployment_evidence_root": public_deployment_evidence_root,
         "public_launch_readiness": &summary.public_launch_readiness,
@@ -32494,6 +32506,18 @@ mod tests {
             capture_plan["capture_plan_root"]
         );
         assert_eq!(
+            value["capture_contract_root"],
+            capture_plan["capture_contract_root"]
+        );
+        assert_eq!(
+            value["public_deployment_evidence_template_root"],
+            capture_plan["public_deployment_evidence_template_root"]
+        );
+        assert_eq!(
+            value["deployment_preflight_checklist_root"],
+            capture_plan["deployment_preflight"]["checklist_root"]
+        );
+        assert_eq!(
             value["public_launch_package_file_set_root"],
             public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id)
         );
@@ -32535,6 +32559,7 @@ mod tests {
         testnet.cli.public_deployment_evidence = Some(evidence.clone());
         let summary = testnet.summary(Vec::new());
         let value = public_launch_readiness_report_artifact(&summary);
+        let capture_plan = public_deployment_capture_plan(&summary);
         assert_eq!(value["level"], "public-launch-ready");
         assert_eq!(value["public_launch_ready"], true);
         assert_eq!(value["blocking_gap_count"], 0);
@@ -32542,6 +32567,18 @@ mod tests {
         assert_eq!(
             value["public_deployment_evidence_root"],
             evidence.evidence_root
+        );
+        assert_eq!(
+            value["capture_contract_root"],
+            capture_plan["capture_contract_root"]
+        );
+        assert_eq!(
+            value["public_deployment_evidence_template_root"],
+            capture_plan["public_deployment_evidence_template_root"]
+        );
+        assert_eq!(
+            value["deployment_preflight_checklist_root"],
+            capture_plan["deployment_preflight"]["checklist_root"]
         );
         assert_eq!(
             value["public_launch_package_file_set_root"],
