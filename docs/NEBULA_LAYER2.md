@@ -3615,8 +3615,8 @@ real XMR.
   remediation kind, relevant command, expected evidence root, granular failed
   subchecks, root-specific `repair_roots` for failed capture/preflight/package file-set/
   runbook receipt/status/bootstrap topology and policy bindings, bootstrap
-  operator-registry/signature, node-probe, P2P endpoint-set, and status-page
-  endpoint-set repair roots, and capture roots, bootstrap profile/report/rate-limit roots,
+  operator-registry/signature, node-probe, P2P endpoint-set, status-page
+  endpoint-set, and live-probe leaf repair roots, and capture roots, bootstrap profile/report/rate-limit roots,
   deferred self-referential package handoff/manifest/readiness root subchecks,
   bootstrap topology/count/registry/probe bindings, aggregate probe repair roots/counts,
   endpoint publicness, TLS pin repair roots/counts,
