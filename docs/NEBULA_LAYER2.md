@@ -3261,16 +3261,16 @@ real XMR.
   filename, root field, artifact
   root, record root, required-before-capture flag, operator-fill flag,
   non-evidence/non-custody flags, package `artifact_set_root`, package
-  `package_file_set_root`, release-candidate manifest id, launch level,
-  ready/blocker counts, readiness report/artifact roots, no-mainnet-custody
-  boundary, rooted command map, rooted `next_steps` that include package-bound
+  `package_file_set_root`, schema/version identity, release-candidate manifest id,
+  launch level, ready/blocker counts, readiness report/artifact roots,
+  no-mainnet-custody boundary, rooted command map, rooted `next_steps` that include package-bound
   capture scaffold creation, and rooted capture command sequence so
   deployment automation can reject stale, swapped, cross-run, extra, or
   metadata-tampered handoff files before public endpoint evidence is assembled.
   When combined with the export step in the same runner invocation,
-  `--verify-public-launch-package` recomputes each package artifact and the
-  package manifest root against the current release-candidate summary, enforces
-  the exact top-level package file set and package-level readiness summary, and
+  `--verify-public-launch-package` pins the package schema/version identity,
+  recomputes each package artifact and the package manifest root against the
+  current release-candidate summary, enforces the exact top-level package file set and package-level readiness summary, and
   fails on stale, tampered, swapped, cross-run, shape-tampered, or extra-file
   package directories before public evidence capture begins.
 - A public testnet certification export writes and verifies the rooted launch

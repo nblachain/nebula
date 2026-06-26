@@ -9466,6 +9466,8 @@ fn public_launch_package_manifest_root(
     root(&[
         "public-launch-package-manifest",
         CHAIN_ID,
+        "1",
+        VERSION,
         manifest_id,
         testnet_id,
         bool_str(true),
@@ -9939,6 +9941,7 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
         "kind": "nebula-public-launch-package",
         "schema_version": 1,
         "chain_id": CHAIN_ID,
+        "version": VERSION,
         "testnet_id": &summary.testnet_id,
         "manifest_id": &summary.manifest_id,
         "public_alpha_only": true,
@@ -9990,6 +9993,14 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
     ensure(
         required_str(&manifest, "chain_id")? == CHAIN_ID,
         "public launch package chain_id mismatch",
+    )?;
+    ensure(
+        required_u64(&manifest, "schema_version")? == 1,
+        "public launch package schema_version mismatch",
+    )?;
+    ensure(
+        required_str(&manifest, "version")? == VERSION,
+        "public launch package version mismatch",
     )?;
     ensure(
         required_str(&manifest, "manifest_id")? == summary.manifest_id,
@@ -33410,6 +33421,7 @@ mod tests {
                 .expect("package manifest json");
         assert_eq!(manifest["kind"], "nebula-public-launch-package");
         assert_eq!(manifest["schema_version"], 1);
+        assert_eq!(manifest["version"], VERSION);
         assert_eq!(manifest["manifest_id"], summary.manifest_id);
         assert_eq!(manifest["public_alpha_only"], true);
         assert_eq!(manifest["usable_as_public_deployment_evidence"], false);
@@ -33708,6 +33720,8 @@ mod tests {
         let unsafe_package_only_root = root(&[
             "public-launch-package-manifest",
             CHAIN_ID,
+            "1",
+            VERSION,
             &summary.manifest_id,
             &summary.testnet_id,
             bool_str(true),
@@ -34431,6 +34445,25 @@ mod tests {
         let error = verify_public_launch_package(&package_dir_string, &summary)
             .expect_err("tampered package manifest shape should fail verification");
         assert!(error.contains("capture requirement mismatch"));
+
+        write_public_launch_package(&package_dir_string, &summary)
+            .expect("rewrite public launch package");
+        let mut manifest: Value =
+            serde_json::from_slice(&fs::read(&manifest_path).expect("read package manifest"))
+                .expect("package manifest json");
+        manifest["version"] = json!("wrong-version");
+        manifest["package_manifest_root"] = json!(root(&[
+            "tampered-public-launch-package-manifest",
+            "wrong-version"
+        ]));
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).expect("manifest json"),
+        )
+        .expect("write wrong-version package manifest");
+        let error = verify_public_launch_package(&package_dir_string, &summary)
+            .expect_err("wrong-version package manifest should fail verification");
+        assert!(error.contains("version mismatch"));
         let _ = fs::remove_dir_all(package_dir);
     }
 
