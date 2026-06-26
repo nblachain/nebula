@@ -3444,6 +3444,8 @@ real XMR.
   `deployment_preflight_checklist_root` against the current generated capture
   plan, binds those actual/expected capture roots into the report root, exposes
   individual root-binding booleans plus expected repair roots,
+  seals the public RPC, P2P, status, health, metrics, incident, faucet, and
+  reset-runbook endpoint strings into the report root,
   requires the embedded `public_launch_package_file_set_root` to match
   the current rooted package file set, requires the embedded
   `public_launch_package_handoff_root` to match both the expected package

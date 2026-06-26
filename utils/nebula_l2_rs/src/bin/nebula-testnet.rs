@@ -6128,6 +6128,14 @@ impl Testnet {
             &expected_release_authority_registry_template_root,
             &evidence.public_status_manifest_root,
             &expected_public_status_manifest_root,
+            &evidence.public_rpc_url,
+            &evidence.public_p2p_endpoint,
+            &evidence.status_page_url,
+            &evidence.health_check_url,
+            &evidence.metrics_url,
+            &evidence.incident_contact_url,
+            &evidence.faucet_url,
+            &evidence.reset_runbook_url,
             &evidence.public_bootstrap_profile_root,
             &summary.public_bootstrap_profile.profile_root,
             &evidence.public_bootstrap_profile_report_root,
@@ -38719,8 +38727,30 @@ mod tests {
         let base_summary = base_testnet.summary(Vec::new());
         let path =
             write_public_deployment_evidence(&valid_public_deployment_evidence(&base_summary));
-        let mut evidence =
-            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let evidence = load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let mut rpc_only = evidence.clone();
+        rpc_only.public_rpc_url = "http://127.0.0.1:58480/status".to_string();
+        base_testnet.cli.public_deployment_evidence = Some(rpc_only);
+        let rpc_only_summary = base_testnet.summary(Vec::new());
+        assert!(!rpc_only_summary.public_deployment.passed);
+        assert!(!rpc_only_summary.public_deployment.endpoint_set_public);
+        assert!(!rpc_only_summary.public_deployment.public_rpc_url_public);
+        assert!(rpc_only_summary.public_deployment.public_p2p_endpoint_public);
+
+        let mut p2p_only = evidence.clone();
+        p2p_only.public_p2p_endpoint = "127.0.0.1:58481".to_string();
+        base_testnet.cli.public_deployment_evidence = Some(p2p_only);
+        let p2p_only_summary = base_testnet.summary(Vec::new());
+        assert!(!p2p_only_summary.public_deployment.passed);
+        assert!(!p2p_only_summary.public_deployment.endpoint_set_public);
+        assert!(p2p_only_summary.public_deployment.public_rpc_url_public);
+        assert!(!p2p_only_summary.public_deployment.public_p2p_endpoint_public);
+        assert_ne!(
+            rpc_only_summary.public_deployment.report_root,
+            p2p_only_summary.public_deployment.report_root
+        );
+
+        let mut evidence = evidence;
         evidence.public_rpc_url = "http://127.0.0.1:58480/status".to_string();
         evidence.public_p2p_endpoint = "127.0.0.1:58481".to_string();
         evidence.status_page_url = "http://status.public.nebula.example".to_string();
