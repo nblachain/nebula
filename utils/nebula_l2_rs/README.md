@@ -524,7 +524,8 @@ deployment attestation passes the gate.
 `--mainnet-readiness`, verifies the nested launch package, recomputes the
 launch readiness report, verifies both release handoff templates, recomputes
 the certification file-set root and certification root against the current
-release-candidate summary, enforces the exact top-level directory shape, and
+release-candidate summary, pins the rooted next steps, command map, and command
+sequence, enforces the exact top-level directory shape, and
 fails on stale, tampered, cross-run, extra-file, or swapped
 package/report/template/cert roots before public evidence capture starts.
 

@@ -3294,7 +3294,8 @@ real XMR.
   attestation passes.
   The paired `--verify-public-testnet-certification` command verifies the nested
   package, recomputes the launch report, certification file-set root, and
-  certification root, verifies both release handoff templates, enforces the
+  certification root, verifies both release handoff templates, pins the rooted
+  next steps, command map, and command sequence, enforces the
   exact top-level directory shape, and rejects stale, tampered, cross-run,
   extra-file, or swapped package/report/template/cert roots.
 - The package-level public capture todo export gives CI a rooted

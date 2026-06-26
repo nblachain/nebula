@@ -9352,6 +9352,13 @@ fn public_deployment_capture_audit_next_steps() -> Value {
     )
 }
 
+fn public_testnet_certification_next_steps() -> Value {
+    public_deployment_capture_next_steps(
+        "Run write_capture_scaffold from nebula-public-launch-package, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
+        true,
+    )
+}
+
 fn public_deployment_capture_next_steps_root(next_steps: &Value) -> String {
     let step_roots = next_steps
         .as_object()
@@ -10334,10 +10341,7 @@ fn verify_public_testnet_certification(path: &str, summary: &TestnetSummary) -> 
     ensure_public_deployment_capture_next_steps(
         &actual_certification,
         "public testnet certification",
-        public_deployment_capture_next_steps(
-            "Run write_capture_scaffold from nebula-public-launch-package, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
-            true,
-        ),
+        public_testnet_certification_next_steps(),
     )?;
     let expected_certification_file_set_root =
         public_testnet_certification_file_set_root(&summary.manifest_id, &summary.testnet_id);
@@ -10452,10 +10456,7 @@ fn public_testnet_certification_artifact(
         .remediations
         .iter()
         .any(|remediation| remediation.external_capture_required);
-    let next_steps = public_deployment_capture_next_steps(
-        "Run write_capture_scaffold from nebula-public-launch-package, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
-        true,
-    );
+    let next_steps = public_testnet_certification_next_steps();
     let next_steps_root = public_deployment_capture_next_steps_root(&next_steps);
     let command_sequence = public_deployment_capture_command_sequence();
     let command_sequence_root =
@@ -34204,10 +34205,7 @@ mod tests {
             .contains("--public-deployment-capture-scaffold-package"));
         assert_eq!(
             certification["next_steps"],
-            public_deployment_capture_next_steps(
-                "Run write_capture_scaffold from nebula-public-launch-package, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
-                true,
-            )
+            public_testnet_certification_next_steps()
         );
         assert_eq!(certification["commands"], public_deployment_capture_commands());
         assert_eq!(
@@ -34610,6 +34608,30 @@ mod tests {
         let error = verify_public_testnet_certification(&cert_dir_string, &summary)
             .expect_err("next-steps tampered certification should fail verification");
         assert!(error.contains("next_steps mismatch"));
+
+        write_public_testnet_certification(&cert_dir_string, &summary)
+            .expect("rewrite public testnet certification");
+        let mut certification: Value =
+            serde_json::from_slice(&fs::read(&certification_path).expect("read certification"))
+                .expect("certification json");
+        certification["next_steps"]["audit_capture"] =
+            json!("cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --json");
+        let next_steps = certification["next_steps"].clone();
+        certification["next_steps_root"] =
+            json!(public_deployment_capture_next_steps_root(&next_steps));
+        if let Some(object) = certification.as_object_mut() {
+            object.remove("certification_root");
+        }
+        let certification_root = value_root("public-testnet-certification", &certification);
+        certification["certification_root"] = json!(certification_root);
+        fs::write(
+            &certification_path,
+            serde_json::to_string_pretty(&certification).expect("certification json"),
+        )
+        .expect("write re-rooted next-steps tampered certification");
+        let error = verify_public_testnet_certification(&cert_dir_string, &summary)
+            .expect_err("re-rooted next-steps tampered certification should fail verification");
+        assert!(error.contains("next_steps root mismatch"));
 
         write_public_testnet_certification(&cert_dir_string, &summary)
             .expect("rewrite public testnet certification");
