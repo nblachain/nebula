@@ -7944,10 +7944,7 @@ fn public_launch_remediation_for_check(
         deferred_repair_root_subchecks.clone(),
     );
     let next_steps = if check.id == "public-launch-deployment-attestation" {
-        public_deployment_capture_next_steps(
-            "Fill capture.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, freshness, and runbook receipt evidence, then audit, verify, assemble, and run the public launch gate.",
-            true,
-        )
+        public_launch_deployment_attestation_next_steps()
     } else {
         Value::Null
     };
@@ -9339,6 +9336,13 @@ fn public_deployment_capture_next_steps(
         );
     }
     steps
+}
+
+fn public_launch_deployment_attestation_next_steps() -> Value {
+    public_deployment_capture_next_steps(
+        "Fill capture.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, freshness, and runbook receipt evidence, then audit, verify, assemble, and run the public launch gate.",
+        true,
+    )
 }
 
 fn public_deployment_capture_next_steps_root(next_steps: &Value) -> String {
@@ -19718,6 +19722,10 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
         "public launch remediation command sequence root mismatch",
     )?;
     if blocker_id == "public-launch-deployment-attestation" {
+        ensure(
+            next_steps == &public_launch_deployment_attestation_next_steps(),
+            "public launch deployment-attestation remediation next steps mismatch",
+        )?;
         ensure(
             commands == &public_deployment_capture_commands(),
             "public launch deployment-attestation remediation command map mismatch",
@@ -33283,6 +33291,25 @@ mod tests {
         let error = ensure_public_launch_readiness_report_artifact_safe(&value)
             .expect_err("tampered remediation command map should fail safety checks");
         assert!(error.contains("command map mismatch"));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_tampered_remediation_next_steps() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["next_steps"]
+            ["verify_public_launch"] =
+            json!("cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --json");
+        let next_steps = value["public_launch_readiness"]["remediations"][0]["next_steps"].clone();
+        value["public_launch_readiness"]["remediations"][0]["next_steps_root"] =
+            json!(public_deployment_capture_next_steps_root(&next_steps));
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("tampered remediation next steps should fail safety checks");
+        assert!(error.contains("next steps mismatch"));
     }
 
     #[test]

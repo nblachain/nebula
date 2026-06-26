@@ -3326,7 +3326,7 @@ real XMR.
   root. It is marked unusable as public deployment evidence or mainnet custody
   approval. The paired `--verify-public-launch-readiness-report` command
   pins the schema, chain, version, and public-alpha/operator-local boundary,
-  recomputes the nested check, remediation, canonical command-map, command-sequence,
+  recomputes the nested check, remediation, canonical next-step map, command-map, command-sequence,
   report, and artifact roots against the current run, and rejects stale
   package-root, status, bundle, capture-plan, capture-contract, evidence-template,
   preflight, or deployment-evidence bindings before deployment CI consumes the
@@ -3608,7 +3608,7 @@ real XMR.
   required. When the deployment attestation is still absent, the remediation
   still seeds the current capture-plan, package file-set, status, runbook, and
   bootstrap topology roots so deployment CI can start capture from deterministic
-  expected bindings, and it carries rooted next steps, a rooted command map, plus
+  expected bindings, and it carries canonical rooted next steps, a rooted command map, plus
   scaffold creation, audit, audit-verification, strict-verification, assembly,
   and final launch-gate commands. That private operator report is intentionally absent from the public status
   manifest and launch bundle.
