@@ -10984,6 +10984,23 @@ fn verify_public_deployment_capture_plan(
     )?;
     ensure_public_deployment_capture_plan_redacted(&actual)?;
     let expected = public_deployment_capture_plan(summary);
+    for field in [
+        "public_status_manifest_root",
+        "public_launch_bundle_root",
+        "public_launch_artifact_manifest_root",
+        "public_launch_artifact_set_root",
+        "public_launch_package_file_set_root",
+        "public_deployment_evidence_template_root",
+        "release_approval_template_root",
+        "release_authority_registry_template_root",
+        "public_deployment_runbook_root",
+        "public_deployment_runbook_step_set_root",
+    ] {
+        ensure(
+            actual.get(field) == expected.get(field),
+            &format!("public deployment capture plan {field} mismatch"),
+        )?;
+    }
     ensure(
         actual == expected,
         "public deployment capture plan does not match this run",
@@ -35877,7 +35894,7 @@ mod tests {
         .expect("write stale capture plan");
         let error = verify_public_deployment_capture_plan(&path, &summary)
             .expect_err("stale capture plan should fail verification");
-        assert!(error.contains("does not match this run"));
+        assert!(error.contains("public_launch_bundle_root mismatch"));
         let _ = fs::remove_file(path);
     }
 

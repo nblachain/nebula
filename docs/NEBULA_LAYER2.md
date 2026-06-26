@@ -3399,8 +3399,10 @@ real XMR.
   ordered public deployment runbook step. This keeps the remaining
   public-launch blocker operationally precise without letting the local runner
   invent external reachability, TLS, or observer-signature evidence. The paired
-  capture-plan verifier recomputes the current work order and rejects stale,
-  tampered, or cross-run plans before public endpoint evidence is filled.
+  capture-plan verifier recomputes the current work order, checks the current
+  run's status, launch, artifact, package, evidence-template, release-template,
+  and runbook roots individually, and rejects stale, tampered, or cross-run
+  plans before public endpoint evidence is filled.
 - A package-bound capture scaffold export lets deployment CI start from a
   verified `nebula-public-launch-package` directory and write a schema v5
   capture worksheet with the current capture-plan root, capture-contract root,

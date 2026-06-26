@@ -609,8 +609,10 @@ from that receipt and rejects missing, incomplete, out-of-order, stale, or
 root-mismatched phase receipts.
 `--verify-public-deployment-capture-plan path\to\capture-plan.json` also
 requires `--mainnet-readiness`, recomputes the current capture plan and its
-root guards, and rejects stale, tampered, or cross-run work orders before public
-endpoint evidence is filled.
+root guards, checks the current run's status, launch, artifact, package,
+evidence-template, release-template, and runbook roots individually, and rejects
+stale, tampered, or cross-run work orders before public endpoint evidence is
+filled.
 
 `--write-public-deployment-capture-scaffold path\to\capture.json
 --public-deployment-capture-scaffold-package path\to\package-dir` also requires
