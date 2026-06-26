@@ -414,7 +414,10 @@ order, required-before-capture flag, publishability flag,
 non-evidence/non-custody flags, record root, and a collection
 `artifact_set_root` without embedding operator-private evidence. The manifest
 guard recomputes the artifact record, set, and manifest roots before export,
-standalone `--verify-public-launch-artifact-manifest`, and package verification. The
+standalone `--verify-public-launch-artifact-manifest`, and package verification.
+The standalone verifier checks the current run's status, bootstrap, runbook,
+launch-bundle, release-template, readiness, and artifact-set roots before the
+full manifest comparison. The
 capture plan and deployment evidence worksheet bind
 `public_launch_artifact_manifest_root` and `public_launch_artifact_set_root`, so
 deployment CI can freeze the exact files used before public probes, TLS pin
@@ -434,7 +437,9 @@ evidence can pass. The bundle is
 proxies to publish only the public status manifest, is not public deployment
 evidence, is not a mainnet custody approval, and is root-recomputed by the
 bundle guard before export, standalone `--verify-public-launch-bundle`, or
-package verification.
+package verification. The standalone verifier checks the current run's status,
+bootstrap, runbook, readiness, operations, reserve, privacy, wallet-recovery,
+watchtower, and bundle roots before the full bundle comparison.
 
 `--write-public-launch-readiness-report path\to\launch-report.json` also
 requires `--mainnet-readiness` and writes a local operator-only
@@ -449,9 +454,9 @@ root. The report is not a public deployment attestation and has both
 pins the schema, chain, version, and public-alpha/operator-local boundary,
 recomputes the report, nested check/remediation roots, canonical next-step map,
 command-map and command-sequence roots, and artifact root against the current run, rejecting
-stale package-root, status, bundle, capture-plan, capture-contract,
-evidence-template, preflight, or deployment-evidence bindings before deployment
-CI consumes the report root.
+stale package-root, readiness-root, status, bundle, capture-plan,
+capture-contract, evidence-template, preflight, artifact-root, or
+deployment-evidence bindings before deployment CI consumes the report root.
 
 `--write-public-launch-package path\to\package-dir` also requires
 `--mainnet-readiness` and writes the full redacted public-alpha handoff set into

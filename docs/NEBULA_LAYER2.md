@@ -3245,7 +3245,10 @@ real XMR.
   non-evidence/non-custody flags, and record root, plus a collection
   `artifact_set_root`, without embedding operator-private evidence. The
   manifest guard recomputes those record, set, and manifest roots before export,
-  standalone manifest verification, or package verification. The evidence
+  standalone manifest verification, or package verification. Standalone
+  verification checks the current run's status, bootstrap, runbook,
+  launch-bundle, release-template, readiness, and artifact-set roots before the
+  full manifest comparison. The evidence
   worksheet and capture plan bind
   `public_launch_artifact_manifest_root` and
   `public_launch_artifact_set_root` so CI can detect swapped or stale launch
@@ -3330,9 +3333,9 @@ real XMR.
   pins the schema, chain, version, and public-alpha/operator-local boundary,
   recomputes the nested check, remediation, canonical next-step map, command-map, command-sequence,
   report, and artifact roots against the current run, and rejects stale
-  package-root, status, bundle, capture-plan, capture-contract, evidence-template,
-  preflight, or deployment-evidence bindings before deployment CI consumes the
-  report root.
+  package-root, readiness-root, status, bundle, capture-plan, capture-contract,
+  evidence-template, preflight, artifact-root, or deployment-evidence bindings
+  before deployment CI consumes the report root.
 - Public launch automation consumes a redacted
   `nebula-public-testnet-launch-bundle` that binds the status manifest,
   bootstrap profile, proxy policy, typed bootstrap-node commitment manifest,
@@ -3344,7 +3347,10 @@ real XMR.
   per committed operator before deployment evidence can clear the public launch
   gate. The bundle is explicitly unusable as public deployment evidence or
   mainnet custody approval, and its guard recomputes the bundle root before
-  export or package verification.
+  export, standalone verification, or package verification. Standalone
+  verification checks the current run's status, bootstrap, runbook, readiness,
+  operations, reserve, privacy, wallet-recovery, watchtower, and bundle roots
+  before the full bundle comparison.
 - Public deployment evidence templates give deployment automation a schema v5
   worksheet with the canonical public status manifest, launch bundle root,
   launch artifact manifest roots, package file-set root, placeholder package

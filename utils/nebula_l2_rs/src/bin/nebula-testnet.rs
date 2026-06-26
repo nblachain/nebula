@@ -5849,8 +5849,7 @@ impl Testnet {
         let public_launch_package_file_set_root_bound = evidence
             .public_launch_package_file_set_root
             == expected_public_launch_package_file_set_root;
-        let public_launch_package_handoff_root_bound = evidence
-            .public_launch_package_handoff_root
+        let public_launch_package_handoff_root_bound = evidence.public_launch_package_handoff_root
             == expected_public_launch_package_handoff_root;
         let public_launch_package_manifest_root_bound = evidence
             .public_launch_package_manifest_root
@@ -7960,8 +7959,7 @@ fn public_launch_remediation_for_check(
     } else {
         Value::Null
     };
-    let command_sequence_root =
-        public_deployment_capture_command_sequence_root(&command_sequence);
+    let command_sequence_root = public_deployment_capture_command_sequence_root(&command_sequence);
     let remediation_root = root(&[
         "public-launch-remediation",
         CHAIN_ID,
@@ -8079,7 +8077,10 @@ fn public_deployment_missing_evidence_repair_roots(
     );
     candidates.insert(
         "rate_limit_policy_root_bound",
-        summary.public_bootstrap_profile.rate_limit_policy_root.clone(),
+        summary
+            .public_bootstrap_profile
+            .rate_limit_policy_root
+            .clone(),
     );
     candidates.insert(
         "status_manifest_root_bound",
@@ -8160,19 +8161,30 @@ fn public_deployment_missing_evidence_repair_roots(
     );
     candidates.insert(
         "bootstrap_node_set_root_bound",
-        summary.public_bootstrap_profile.bootstrap_node_set_root.clone(),
+        summary
+            .public_bootstrap_profile
+            .bootstrap_node_set_root
+            .clone(),
     );
     candidates.insert(
         "bootstrap_operator_set_root_bound",
-        summary.public_bootstrap_profile.bootstrap_operator_set_root.clone(),
+        summary
+            .public_bootstrap_profile
+            .bootstrap_operator_set_root
+            .clone(),
     );
     candidates.insert(
         "bootstrap_region_set_root_bound",
-        summary.public_bootstrap_profile.bootstrap_region_set_root.clone(),
+        summary
+            .public_bootstrap_profile
+            .bootstrap_region_set_root
+            .clone(),
     );
     candidates
         .into_iter()
-        .filter(|(subcheck, expected_root)| failed.contains(*subcheck) && is_hex_root(expected_root))
+        .filter(|(subcheck, expected_root)| {
+            failed.contains(*subcheck) && is_hex_root(expected_root)
+        })
         .map(|(subcheck, expected_root)| (subcheck.to_string(), expected_root))
         .collect()
 }
@@ -9119,6 +9131,21 @@ fn verify_public_deployment_runbook(path: &str, summary: &TestnetSummary) -> Res
     )
 }
 
+fn ensure_current_run_pointer_bindings(
+    actual: &Value,
+    expected: &Value,
+    artifact_label: &str,
+    bindings: &[(&str, &str)],
+) -> Result<(), String> {
+    for (label, pointer) in bindings {
+        ensure(
+            actual.pointer(pointer) == expected.pointer(pointer),
+            &format!("{artifact_label} {label} mismatch"),
+        )?;
+    }
+    Ok(())
+}
+
 fn write_public_launch_artifact_manifest(
     path: &str,
     summary: &TestnetSummary,
@@ -9148,6 +9175,62 @@ fn verify_public_launch_artifact_manifest(
     ensure_public_launch_artifact_manifest_redacted(&actual)?;
     let expected = public_launch_artifact_manifest(summary);
     ensure_public_launch_artifact_manifest_redacted(&expected)?;
+    ensure_current_run_pointer_bindings(
+        &actual,
+        &expected,
+        "public launch artifact manifest",
+        &[
+            (
+                "source_roots/public_status_manifest_root",
+                "/source_roots/public_status_manifest_root",
+            ),
+            (
+                "source_roots/public_bootstrap_profile_root",
+                "/source_roots/public_bootstrap_profile_root",
+            ),
+            (
+                "source_roots/public_bootstrap_profile_report_root",
+                "/source_roots/public_bootstrap_profile_report_root",
+            ),
+            (
+                "source_roots/public_bootstrap_profile_template_root",
+                "/source_roots/public_bootstrap_profile_template_root",
+            ),
+            (
+                "source_roots/public_deployment_runbook_root",
+                "/source_roots/public_deployment_runbook_root",
+            ),
+            (
+                "source_roots/public_deployment_runbook_step_set_root",
+                "/source_roots/public_deployment_runbook_step_set_root",
+            ),
+            (
+                "source_roots/public_launch_bundle_root",
+                "/source_roots/public_launch_bundle_root",
+            ),
+            (
+                "source_roots/release_approval_template_root",
+                "/source_roots/release_approval_template_root",
+            ),
+            (
+                "source_roots/release_authority_registry_template_root",
+                "/source_roots/release_authority_registry_template_root",
+            ),
+            (
+                "source_roots/run_checkpoint_root",
+                "/source_roots/run_checkpoint_root",
+            ),
+            (
+                "source_roots/mainnet_readiness_check_root",
+                "/source_roots/mainnet_readiness_check_root",
+            ),
+            ("artifact_set_root", "/artifact_set_root"),
+            (
+                "public_launch_artifact_manifest_root",
+                "/public_launch_artifact_manifest_root",
+            ),
+        ],
+    )?;
     ensure(
         actual == expected,
         "public launch artifact manifest does not match this run",
@@ -9175,6 +9258,62 @@ fn verify_public_launch_bundle(path: &str, summary: &TestnetSummary) -> Result<(
     ensure_public_launch_bundle_redacted(&actual)?;
     let expected = public_launch_bundle(summary);
     ensure_public_launch_bundle_redacted(&expected)?;
+    ensure_current_run_pointer_bindings(
+        &actual,
+        &expected,
+        "public launch bundle",
+        &[
+            (
+                "source_roots/public_status_manifest_root",
+                "/source_roots/public_status_manifest_root",
+            ),
+            (
+                "source_roots/public_bootstrap_profile_report_root",
+                "/source_roots/public_bootstrap_profile_report_root",
+            ),
+            (
+                "source_roots/public_bootstrap_profile_root",
+                "/source_roots/public_bootstrap_profile_root",
+            ),
+            (
+                "source_roots/public_deployment_runbook_root",
+                "/source_roots/public_deployment_runbook_root",
+            ),
+            (
+                "source_roots/public_deployment_runbook_step_set_root",
+                "/source_roots/public_deployment_runbook_step_set_root",
+            ),
+            (
+                "source_roots/run_checkpoint_root",
+                "/source_roots/run_checkpoint_root",
+            ),
+            (
+                "source_roots/readiness_check_root",
+                "/source_roots/readiness_check_root",
+            ),
+            (
+                "source_roots/operations_readiness_local_report_root",
+                "/source_roots/operations_readiness_local_report_root",
+            ),
+            (
+                "source_roots/reserve_monitoring_report_root",
+                "/source_roots/reserve_monitoring_report_root",
+            ),
+            (
+                "source_roots/privacy_surface_report_root",
+                "/source_roots/privacy_surface_report_root",
+            ),
+            (
+                "source_roots/wallet_recovery_audit_report_root",
+                "/source_roots/wallet_recovery_audit_report_root",
+            ),
+            (
+                "source_roots/da_proof_watchtower_coverage_report_root",
+                "/source_roots/da_proof_watchtower_coverage_report_root",
+            ),
+            ("public_launch_bundle_root", "/public_launch_bundle_root"),
+        ],
+    )?;
     ensure(
         actual == expected,
         "public launch bundle does not match this run",
@@ -9208,6 +9347,52 @@ fn verify_public_launch_readiness_report(
     ensure_public_launch_readiness_report_artifact_safe(&actual)?;
     let expected = public_launch_readiness_report_artifact(summary);
     ensure_public_launch_readiness_report_artifact_safe(&expected)?;
+    ensure_current_run_pointer_bindings(
+        &actual,
+        &expected,
+        "public launch readiness report",
+        &[
+            (
+                "public_launch_readiness_report_root",
+                "/public_launch_readiness_report_root",
+            ),
+            (
+                "public_launch_readiness_check_root",
+                "/public_launch_readiness_check_root",
+            ),
+            (
+                "public_launch_readiness_remediation_root",
+                "/public_launch_readiness_remediation_root",
+            ),
+            (
+                "public_status_manifest_root",
+                "/public_status_manifest_root",
+            ),
+            ("public_launch_bundle_root", "/public_launch_bundle_root"),
+            ("capture_plan_root", "/capture_plan_root"),
+            ("capture_contract_root", "/capture_contract_root"),
+            (
+                "public_deployment_evidence_template_root",
+                "/public_deployment_evidence_template_root",
+            ),
+            (
+                "deployment_preflight_checklist_root",
+                "/deployment_preflight_checklist_root",
+            ),
+            (
+                "public_launch_package_file_set_root",
+                "/public_launch_package_file_set_root",
+            ),
+            (
+                "public_deployment_evidence_root",
+                "/public_deployment_evidence_root",
+            ),
+            (
+                "public_launch_readiness_artifact_root",
+                "/public_launch_readiness_artifact_root",
+            ),
+        ],
+    )?;
     ensure(
         actual == expected,
         "public launch readiness report does not match this run",
@@ -9476,10 +9661,7 @@ fn public_deployment_capture_command_sequence_root(sequence: &Value) -> String {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    collection_root(
-        "public-deployment-command-sequence",
-        step_roots,
-    )
+    collection_root("public-deployment-command-sequence", step_roots)
 }
 
 fn public_launch_package_manifest_root(
@@ -9533,9 +9715,7 @@ fn ensure_public_deployment_capture_next_steps(
 ) -> Result<(), String> {
     let expected_next_steps_root = public_deployment_capture_next_steps_root(&expected_next_steps);
     ensure(
-        value
-            .get("next_steps_root")
-            .and_then(Value::as_str)
+        value.get("next_steps_root").and_then(Value::as_str)
             == Some(expected_next_steps_root.as_str()),
         &format!("{artifact_label} next_steps root mismatch"),
     )?;
@@ -9558,9 +9738,7 @@ fn ensure_public_deployment_capture_command_sequence(
             &format!("{artifact_label} command map mismatch"),
         )?;
         ensure(
-            value
-                .get("commands_root")
-                .and_then(Value::as_str)
+            value.get("commands_root").and_then(Value::as_str)
                 == Some(expected_commands_root.as_str()),
             &format!("{artifact_label} commands root mismatch"),
         )?;
@@ -9573,9 +9751,7 @@ fn ensure_public_deployment_capture_command_sequence(
     let expected_sequence_root =
         public_deployment_capture_command_sequence_root(&expected_sequence);
     ensure(
-        value
-            .get("command_sequence_root")
-            .and_then(Value::as_str)
+        value.get("command_sequence_root").and_then(Value::as_str)
             == Some(expected_sequence_root.as_str()),
         &format!("{artifact_label} command sequence root mismatch"),
     )
@@ -9830,12 +10006,9 @@ fn ensure_public_capture_todo_artifact(value: &Value) -> Result<(), String> {
     let deferred_subchecks = deferred_repair_root_subchecks
         .iter()
         .map(|subcheck| {
-            subcheck
-                .as_str()
-                .map(str::to_string)
-                .ok_or_else(|| {
-                    "public capture todo deferred repair root subcheck must be a string".to_string()
-                })
+            subcheck.as_str().map(str::to_string).ok_or_else(|| {
+                "public capture todo deferred repair root subcheck must be a string".to_string()
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
     let expected_deferred_root = collection_root(
@@ -9957,8 +10130,7 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
     let next_steps = public_launch_package_next_steps();
     let next_steps_root = public_deployment_capture_next_steps_root(&next_steps);
     let command_sequence = public_deployment_capture_command_sequence();
-    let command_sequence_root =
-        public_deployment_capture_command_sequence_root(&command_sequence);
+    let command_sequence_root = public_deployment_capture_command_sequence_root(&command_sequence);
     let commands = public_deployment_capture_commands();
     let commands_root = public_deployment_capture_commands_root(&commands);
     let package_manifest_root = public_launch_package_manifest_root(
@@ -10074,11 +10246,7 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
         required_str(&manifest, "custody_mode")? == "no-mainnet-custody",
         "public launch package custody_mode mismatch",
     )?;
-    ensure_public_deployment_capture_command_sequence(
-        &manifest,
-        "public launch package",
-        true,
-    )?;
+    ensure_public_deployment_capture_command_sequence(&manifest, "public launch package", true)?;
     ensure_public_deployment_capture_next_steps(
         &manifest,
         "public launch package",
@@ -10266,16 +10434,16 @@ fn write_public_testnet_certification(path: &str, summary: &TestnetSummary) -> R
         "public-testnet-certification-readiness-report",
     )?;
     let release_approval_template_path = dir.join("nebula-release-approval-template.json");
-    let release_approval_template_path_string =
-        release_approval_template_path.to_string_lossy().into_owned();
+    let release_approval_template_path_string = release_approval_template_path
+        .to_string_lossy()
+        .into_owned();
     write_release_approval_template(&release_approval_template_path_string, summary)?;
     verify_release_approval_template(&release_approval_template_path_string, summary)?;
     let release_authority_registry_template_path =
         dir.join("nebula-release-authority-registry-template.json");
-    let release_authority_registry_template_path_string =
-        release_authority_registry_template_path
-            .to_string_lossy()
-            .into_owned();
+    let release_authority_registry_template_path_string = release_authority_registry_template_path
+        .to_string_lossy()
+        .into_owned();
     write_release_authority_registry_template(&release_authority_registry_template_path_string)?;
     verify_release_authority_registry_template(&release_authority_registry_template_path_string)?;
     let package_manifest = read_json_file(
@@ -10311,15 +10479,15 @@ fn verify_public_testnet_certification(path: &str, summary: &TestnetSummary) -> 
         "public testnet certification readiness report does not match this run",
     )?;
     let release_approval_template_path = dir.join("nebula-release-approval-template.json");
-    let release_approval_template_path_string =
-        release_approval_template_path.to_string_lossy().into_owned();
+    let release_approval_template_path_string = release_approval_template_path
+        .to_string_lossy()
+        .into_owned();
     verify_release_approval_template(&release_approval_template_path_string, summary)?;
     let release_authority_registry_template_path =
         dir.join("nebula-release-authority-registry-template.json");
-    let release_authority_registry_template_path_string =
-        release_authority_registry_template_path
-            .to_string_lossy()
-            .into_owned();
+    let release_authority_registry_template_path_string = release_authority_registry_template_path
+        .to_string_lossy()
+        .into_owned();
     verify_release_authority_registry_template(&release_authority_registry_template_path_string)?;
 
     let package_manifest = read_json_file(
@@ -10384,19 +10552,18 @@ fn public_testnet_certification_artifact(
         package_manifest,
         "release-authority-registry-template",
     )?;
-    let package_public_deployment_evidence_template_root =
-        public_launch_package_artifact_root(package_manifest, "public-deployment-evidence-template")?;
+    let package_public_deployment_evidence_template_root = public_launch_package_artifact_root(
+        package_manifest,
+        "public-deployment-evidence-template",
+    )?;
     let package_public_deployment_capture_plan_root =
         public_launch_package_artifact_root(package_manifest, "public-deployment-capture-plan")?;
     let package_public_capture_todo_root =
         public_launch_package_artifact_root(package_manifest, "public-capture-todo")?;
     let public_launch_readiness_artifact_root =
         required_root(launch_report, "public_launch_readiness_artifact_root")?;
-    let readiness_public_deployment_evidence_root = required_str(
-        launch_report,
-        "public_deployment_evidence_root",
-    )?
-    .to_string();
+    let readiness_public_deployment_evidence_root =
+        required_str(launch_report, "public_deployment_evidence_root")?.to_string();
     let public_deployment_evidence_root = summary
         .public_deployment
         .evidence_root
@@ -10445,9 +10612,11 @@ fn public_testnet_certification_artifact(
     let release_approval_template_root_bound_to_package =
         release_approval_template_root == package_release_approval_template_root;
     let release_authority_registry_template_root_bound_to_package =
-        release_authority_registry_template_root == package_release_authority_registry_template_root;
+        release_authority_registry_template_root
+            == package_release_authority_registry_template_root;
     let public_deployment_evidence_template_root_bound_to_package =
-        public_deployment_evidence_template_root == package_public_deployment_evidence_template_root;
+        public_deployment_evidence_template_root
+            == package_public_deployment_evidence_template_root;
     let public_deployment_capture_plan_root_bound_to_package =
         public_deployment_capture_plan_root == package_public_deployment_capture_plan_root;
     let public_capture_todo_root_bound_to_package =
@@ -10460,8 +10629,7 @@ fn public_testnet_certification_artifact(
     let next_steps = public_testnet_certification_next_steps();
     let next_steps_root = public_deployment_capture_next_steps_root(&next_steps);
     let command_sequence = public_deployment_capture_command_sequence();
-    let command_sequence_root =
-        public_deployment_capture_command_sequence_root(&command_sequence);
+    let command_sequence_root = public_deployment_capture_command_sequence_root(&command_sequence);
     let commands = public_deployment_capture_commands();
     let commands_root = public_deployment_capture_commands_root(&commands);
     let certification_file_set_root =
@@ -10554,9 +10722,7 @@ fn public_launch_package_artifact_root(
     let artifact_root = record
         .get("root")
         .and_then(Value::as_str)
-        .ok_or_else(|| {
-            format!("public launch package artifact '{artifact_id}' missing root")
-        })?;
+        .ok_or_else(|| format!("public launch package artifact '{artifact_id}' missing root"))?;
     ensure(
         is_hex_root(artifact_root),
         &format!(
@@ -10823,8 +10989,7 @@ fn public_launch_package_manifest_root_for_summary(summary: &TestnetSummary) -> 
     );
     let next_steps_root = public_deployment_capture_next_steps_root(&next_steps);
     let command_sequence = public_deployment_capture_command_sequence();
-    let command_sequence_root =
-        public_deployment_capture_command_sequence_root(&command_sequence);
+    let command_sequence_root = public_deployment_capture_command_sequence_root(&command_sequence);
     let commands = public_deployment_capture_commands();
     let commands_root = public_deployment_capture_commands_root(&commands);
     public_launch_package_manifest_root(
@@ -11120,16 +11285,11 @@ fn public_deployment_capture_scaffold(
         required_root(package_manifest, "package_file_set_root")?;
     let public_launch_package_manifest_root =
         required_root(package_manifest, "package_manifest_root")?;
-    let public_launch_package_schema_version =
-        required_u64(package_manifest, "schema_version")?;
-    let public_launch_package_chain_id =
-        required_str(package_manifest, "chain_id")?;
-    let public_launch_package_version =
-        required_str(package_manifest, "version")?;
-    let public_launch_package_manifest_id =
-        required_str(package_manifest, "manifest_id")?;
-    let public_launch_package_testnet_id =
-        required_str(package_manifest, "testnet_id")?;
+    let public_launch_package_schema_version = required_u64(package_manifest, "schema_version")?;
+    let public_launch_package_chain_id = required_str(package_manifest, "chain_id")?;
+    let public_launch_package_version = required_str(package_manifest, "version")?;
+    let public_launch_package_manifest_id = required_str(package_manifest, "manifest_id")?;
+    let public_launch_package_testnet_id = required_str(package_manifest, "testnet_id")?;
     let public_launch_readiness_artifact_root =
         required_root(launch_report, "public_launch_readiness_artifact_root")?;
     let release_approval_template_root =
@@ -11163,8 +11323,7 @@ fn public_deployment_capture_scaffold(
     scaffold["public_launch_package_file_set_root"] = json!(public_launch_package_file_set_root);
     scaffold["public_launch_package_handoff_root"] = json!(public_launch_package_handoff_root);
     scaffold["public_launch_package_manifest_root"] = json!(public_launch_package_manifest_root);
-    scaffold["public_launch_package_schema_version"] =
-        json!(public_launch_package_schema_version);
+    scaffold["public_launch_package_schema_version"] = json!(public_launch_package_schema_version);
     scaffold["public_launch_package_chain_id"] = json!(public_launch_package_chain_id);
     scaffold["public_launch_package_version"] = json!(public_launch_package_version);
     scaffold["public_launch_package_manifest_id"] = json!(public_launch_package_manifest_id);
@@ -11611,11 +11770,15 @@ fn public_deployment_capture_audit(
                     .get("release_authority_registry_template_root")
                     .and_then(Value::as_str),
             ) {
-                (Some(file_set), Some(manifest), Some(readiness), Some(approval), Some(authority)) => {
-                    public_launch_package_handoff_root_from_roots(
-                        file_set, manifest, readiness, approval, authority,
-                    )
-                }
+                (
+                    Some(file_set),
+                    Some(manifest),
+                    Some(readiness),
+                    Some(approval),
+                    Some(authority),
+                ) => public_launch_package_handoff_root_from_roots(
+                    file_set, manifest, readiness, approval, authority,
+                ),
                 _ => String::new(),
             };
             let receipt_root_values_match = |field: &str, expected_root: &str| {
@@ -12294,8 +12457,7 @@ fn public_deployment_capture_audit(
         json!(public_launch_readiness_artifact_root_matches);
     audit["expected_release_approval_template_root"] =
         json!(expected_release_approval_template_root);
-    audit["release_approval_template_root_matches"] =
-        json!(release_approval_template_root_matches);
+    audit["release_approval_template_root_matches"] = json!(release_approval_template_root_matches);
     audit["expected_release_authority_registry_template_root"] =
         json!(expected_release_authority_registry_template_root);
     audit["release_authority_registry_template_root_matches"] =
@@ -14293,8 +14455,7 @@ fn write_public_deployment_evidence_from_capture(
         required_root(&value, "deployment_preflight_checklist_root")?;
     let capture_package_file_set_root =
         required_root(&value, "public_launch_package_file_set_root")?;
-    let capture_package_handoff_root =
-        required_root(&value, "public_launch_package_handoff_root")?;
+    let capture_package_handoff_root = required_root(&value, "public_launch_package_handoff_root")?;
     let capture_package_manifest_root =
         required_root(&value, "public_launch_package_manifest_root")?;
     let capture_package_schema_version =
@@ -14303,8 +14464,7 @@ fn write_public_deployment_evidence_from_capture(
         required_str(&value, "public_launch_package_chain_id")?.to_string();
     let capture_package_version =
         required_str(&value, "public_launch_package_version")?.to_string();
-    let capture_package_manifest_id =
-        required_root(&value, "public_launch_package_manifest_id")?;
+    let capture_package_manifest_id = required_root(&value, "public_launch_package_manifest_id")?;
     let capture_package_testnet_id =
         required_str(&value, "public_launch_package_testnet_id")?.to_string();
     let capture_readiness_artifact_root =
@@ -19772,17 +19932,19 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
         )?;
     }
     let failed_subchecks = required_nested_string_list(remediation, "failed_subchecks", label)?;
-    let failed_subcheck_root =
-        collection_root("public-launch-remediation-failed-subchecks", failed_subchecks);
+    let failed_subcheck_root = collection_root(
+        "public-launch-remediation-failed-subchecks",
+        failed_subchecks,
+    );
     let repair_roots = remediation
         .get("repair_roots")
         .and_then(Value::as_object)
         .ok_or_else(|| "public launch remediation missing repair_roots".to_string())?
         .iter()
         .map(|(subcheck, expected_root)| {
-            let expected_root = expected_root
-                .as_str()
-                .ok_or_else(|| "public launch remediation repair root must be a string".to_string())?;
+            let expected_root = expected_root.as_str().ok_or_else(|| {
+                "public launch remediation repair root must be a string".to_string()
+            })?;
             Ok(root(&[
                 "public-launch-remediation-repair-root",
                 subcheck,
@@ -19814,7 +19976,11 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
         required_nested_str(remediation, "commands_root", label)?,
         required_nested_str(remediation, "command_sequence_root", label)?,
         required_nested_str(remediation, "privacy_classification", label)?,
-        bool_str(required_nested_bool(remediation, "operator_private", label)?),
+        bool_str(required_nested_bool(
+            remediation,
+            "operator_private",
+            label,
+        )?),
         bool_str(required_nested_bool(
             remediation,
             "external_capture_required",
@@ -20183,9 +20349,9 @@ fn ensure_public_deployment_capture_plan_redacted(value: &Value) -> Result<(), S
             "public deployment capture plan preflight phase must block public launch",
         )?;
     }
-    let preflight_source_roots = deployment_preflight
-        .get("source_roots")
-        .ok_or_else(|| "public deployment capture plan preflight missing source_roots".to_string())?;
+    let preflight_source_roots = deployment_preflight.get("source_roots").ok_or_else(|| {
+        "public deployment capture plan preflight missing source_roots".to_string()
+    })?;
     ensure(
         preflight_source_roots
             .get("release_approval_template_root")
@@ -33032,7 +33198,7 @@ mod tests {
 
         let error = verify_public_launch_artifact_manifest(&path, &summary)
             .expect_err("re-rooted stale manifest should fail exact verification");
-        assert!(error.contains("does not match this run"));
+        assert!(error.contains("source_roots/run_checkpoint_root mismatch"));
         let _ = fs::remove_file(path);
     }
 
@@ -33238,7 +33404,7 @@ mod tests {
 
         let error = verify_public_launch_bundle(&path, &summary)
             .expect_err("re-rooted stale bundle should fail exact verification");
-        assert!(error.contains("does not match this run"));
+        assert!(error.contains("source_roots/run_checkpoint_root mismatch"));
         let _ = fs::remove_file(path);
     }
 
@@ -33362,8 +33528,10 @@ mod tests {
             .as_object_mut()
             .expect("readiness report object")
             .remove("public_launch_readiness_artifact_root");
-        value["public_launch_readiness_artifact_root"] =
-            json!(value_root("public-launch-readiness-report-artifact", &rootless));
+        value["public_launch_readiness_artifact_root"] = json!(value_root(
+            "public-launch-readiness-report-artifact",
+            &rootless
+        ));
         let error = ensure_public_launch_readiness_report_artifact_safe(&value)
             .expect_err("wrong-chain readiness report should fail safety checks");
         assert!(error.contains("chain id mismatch"));
@@ -33486,7 +33654,7 @@ mod tests {
 
         let error = verify_public_launch_readiness_report(&path, &summary)
             .expect_err("re-rooted stale report should fail exact verification");
-        assert!(error.contains("does not match this run"));
+        assert!(error.contains("public_launch_package_file_set_root mismatch"));
         let _ = fs::remove_file(path);
     }
 
@@ -33610,8 +33778,10 @@ mod tests {
             .as_object_mut()
             .expect("version-tampered todo object")
             .remove("public_capture_todo_root");
-        version_tampered["public_capture_todo_root"] =
-            json!(value_root("public-capture-todo", &rootless_version_tampered));
+        version_tampered["public_capture_todo_root"] = json!(value_root(
+            "public-capture-todo",
+            &rootless_version_tampered
+        ));
         let error = ensure_public_capture_todo_artifact(&version_tampered)
             .expect_err("version-tampered capture todo should fail");
         assert!(error.contains("version mismatch"));
@@ -34010,10 +34180,7 @@ mod tests {
             .as_str()
             .expect("package scaffold command")
             .contains("--verify-public-deployment-capture-scaffold"));
-        assert_eq!(
-            manifest["next_steps"],
-            public_launch_package_next_steps()
-        );
+        assert_eq!(manifest["next_steps"], public_launch_package_next_steps());
         assert_eq!(
             manifest["next_steps_root"],
             public_deployment_capture_next_steps_root(&manifest["next_steps"])
@@ -34074,7 +34241,9 @@ mod tests {
                 .expect("readiness artifact root"),
             bool_str(summary.acceptance.no_mainnet_custody),
             manifest["commands_root"].as_str().expect("commands root"),
-            manifest["next_steps_root"].as_str().expect("next steps root"),
+            manifest["next_steps_root"]
+                .as_str()
+                .expect("next steps root"),
             manifest["command_sequence_root"]
                 .as_str()
                 .expect("command sequence root"),
@@ -34109,49 +34278,49 @@ mod tests {
         let next_steps = re_rooted_next_steps_tampered_manifest["next_steps"].clone();
         re_rooted_next_steps_tampered_manifest["next_steps_root"] =
             json!(public_deployment_capture_next_steps_root(&next_steps));
-        re_rooted_next_steps_tampered_manifest["package_manifest_root"] = json!(public_launch_package_manifest_root(
-            re_rooted_next_steps_tampered_manifest["manifest_id"]
-                .as_str()
-                .expect("manifest id"),
-            re_rooted_next_steps_tampered_manifest["testnet_id"]
-                .as_str()
-                .expect("testnet id"),
-            re_rooted_next_steps_tampered_manifest["artifact_set_root"]
-                .as_str()
-                .expect("artifact set root"),
-            re_rooted_next_steps_tampered_manifest["package_file_set_root"]
-                .as_str()
-                .expect("package file-set root"),
-            re_rooted_next_steps_tampered_manifest["public_launch_level"]
-                .as_str()
-                .expect("launch level"),
-            re_rooted_next_steps_tampered_manifest["public_launch_ready"]
-                .as_bool()
-                .expect("launch ready"),
-            re_rooted_next_steps_tampered_manifest["blocking_gap_count"]
-                .as_u64()
-                .expect("blocking gap count"),
-            re_rooted_next_steps_tampered_manifest["remediation_count"]
-                .as_u64()
-                .expect("remediation count"),
-            re_rooted_next_steps_tampered_manifest["public_launch_readiness_report_root"]
-                .as_str()
-                .expect("readiness report root"),
-            re_rooted_next_steps_tampered_manifest["public_launch_readiness_artifact_root"]
-                .as_str()
-                .expect("readiness artifact root"),
-            true,
-            re_rooted_next_steps_tampered_manifest["commands_root"]
-                .as_str()
-                .expect("commands root"),
-            re_rooted_next_steps_tampered_manifest["next_steps_root"]
-                .as_str()
-                .expect("next steps root"),
-            re_rooted_next_steps_tampered_manifest["command_sequence_root"]
-                .as_str()
-                .expect("command sequence root"),
-        )
-        );
+        re_rooted_next_steps_tampered_manifest["package_manifest_root"] =
+            json!(public_launch_package_manifest_root(
+                re_rooted_next_steps_tampered_manifest["manifest_id"]
+                    .as_str()
+                    .expect("manifest id"),
+                re_rooted_next_steps_tampered_manifest["testnet_id"]
+                    .as_str()
+                    .expect("testnet id"),
+                re_rooted_next_steps_tampered_manifest["artifact_set_root"]
+                    .as_str()
+                    .expect("artifact set root"),
+                re_rooted_next_steps_tampered_manifest["package_file_set_root"]
+                    .as_str()
+                    .expect("package file-set root"),
+                re_rooted_next_steps_tampered_manifest["public_launch_level"]
+                    .as_str()
+                    .expect("launch level"),
+                re_rooted_next_steps_tampered_manifest["public_launch_ready"]
+                    .as_bool()
+                    .expect("launch ready"),
+                re_rooted_next_steps_tampered_manifest["blocking_gap_count"]
+                    .as_u64()
+                    .expect("blocking gap count"),
+                re_rooted_next_steps_tampered_manifest["remediation_count"]
+                    .as_u64()
+                    .expect("remediation count"),
+                re_rooted_next_steps_tampered_manifest["public_launch_readiness_report_root"]
+                    .as_str()
+                    .expect("readiness report root"),
+                re_rooted_next_steps_tampered_manifest["public_launch_readiness_artifact_root"]
+                    .as_str()
+                    .expect("readiness artifact root"),
+                true,
+                re_rooted_next_steps_tampered_manifest["commands_root"]
+                    .as_str()
+                    .expect("commands root"),
+                re_rooted_next_steps_tampered_manifest["next_steps_root"]
+                    .as_str()
+                    .expect("next steps root"),
+                re_rooted_next_steps_tampered_manifest["command_sequence_root"]
+                    .as_str()
+                    .expect("command sequence root"),
+            ));
         fs::write(
             &package_manifest_path,
             serde_json::to_string_pretty(&re_rooted_next_steps_tampered_manifest)
@@ -34280,7 +34449,10 @@ mod tests {
             certification["next_steps"],
             public_testnet_certification_next_steps()
         );
-        assert_eq!(certification["commands"], public_deployment_capture_commands());
+        assert_eq!(
+            certification["commands"],
+            public_deployment_capture_commands()
+        );
         assert_eq!(
             certification["commands_root"],
             public_deployment_capture_commands_root(&certification["commands"])
@@ -34438,8 +34610,11 @@ mod tests {
         );
         assert_eq!(
             certification["package_public_deployment_capture_plan_root"],
-            public_launch_package_artifact_root(&package_manifest, "public-deployment-capture-plan")
-                .expect("package public deployment capture plan root")
+            public_launch_package_artifact_root(
+                &package_manifest,
+                "public-deployment-capture-plan"
+            )
+            .expect("package public deployment capture plan root")
         );
         assert_eq!(
             certification["public_deployment_capture_plan_root_bound_to_package"],
@@ -34472,7 +34647,9 @@ mod tests {
         assert!(cert_dir
             .join("nebula-public-launch-readiness-report.json")
             .exists());
-        assert!(cert_dir.join("nebula-release-approval-template.json").exists());
+        assert!(cert_dir
+            .join("nebula-release-approval-template.json")
+            .exists());
         assert!(cert_dir
             .join("nebula-release-authority-registry-template.json")
             .exists());
@@ -34983,7 +35160,10 @@ mod tests {
             value["public_launch_package_file_set_root"],
             public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id)
         );
-        assert_eq!(value["public_launch_package_handoff_root"], ROOT_PLACEHOLDER);
+        assert_eq!(
+            value["public_launch_package_handoff_root"],
+            ROOT_PLACEHOLDER
+        );
         assert_eq!(
             value["release_approval_template_root"],
             expected_release_approval_root
@@ -35765,8 +35945,7 @@ mod tests {
             REQUIRED_PUBLIC_DEPLOYMENT_PROBE_ROOT_FIELDS.to_vec()
         );
         let mut unsafe_plan = value.clone();
-        unsafe_plan["capture_contract"]["release_approval_template_root_required"] =
-            json!(false);
+        unsafe_plan["capture_contract"]["release_approval_template_root_required"] = json!(false);
         let error = ensure_public_deployment_capture_plan_redacted(&unsafe_plan)
             .expect_err("unsafe release template handoff should fail");
         assert!(error.contains("release approval template root"));
@@ -40111,7 +40290,11 @@ mod tests {
         let slow_summary = base_testnet.summary(Vec::new());
         assert!(!slow_summary.finality_latency_profile.passed);
         assert!(!slow_summary.public_deployment.passed);
-        assert!(!slow_summary.public_deployment.finality_latency_profile_passed);
+        assert!(
+            !slow_summary
+                .public_deployment
+                .finality_latency_profile_passed
+        );
         assert_eq!(
             slow_summary
                 .public_deployment
@@ -40124,7 +40307,11 @@ mod tests {
         base_testnet.cli.public_deployment_evidence = Some(evidence);
         let slower_summary = base_testnet.summary(Vec::new());
         assert!(!slower_summary.finality_latency_profile.passed);
-        assert!(!slower_summary.public_deployment.finality_latency_profile_passed);
+        assert!(
+            !slower_summary
+                .public_deployment
+                .finality_latency_profile_passed
+        );
         assert_ne!(
             slow_summary.finality_latency_profile.report_root,
             slower_summary.finality_latency_profile.report_root
@@ -40162,7 +40349,11 @@ mod tests {
         assert!(!rpc_only_summary.public_deployment.passed);
         assert!(!rpc_only_summary.public_deployment.endpoint_set_public);
         assert!(!rpc_only_summary.public_deployment.public_rpc_url_public);
-        assert!(rpc_only_summary.public_deployment.public_p2p_endpoint_public);
+        assert!(
+            rpc_only_summary
+                .public_deployment
+                .public_p2p_endpoint_public
+        );
 
         let mut p2p_only = evidence.clone();
         p2p_only.public_p2p_endpoint = "127.0.0.1:58481".to_string();
@@ -40171,7 +40362,11 @@ mod tests {
         assert!(!p2p_only_summary.public_deployment.passed);
         assert!(!p2p_only_summary.public_deployment.endpoint_set_public);
         assert!(p2p_only_summary.public_deployment.public_rpc_url_public);
-        assert!(!p2p_only_summary.public_deployment.public_p2p_endpoint_public);
+        assert!(
+            !p2p_only_summary
+                .public_deployment
+                .public_p2p_endpoint_public
+        );
         assert_ne!(
             rpc_only_summary.public_deployment.report_root,
             p2p_only_summary.public_deployment.report_root
@@ -40647,8 +40842,9 @@ mod tests {
         let mut evidence =
             load_public_deployment_evidence(&path).expect("public deployment evidence");
         let mut registry_count_only = evidence.clone();
-        registry_count_only.bootstrap_operator_registry_count =
-            registry_count_only.bootstrap_operator_count.saturating_sub(1);
+        registry_count_only.bootstrap_operator_registry_count = registry_count_only
+            .bootstrap_operator_count
+            .saturating_sub(1);
         base_testnet.cli.public_deployment_evidence = Some(registry_count_only);
         let registry_count_only_summary = base_testnet.summary(Vec::new());
         assert!(!registry_count_only_summary.public_deployment.passed);
@@ -41196,7 +41392,11 @@ mod tests {
                 .public_deployment
                 .public_launch_readiness_artifact_root_bound
         );
-        assert!(!summary.public_deployment.release_approval_template_root_bound);
+        assert!(
+            !summary
+                .public_deployment
+                .release_approval_template_root_bound
+        );
         assert!(
             !summary
                 .public_deployment
@@ -42663,21 +42863,36 @@ mod tests {
                 .repair_roots
                 .get("bootstrap_node_set_root_bound")
                 .map(String::as_str),
-            Some(summary.public_bootstrap_profile.bootstrap_node_set_root.as_str())
+            Some(
+                summary
+                    .public_bootstrap_profile
+                    .bootstrap_node_set_root
+                    .as_str()
+            )
         );
         assert_eq!(
             remediation
                 .repair_roots
                 .get("bootstrap_operator_set_root_bound")
                 .map(String::as_str),
-            Some(summary.public_bootstrap_profile.bootstrap_operator_set_root.as_str())
+            Some(
+                summary
+                    .public_bootstrap_profile
+                    .bootstrap_operator_set_root
+                    .as_str()
+            )
         );
         assert_eq!(
             remediation
                 .repair_roots
                 .get("bootstrap_region_set_root_bound")
                 .map(String::as_str),
-            Some(summary.public_bootstrap_profile.bootstrap_region_set_root.as_str())
+            Some(
+                summary
+                    .public_bootstrap_profile
+                    .bootstrap_region_set_root
+                    .as_str()
+            )
         );
         assert!(is_hex_root(&remediation.remediation_root));
         let public_status = public_status_manifest(&summary);
