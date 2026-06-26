@@ -1518,6 +1518,10 @@ struct PublicLaunchRemediation {
     failed_subchecks: Vec<String>,
     repair_roots: BTreeMap<String, String>,
     deferred_repair_root_subchecks: Vec<String>,
+    next_steps_root: String,
+    next_steps: Value,
+    command_sequence_root: String,
+    command_sequence: Value,
     privacy_classification: String,
     operator_private: bool,
     external_capture_required: bool,
@@ -7799,7 +7803,7 @@ fn public_launch_remediation_for_check(
                 "nebula-public-launch-artifacts.json + nebula-public-deployment.json",
                 "public-deployment-attestation",
                 "nebula-public-deployment.json",
-                "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-artifact-manifest nebula-public-launch-artifacts.json --write-public-deployment-capture-plan nebula-public-deployment-capture-plan.json --write-public-capture-todo nebula-public-capture-todo.json --verify-public-capture-todo nebula-public-capture-todo.json --write-public-deployment-evidence-template nebula-public-deployment-template.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json",
+                "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-artifact-manifest nebula-public-launch-artifacts.json --write-public-deployment-capture-plan nebula-public-deployment-capture-plan.json --write-public-capture-todo nebula-public-capture-todo.json --verify-public-capture-todo nebula-public-capture-todo.json --write-public-deployment-evidence-template nebula-public-deployment-template.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --fail-on-public-launch-gaps --json",
                 "external-capture",
                 "operator-captured-redacted",
                 true,
@@ -7927,6 +7931,22 @@ fn public_launch_remediation_for_check(
         "public-launch-remediation-deferred-repair-roots",
         deferred_repair_root_subchecks.clone(),
     );
+    let next_steps = if check.id == "public-launch-deployment-attestation" {
+        public_deployment_capture_next_steps(
+            "Fill capture.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, freshness, and runbook receipt evidence, then audit, verify, assemble, and run the public launch gate.",
+            true,
+        )
+    } else {
+        Value::Null
+    };
+    let next_steps_root = public_deployment_capture_next_steps_root(&next_steps);
+    let command_sequence = if check.id == "public-launch-deployment-attestation" {
+        public_deployment_capture_command_sequence()
+    } else {
+        Value::Null
+    };
+    let command_sequence_root =
+        public_deployment_capture_command_sequence_root(&command_sequence);
     let remediation_root = root(&[
         "public-launch-remediation",
         CHAIN_ID,
@@ -7940,6 +7960,8 @@ fn public_launch_remediation_for_check(
         &failed_subcheck_root,
         &repair_root,
         &deferred_repair_root,
+        &next_steps_root,
+        &command_sequence_root,
         privacy_classification,
         bool_str(operator_private),
         bool_str(external_capture_required),
@@ -7955,6 +7977,10 @@ fn public_launch_remediation_for_check(
         failed_subchecks,
         repair_roots,
         deferred_repair_root_subchecks,
+        next_steps_root,
+        next_steps,
+        command_sequence_root,
+        command_sequence,
         privacy_classification: privacy_classification.to_string(),
         operator_private,
         external_capture_required,
@@ -41316,7 +41342,48 @@ mod tests {
             .contains("--write-public-deployment-capture-plan"));
         assert!(remediation
             .command
+            .contains("--write-public-deployment-capture-audit"));
+        assert!(remediation
+            .command
+            .contains("--verify-public-deployment-capture-audit"));
+        assert!(remediation
+            .command
             .contains("--assemble-public-deployment-evidence"));
+        assert!(remediation
+            .command
+            .contains("--verify-public-deployment-evidence"));
+        assert_eq!(
+            remediation.next_steps["audit_capture"],
+            public_deployment_capture_commands()["audit_capture"]
+        );
+        assert_eq!(
+            remediation.next_steps["verify_capture_audit"],
+            public_deployment_capture_commands()["verify_capture_audit"]
+        );
+        assert_eq!(
+            remediation.next_steps["verify_capture"],
+            public_deployment_capture_commands()["verify_capture"]
+        );
+        assert_eq!(
+            remediation.next_steps["assemble_public_deployment"],
+            public_deployment_capture_commands()["assemble_public_deployment"]
+        );
+        assert_eq!(
+            remediation.next_steps["verify_public_launch"],
+            public_deployment_capture_commands()["verify_public_launch"]
+        );
+        assert_eq!(
+            remediation.next_steps_root,
+            public_deployment_capture_next_steps_root(&remediation.next_steps)
+        );
+        assert_eq!(
+            remediation.command_sequence,
+            public_deployment_capture_command_sequence()
+        );
+        assert_eq!(
+            remediation.command_sequence_root,
+            public_deployment_capture_command_sequence_root(&remediation.command_sequence)
+        );
         assert!(remediation.operator_private);
         assert!(remediation.external_capture_required);
         assert_eq!(
