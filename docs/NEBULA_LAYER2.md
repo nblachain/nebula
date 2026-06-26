@@ -3347,7 +3347,8 @@ real XMR.
   report, requires all repair-root values to be hex roots while identity values
   such as the package manifest id remain in expected values, requires the
   blocker, ready flag, level, and remediation lists to match the failed checks,
-  and rejects stale package-root, readiness-root, status, bundle, capture-plan,
+  rejects duplicate remediation subcheck/deferred-repair lists, and rejects
+  stale package-root, readiness-root, status, bundle, capture-plan,
   capture-contract, evidence-template, preflight, artifact-root, or
   deployment-evidence bindings before deployment CI consumes the report root.
 - Public launch automation consumes a redacted

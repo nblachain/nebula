@@ -22080,6 +22080,21 @@ fn required_nested_string_list(
         .collect()
 }
 
+fn ensure_unique_nested_string_list(
+    values: &[String],
+    key: &str,
+    label: &str,
+) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        ensure(
+            seen.insert(value.as_str()),
+            &format!("{label} {key} must not contain duplicate subcheck {value}"),
+        )?;
+    }
+    Ok(())
+}
+
 fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<String, String> {
     let label = "public launch remediation";
     let blocker_id = required_nested_str(remediation, "blocker_id", label)?;
@@ -22166,6 +22181,7 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
         )?;
     }
     let failed_subchecks = required_nested_string_list(remediation, "failed_subchecks", label)?;
+    ensure_unique_nested_string_list(&failed_subchecks, "failed_subchecks", label)?;
     let failed_subcheck_names = failed_subcheck_set(&failed_subchecks);
     let failed_subcheck_root = collection_root(
         "public-launch-remediation-failed-subchecks",
@@ -22239,6 +22255,11 @@ fn public_launch_remediation_root_from_value(remediation: &Value) -> Result<Stri
         collection_root("public-launch-remediation-expected-values", expected_values);
     let deferred_repair_root_subchecks =
         required_nested_string_list(remediation, "deferred_repair_root_subchecks", label)?;
+    ensure_unique_nested_string_list(
+        &deferred_repair_root_subchecks,
+        "deferred_repair_root_subchecks",
+        label,
+    )?;
     for subcheck in &deferred_repair_root_subchecks {
         ensure(
             failed_subcheck_names.contains(subcheck.as_str()),
@@ -36274,6 +36295,25 @@ mod tests {
             .expect_err("extra deferred subcheck should fail safety checks");
         assert!(error.contains(
             "public launch remediation deferred repair root for unexpected subcheck not_a_failed_subcheck"
+        ));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_duplicate_deferred_repair_subcheck() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["remediations"][0]["deferred_repair_root_subchecks"]
+            .as_array_mut()
+            .expect("deferred repair subchecks")
+            .push(json!("public_launch_package_handoff_root_bound"));
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("duplicate deferred subcheck should fail safety checks");
+        assert!(error.contains(
+            "public launch remediation deferred_repair_root_subchecks must not contain duplicate subcheck public_launch_package_handoff_root_bound"
         ));
     }
 
