@@ -9274,7 +9274,7 @@ fn public_deployment_capture_commands() -> Value {
         "verify_capture_audit": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json",
         "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json",
         "assemble_public_deployment": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json",
-        "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --json"
+        "verify_public_launch": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --fail-on-public-launch-gaps --json"
     })
 }
 
@@ -41423,6 +41423,10 @@ mod tests {
             remediation.next_steps["verify_public_launch"],
             public_deployment_capture_commands()["verify_public_launch"]
         );
+        assert!(remediation.next_steps["verify_public_launch"]
+            .as_str()
+            .expect("verify launch command")
+            .contains("--fail-on-public-launch-gaps"));
         assert_eq!(
             remediation.next_steps_root,
             public_deployment_capture_next_steps_root(&remediation.next_steps)
