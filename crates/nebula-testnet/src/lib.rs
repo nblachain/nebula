@@ -372,6 +372,33 @@ pub struct LaunchPackageReport {
     pub activation_height: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PublicStatusReport {
+    pub public_status_ready: bool,
+    pub level: &'static str,
+    pub public_status_manifest_root: String,
+    pub endpoint_url: String,
+    pub launch_bundle_root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PublicProbeReport {
+    pub public_probe_ready: bool,
+    pub level: &'static str,
+    pub public_probe_root: String,
+    pub endpoint_url: String,
+    pub launch_bundle_root: String,
+    pub fee_policy_root: String,
+}
+
+struct PublicSurfaceSample {
+    endpoint_url: String,
+    launch_bundle_root: String,
+    economics_root: String,
+    public_status_manifest: PublicStatusManifest,
+    public_probe: PublicProbe,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum FeeError {
     ZeroGas,
@@ -573,6 +600,20 @@ pub fn readiness_report() -> NebulaReadiness {
                 "genesis_binds_validator_count": true,
                 "genesis_binds_total_power": true,
             })),
+            "public_status_surface": stable_root(&json!({
+                "status": "deployment-attested",
+                "public_launch_ready": false,
+                "launch_bundle_root_required": true,
+                "endpoint_url_required": true,
+                "redacted_public_status": true,
+            })),
+            "public_probe_surface": stable_root(&json!({
+                "status_code": 200,
+                "body_chain_id_required": true,
+                "body_launch_bundle_root_required": true,
+                "body_fee_policy_root_required": true,
+                "unexpected_fields_rejected": true,
+            })),
             "guide": stable_root(&json!({
                 "root_readme": "README.md",
                 "guide": "docs/NEBULA_LAYER2.md",
@@ -716,6 +757,70 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
     };
 
     serde_json::to_string_pretty(&attestation).expect("sample attestation serializes")
+}
+
+pub fn sample_public_status_manifest_json_pretty() -> String {
+    let sample = sample_public_surface();
+    serde_json::to_string_pretty(&sample.public_status_manifest)
+        .expect("sample public status manifest serializes")
+}
+
+pub fn sample_public_probe_json_pretty() -> String {
+    let sample = sample_public_surface();
+    serde_json::to_string_pretty(&sample.public_probe).expect("sample public probe serializes")
+}
+
+pub fn verify_public_status_manifest_json(
+    input: &str,
+) -> Result<PublicStatusReport, AttestationError> {
+    let input = input.trim_start_matches('\u{feff}');
+    let manifest = serde_json::from_str::<PublicStatusManifest>(input)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let mut errors = Vec::new();
+    let expected = sample_public_surface();
+
+    verify_public_status_manifest(&mut errors, &manifest, &expected.launch_bundle_root);
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    Ok(PublicStatusReport {
+        public_status_ready: true,
+        level: "public-status-attested",
+        public_status_manifest_root: manifest.root,
+        endpoint_url: manifest.endpoint_url,
+        launch_bundle_root: manifest.launch_bundle_root,
+    })
+}
+
+pub fn verify_public_probe_json(input: &str) -> Result<PublicProbeReport, AttestationError> {
+    let input = input.trim_start_matches('\u{feff}');
+    let probe = serde_json::from_str::<PublicProbe>(input)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let mut errors = Vec::new();
+    let expected = sample_public_surface();
+
+    verify_public_probe(
+        &mut errors,
+        &probe,
+        &expected.endpoint_url,
+        &expected.launch_bundle_root,
+        &expected.economics_root,
+    );
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    Ok(PublicProbeReport {
+        public_probe_ready: true,
+        level: "public-probe-attested",
+        public_probe_root: probe.root,
+        endpoint_url: probe.url,
+        launch_bundle_root: probe.body.launch_bundle_root,
+        fee_policy_root: probe.body.fee_policy_root,
+    })
 }
 
 pub fn sample_validator_set_json_pretty() -> String {
@@ -1215,6 +1320,32 @@ fn sample_launch_bundle(
     };
     launch_bundle.root = launch_bundle_root(&launch_bundle);
     launch_bundle
+}
+
+fn sample_public_surface() -> PublicSurfaceSample {
+    let package_identity = sample_package_identity();
+    let readiness = readiness_report();
+    let runtime_root = readiness.status_roots["runtime"]
+        .as_str()
+        .expect("runtime root is a string")
+        .to_string();
+    let economics_root = readiness.status_roots["economics"]
+        .as_str()
+        .expect("economics root is a string")
+        .to_string();
+    let launch_bundle =
+        sample_launch_bundle(&package_identity.root, &runtime_root, &economics_root);
+    let endpoint_url = "https://testnet.nebula.example/status".to_string();
+    let public_status_manifest = sample_public_status_manifest(&launch_bundle.root, &endpoint_url);
+    let public_probe = sample_public_probe(&endpoint_url, &launch_bundle.root, &economics_root);
+
+    PublicSurfaceSample {
+        endpoint_url,
+        launch_bundle_root: launch_bundle.root,
+        economics_root,
+        public_status_manifest,
+        public_probe,
+    }
 }
 
 fn sample_public_status_manifest(
@@ -2008,6 +2139,52 @@ mod public_launch {
         assert_eq!(report.verified_observer_count, 2);
         assert_eq!(report.verified_region_count, 2);
         assert_eq!(report.evidence_root.len(), 64);
+    }
+
+    #[test]
+    fn sample_public_status_manifest_verifies_surface() {
+        let report =
+            verify_public_status_manifest_json(&sample_public_status_manifest_json_pretty())
+                .unwrap();
+
+        assert!(report.public_status_ready);
+        assert_eq!(report.level, "public-status-attested");
+        assert_eq!(report.public_status_manifest_root.len(), 64);
+        assert_eq!(report.endpoint_url, "https://testnet.nebula.example/status");
+        assert_eq!(report.launch_bundle_root.len(), 64);
+    }
+
+    #[test]
+    fn sample_public_probe_verifies_surface() {
+        let report = verify_public_probe_json(&sample_public_probe_json_pretty()).unwrap();
+
+        assert!(report.public_probe_ready);
+        assert_eq!(report.level, "public-probe-attested");
+        assert_eq!(report.public_probe_root.len(), 64);
+        assert_eq!(report.endpoint_url, "https://testnet.nebula.example/status");
+        assert_eq!(report.launch_bundle_root.len(), 64);
+        assert_eq!(report.fee_policy_root.len(), 64);
+    }
+
+    #[test]
+    fn public_status_rejects_unknown_fields() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_public_status_manifest_json_pretty()).unwrap();
+        value["unexpected_field"] = json!(true);
+
+        let error = verify_public_status_manifest_json(&value.to_string()).unwrap_err();
+
+        assert!(matches!(error, AttestationError::MalformedJson(_)));
+    }
+
+    #[test]
+    fn public_probe_rejects_unexpected_body_fields() {
+        let mut value = serde_json::from_str::<Value>(&sample_public_probe_json_pretty()).unwrap();
+        value["body"]["unexpected_field"] = json!(true);
+
+        let error = verify_public_probe_json(&value.to_string()).unwrap_err();
+
+        assert!(matches!(error, AttestationError::MalformedJson(_)));
     }
 
     #[test]

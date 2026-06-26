@@ -66,6 +66,37 @@ jobs:
           assert roots["validator_admission"]
           assert roots["genesis_manifest"]
           assert roots["launch_package"]
+          assert roots["public_status_surface"]
+          assert roots["public_probe_surface"]
+          PY
+
+      - name: Verify public status and probe surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(mktemp)"
+          probe="$(mktemp)"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > "$status"
+          status_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-status "$status" --json)"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-probe > "$probe"
+          probe_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-probe "$probe" --json)"
+          NEBULA_PUBLIC_STATUS_JSON="$status_output" NEBULA_PUBLIC_PROBE_JSON="$probe_output" python3 - <<'PY'
+          import json
+          import os
+
+          status = json.loads(os.environ["NEBULA_PUBLIC_STATUS_JSON"])
+          probe = json.loads(os.environ["NEBULA_PUBLIC_PROBE_JSON"])
+          assert status["public_status_ready"] is True
+          assert status["level"] == "public-status-attested"
+          assert len(status["public_status_manifest_root"]) == 64
+          assert status["endpoint_url"] == "https://testnet.nebula.example/status"
+          assert len(status["launch_bundle_root"]) == 64
+          assert probe["public_probe_ready"] is True
+          assert probe["level"] == "public-probe-attested"
+          assert len(probe["public_probe_root"]) == 64
+          assert probe["endpoint_url"] == status["endpoint_url"]
+          assert probe["launch_bundle_root"] == status["launch_bundle_root"]
+          assert len(probe["fee_policy_root"]) == 64
           PY
 
       - name: Verify deployment attestation gate

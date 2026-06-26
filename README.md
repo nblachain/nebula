@@ -46,6 +46,10 @@ cargo fmt --manifest-path crates/nebula-testnet/Cargo.toml -- --check
 cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
 cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > /tmp/nebula-public-status.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-status /tmp/nebula-public-status.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-probe > /tmp/nebula-public-probe.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-probe /tmp/nebula-public-probe.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > /tmp/nebula-attestation.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-deployment-attestation /tmp/nebula-attestation.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-validator-set > /tmp/nebula-validator-set.json
@@ -63,6 +67,7 @@ The public launch suite covers:
 - deployment evidence root binding
 - public status manifest redaction
 - public endpoint and TLS pin evidence
+- standalone public status/probe surface exact-shape validation
 - policy claim and public probe body exact-shape validation
 - preflight and runbook receipt exact-shape validation
 - bootstrap node/operator and observer attestation exact-shape validation
@@ -100,11 +105,12 @@ The active GitHub Actions workflow is Nebula-owned:
 3. Build `nebula-testnet`.
 4. Run the Nebula test suite.
 5. Assert the current readiness contract.
-6. Generate and verify a deployment attestation sample.
-7. Generate and verify a validator-set manifest sample.
-8. Build and verify a genesis manifest from the verified samples.
-9. Verify the launch package is internally coherent.
-10. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
+6. Generate and verify public status and probe samples.
+7. Generate and verify a deployment attestation sample.
+8. Generate and verify a validator-set manifest sample.
+9. Build and verify a genesis manifest from the verified samples.
+10. Verify the launch package is internally coherent.
+11. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
 
 Legacy upstream CI for daemon, wallet, Guix, depends, Docker daemon images, and
 source archives has been removed.
@@ -125,6 +131,16 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 
 Until an operator provides fresh deployment evidence that satisfies those rules,
 `public_launch_ready` must remain `false`.
+
+Operators can generate and verify the public status/probe surface before filling
+deployment evidence:
+
+```bash
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > /tmp/nebula-public-status.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-status /tmp/nebula-public-status.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-probe > /tmp/nebula-public-probe.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-probe /tmp/nebula-public-probe.json --json
+```
 
 Operators can generate the required shape and verify a filled attestation with:
 
