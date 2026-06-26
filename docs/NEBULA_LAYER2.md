@@ -3403,9 +3403,10 @@ real XMR.
   capture worksheet with the current capture-plan root, capture-contract root,
   public deployment evidence-template root, deployment preflight checklist
   root, package file-set root, package handoff root, package manifest root,
-  readiness artifact root, release-template roots, and matching
-  preflight/runbook receipt bindings already filled. The release-template roots
-  are copied from the verified package's release approval and release-authority
+  package schema/version/chain/run identity, readiness artifact root,
+  release-template roots, and matching preflight/runbook receipt bindings
+  already filled. The release-template roots are copied from the verified
+  package's release approval and release-authority
   registry template files. The scaffold is still marked operator-fill-required
   and unusable as public deployment evidence; live endpoints, TLS pins, public
   probes, bootstrap/operator records, observer signatures, freshness, and the
@@ -3482,7 +3483,8 @@ real XMR.
   invalid deployment run ids, malformed preflight receipt fields or phases,
   malformed runbook receipt fields or steps, expected capture-plan,
   capture-contract, evidence-template, preflight, package-manifest,
-  readiness-artifact, release-approval-template, and
+  package schema/version/chain/run identity, readiness-artifact,
+  release-approval-template, and
   release-authority-registry-template roots, mismatched frozen launch/status
   roots,
   missing or extra TLS endpoint pin roles,

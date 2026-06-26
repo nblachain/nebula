@@ -616,11 +616,11 @@ then writes a non-evidence schema v5 capture scaffold with the current
 `capture_plan_root`, `capture_contract_root`,
 `public_deployment_evidence_template_root`,
 `deployment_preflight_checklist_root`, package file-set root, package handoff
-root, package manifest root, readiness artifact root, release-template roots, and matching
-preflight/runbook receipt bindings already filled from the verified package and
-current release-candidate summary. The release-template roots are copied from
-the verified package's release approval and release-authority registry template
-files.
+root, package manifest root, package schema/version/chain/run identity,
+readiness artifact root, release-template roots, and matching preflight/runbook
+receipt bindings already filled from the verified package and current
+release-candidate summary. The release-template roots are copied from the
+verified package's release approval and release-authority registry template files.
 The scaffold still contains placeholders for the live public endpoints, TLS
 pins, probe transcripts, bootstrap/operator records, observer signatures,
 freshness window, and evidence root, so `--audit-public-deployment-capture`
@@ -656,7 +656,7 @@ indexes, sensitive key markers, public-forbidden key names, size/parseability
 checks, current capture-plan/contract/preflight root matches, expected
 capture-plan, capture-contract, evidence-template, and preflight roots, the
 expected package file-set root, expected package handoff root, package
-file-set/handoff root matches, and
+schema/version/chain/run identity matches, file-set/handoff root matches, and
 `structural_failed_checks`/`failed_checks` arrays with counts for CI routing,
 rooted command map, rooted `next_steps`, the rooted capture command sequence, and an
 `assembler_ready` boolean. It is diagnostic only:

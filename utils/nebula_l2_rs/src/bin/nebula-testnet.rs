@@ -11072,6 +11072,16 @@ fn public_deployment_capture_scaffold(
         required_root(package_manifest, "package_file_set_root")?;
     let public_launch_package_manifest_root =
         required_root(package_manifest, "package_manifest_root")?;
+    let public_launch_package_schema_version =
+        required_u64(package_manifest, "schema_version")?;
+    let public_launch_package_chain_id =
+        required_str(package_manifest, "chain_id")?;
+    let public_launch_package_version =
+        required_str(package_manifest, "version")?;
+    let public_launch_package_manifest_id =
+        required_str(package_manifest, "manifest_id")?;
+    let public_launch_package_testnet_id =
+        required_str(package_manifest, "testnet_id")?;
     let public_launch_readiness_artifact_root =
         required_root(launch_report, "public_launch_readiness_artifact_root")?;
     let release_approval_template_root =
@@ -11105,6 +11115,12 @@ fn public_deployment_capture_scaffold(
     scaffold["public_launch_package_file_set_root"] = json!(public_launch_package_file_set_root);
     scaffold["public_launch_package_handoff_root"] = json!(public_launch_package_handoff_root);
     scaffold["public_launch_package_manifest_root"] = json!(public_launch_package_manifest_root);
+    scaffold["public_launch_package_schema_version"] =
+        json!(public_launch_package_schema_version);
+    scaffold["public_launch_package_chain_id"] = json!(public_launch_package_chain_id);
+    scaffold["public_launch_package_version"] = json!(public_launch_package_version);
+    scaffold["public_launch_package_manifest_id"] = json!(public_launch_package_manifest_id);
+    scaffold["public_launch_package_testnet_id"] = json!(public_launch_package_testnet_id);
     scaffold["public_launch_readiness_artifact_root"] =
         json!(public_launch_readiness_artifact_root);
     scaffold["release_approval_template_root"] = json!(release_approval_template_root);
@@ -11874,6 +11890,32 @@ fn public_deployment_capture_audit(
     missing_endpoint_fields.sort();
     invalid_endpoint_fields.sort();
     invalid_capture_time_fields.sort();
+    let capture_value_for_package_identity = serde_json::from_slice::<Value>(&bytes).ok();
+    let public_launch_package_schema_version_matches = capture_value_for_package_identity
+        .as_ref()
+        .and_then(|value| value.get("public_launch_package_schema_version"))
+        .and_then(Value::as_u64)
+        == Some(1);
+    let public_launch_package_chain_id_matches = capture_value_for_package_identity
+        .as_ref()
+        .and_then(|value| value.get("public_launch_package_chain_id"))
+        .and_then(Value::as_str)
+        == Some(CHAIN_ID);
+    let public_launch_package_version_matches = capture_value_for_package_identity
+        .as_ref()
+        .and_then(|value| value.get("public_launch_package_version"))
+        .and_then(Value::as_str)
+        == Some(VERSION);
+    let public_launch_package_manifest_id_matches = capture_value_for_package_identity
+        .as_ref()
+        .and_then(|value| value.get("public_launch_package_manifest_id"))
+        .and_then(Value::as_str)
+        == Some(summary.manifest_id.as_str());
+    let public_launch_package_testnet_id_matches = capture_value_for_package_identity
+        .as_ref()
+        .and_then(|value| value.get("public_launch_package_testnet_id"))
+        .and_then(Value::as_str)
+        == Some(summary.testnet_id.as_str());
     let structural_ready = within_size_limit
         && parseable_json
         && top_level_object
@@ -12126,6 +12168,16 @@ fn public_deployment_capture_audit(
         "public_launch_package_file_set_root_matches": public_launch_package_file_set_root_matches,
         "expected_public_launch_package_handoff_root": expected_public_launch_package_handoff_root,
         "public_launch_package_handoff_root_matches": public_launch_package_handoff_root_matches,
+        "expected_public_launch_package_schema_version": 1,
+        "public_launch_package_schema_version_matches": public_launch_package_schema_version_matches,
+        "expected_public_launch_package_chain_id": CHAIN_ID,
+        "public_launch_package_chain_id_matches": public_launch_package_chain_id_matches,
+        "expected_public_launch_package_version": VERSION,
+        "public_launch_package_version_matches": public_launch_package_version_matches,
+        "expected_public_launch_package_manifest_id": &summary.manifest_id,
+        "public_launch_package_manifest_id_matches": public_launch_package_manifest_id_matches,
+        "expected_public_launch_package_testnet_id": &summary.testnet_id,
+        "public_launch_package_testnet_id_matches": public_launch_package_testnet_id_matches,
         "structural_ready": structural_ready,
         "structural_failed_check_count": structural_failed_checks.len(),
         "structural_failed_checks": structural_failed_checks,
@@ -35527,6 +35579,17 @@ mod tests {
             scaffold["public_launch_package_manifest_root"],
             package_manifest["package_manifest_root"]
         );
+        assert_eq!(scaffold["public_launch_package_schema_version"], 1);
+        assert_eq!(scaffold["public_launch_package_chain_id"], CHAIN_ID);
+        assert_eq!(scaffold["public_launch_package_version"], VERSION);
+        assert_eq!(
+            scaffold["public_launch_package_manifest_id"],
+            package_manifest["manifest_id"]
+        );
+        assert_eq!(
+            scaffold["public_launch_package_testnet_id"],
+            package_manifest["testnet_id"]
+        );
         assert_eq!(
             scaffold["public_launch_readiness_artifact_root"],
             launch_report["public_launch_readiness_artifact_root"]
@@ -35576,6 +35639,11 @@ mod tests {
             audit["expected_public_launch_package_handoff_root"],
             expected_package_handoff_root
         );
+        assert_eq!(audit["public_launch_package_schema_version_matches"], true);
+        assert_eq!(audit["public_launch_package_chain_id_matches"], true);
+        assert_eq!(audit["public_launch_package_version_matches"], true);
+        assert_eq!(audit["public_launch_package_manifest_id_matches"], true);
+        assert_eq!(audit["public_launch_package_testnet_id_matches"], true);
         assert_eq!(audit["public_launch_package_manifest_root_matches"], true);
         assert_eq!(audit["public_launch_readiness_artifact_root_matches"], true);
         assert_eq!(audit["placeholder_present"], true);
@@ -35649,6 +35717,25 @@ mod tests {
             &summary,
         )
         .expect_err("tampered scaffold should fail verification");
+        assert!(error.contains("does not match this run and package"));
+
+        write_public_deployment_capture_scaffold(&scaffold_path, &package_dir_string, &summary)
+            .expect("rewrite public deployment capture scaffold");
+        let mut scaffold: Value =
+            serde_json::from_slice(&fs::read(&scaffold_path).expect("read scaffold"))
+                .expect("scaffold json");
+        scaffold["public_launch_package_version"] = json!("wrong-package-version");
+        fs::write(
+            &scaffold_path,
+            serde_json::to_string_pretty(&scaffold).expect("scaffold json"),
+        )
+        .expect("write package identity tampered scaffold");
+        let error = verify_public_deployment_capture_scaffold(
+            &scaffold_path,
+            &package_dir_string,
+            &summary,
+        )
+        .expect_err("package identity tampered scaffold should fail verification");
         assert!(error.contains("does not match this run and package"));
 
         write_public_deployment_capture_scaffold(&scaffold_path, &package_dir_string, &summary)
