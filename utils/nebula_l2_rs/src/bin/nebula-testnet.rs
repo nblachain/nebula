@@ -1189,6 +1189,11 @@ struct PublicDeploymentReport {
     passed: bool,
     report_root: String,
     evidence_root: Option<String>,
+    expected_evidence_root: Option<String>,
+    evidence_root_bound: bool,
+    provenance_root: Option<String>,
+    expected_provenance_root: Option<String>,
+    provenance_root_bound: bool,
     evidence_shape_verified: bool,
     placeholders_absent: bool,
     public_bootstrap_profile_passed: bool,
@@ -1204,6 +1209,12 @@ struct PublicDeploymentReport {
     public_launch_package_handoff_root_bound: bool,
     public_launch_package_manifest_root_bound: bool,
     public_launch_readiness_artifact_root_bound: bool,
+    public_launch_package_identity_bound: bool,
+    public_launch_package_schema_version_bound: bool,
+    public_launch_package_chain_id_bound: bool,
+    public_launch_package_version_bound: bool,
+    public_launch_package_manifest_id_bound: bool,
+    public_launch_package_testnet_id_bound: bool,
     release_approval_template_root_bound: bool,
     release_authority_registry_template_root_bound: bool,
     bootstrap_profile_bound: bool,
@@ -1281,6 +1292,16 @@ struct PublicDeploymentReport {
     expected_public_launch_package_manifest_root: Option<String>,
     public_launch_readiness_artifact_root: Option<String>,
     expected_public_launch_readiness_artifact_root: Option<String>,
+    public_launch_package_schema_version: u64,
+    expected_public_launch_package_schema_version: Option<u64>,
+    public_launch_package_chain_id: Option<String>,
+    expected_public_launch_package_chain_id: Option<String>,
+    public_launch_package_version: Option<String>,
+    expected_public_launch_package_version: Option<String>,
+    public_launch_package_manifest_id: Option<String>,
+    expected_public_launch_package_manifest_id: Option<String>,
+    public_launch_package_testnet_id: Option<String>,
+    expected_public_launch_package_testnet_id: Option<String>,
     release_approval_template_root: Option<String>,
     expected_release_approval_template_root: Option<String>,
     release_authority_registry_template_root: Option<String>,
@@ -5741,6 +5762,11 @@ impl Testnet {
             public_launch_package_manifest_root_for_summary(summary);
         let expected_public_launch_readiness_artifact_root =
             public_launch_readiness_artifact_root_for_summary(summary);
+        let expected_public_launch_package_schema_version = 1;
+        let expected_public_launch_package_chain_id = CHAIN_ID.to_string();
+        let expected_public_launch_package_version = VERSION.to_string();
+        let expected_public_launch_package_manifest_id = summary.manifest_id.clone();
+        let expected_public_launch_package_testnet_id = summary.testnet_id.clone();
         let expected_launch_artifact_manifest = public_launch_artifact_manifest(summary);
         let expected_release_approval_template_root = expected_launch_artifact_manifest
             .pointer("/source_roots/release_approval_template_root")
@@ -5889,6 +5915,22 @@ impl Testnet {
         let public_launch_readiness_artifact_root_bound = evidence
             .public_launch_readiness_artifact_root
             == expected_public_launch_readiness_artifact_root;
+        let public_launch_package_schema_version_bound = evidence
+            .public_launch_package_schema_version
+            == expected_public_launch_package_schema_version;
+        let public_launch_package_chain_id_bound =
+            evidence.public_launch_package_chain_id == expected_public_launch_package_chain_id;
+        let public_launch_package_version_bound =
+            evidence.public_launch_package_version == expected_public_launch_package_version;
+        let public_launch_package_manifest_id_bound = evidence.public_launch_package_manifest_id
+            == expected_public_launch_package_manifest_id;
+        let public_launch_package_testnet_id_bound =
+            evidence.public_launch_package_testnet_id == expected_public_launch_package_testnet_id;
+        let public_launch_package_identity_bound = public_launch_package_schema_version_bound
+            && public_launch_package_chain_id_bound
+            && public_launch_package_version_bound
+            && public_launch_package_manifest_id_bound
+            && public_launch_package_testnet_id_bound;
         let release_approval_template_root_bound =
             evidence.release_approval_template_root == expected_release_approval_template_root;
         let release_authority_registry_template_root_bound = evidence
@@ -6256,7 +6298,19 @@ impl Testnet {
         let public_bootstrap_profile_passed = summary.public_bootstrap_profile.passed;
         let finality_latency_profile_passed = summary.finality_latency_profile.passed;
         let mainnet_custody_disabled = evidence.mainnet_custody_disabled;
-        let passed = placeholders_absent
+        let evidence_shape_verified =
+            evidence.schema_version == PUBLIC_DEPLOYMENT_EVIDENCE_SCHEMA_VERSION;
+        let expected_provenance_root = public_deployment_provenance_root(evidence);
+        let provenance_root_bound = evidence.provenance_root == expected_provenance_root;
+        let mut evidence_with_expected_provenance = evidence.clone();
+        evidence_with_expected_provenance.provenance_root = expected_provenance_root.clone();
+        let expected_evidence_root =
+            public_deployment_attestation_root(&evidence_with_expected_provenance);
+        let evidence_root_bound = evidence.evidence_root == expected_evidence_root;
+        let passed = evidence_shape_verified
+            && evidence_root_bound
+            && provenance_root_bound
+            && placeholders_absent
             && capture_plan_bound
             && matches_current_manifest
             && public_launch_bundle_root_bound
@@ -6264,6 +6318,7 @@ impl Testnet {
             && public_launch_package_handoff_root_bound
             && public_launch_package_manifest_root_bound
             && public_launch_readiness_artifact_root_bound
+            && public_launch_package_identity_bound
             && release_approval_template_root_bound
             && release_authority_registry_template_root_bound
             && bootstrap_profile_bound
@@ -6317,6 +6372,9 @@ impl Testnet {
             CHAIN_ID,
             &summary.manifest_id,
             &evidence.evidence_root,
+            &expected_evidence_root,
+            &evidence.provenance_root,
+            &expected_provenance_root,
             &evidence.capture_plan_root,
             &expected_capture_plan_root,
             &evidence.capture_contract_root,
@@ -6361,6 +6419,16 @@ impl Testnet {
             &expected_public_launch_package_manifest_root,
             &evidence.public_launch_readiness_artifact_root,
             &expected_public_launch_readiness_artifact_root,
+            &evidence.public_launch_package_schema_version.to_string(),
+            &expected_public_launch_package_schema_version.to_string(),
+            &evidence.public_launch_package_chain_id,
+            &expected_public_launch_package_chain_id,
+            &evidence.public_launch_package_version,
+            &expected_public_launch_package_version,
+            &evidence.public_launch_package_manifest_id,
+            &expected_public_launch_package_manifest_id,
+            &evidence.public_launch_package_testnet_id,
+            &expected_public_launch_package_testnet_id,
             &evidence.release_approval_template_root,
             &expected_release_approval_template_root,
             &evidence.release_authority_registry_template_root,
@@ -6513,8 +6581,12 @@ impl Testnet {
             passed,
             report_root,
             evidence_root: Some(evidence.evidence_root.clone()),
-            evidence_shape_verified: evidence.schema_version
-                == PUBLIC_DEPLOYMENT_EVIDENCE_SCHEMA_VERSION,
+            expected_evidence_root: Some(expected_evidence_root),
+            evidence_root_bound,
+            provenance_root: Some(evidence.provenance_root.clone()),
+            expected_provenance_root: Some(expected_provenance_root),
+            provenance_root_bound,
+            evidence_shape_verified,
             placeholders_absent,
             public_bootstrap_profile_passed,
             finality_latency_profile_passed,
@@ -6529,6 +6601,12 @@ impl Testnet {
             public_launch_package_handoff_root_bound,
             public_launch_package_manifest_root_bound,
             public_launch_readiness_artifact_root_bound,
+            public_launch_package_identity_bound,
+            public_launch_package_schema_version_bound,
+            public_launch_package_chain_id_bound,
+            public_launch_package_version_bound,
+            public_launch_package_manifest_id_bound,
+            public_launch_package_testnet_id_bound,
             release_approval_template_root_bound,
             release_authority_registry_template_root_bound,
             bootstrap_profile_bound,
@@ -6621,6 +6699,26 @@ impl Testnet {
             ),
             expected_public_launch_readiness_artifact_root: Some(
                 expected_public_launch_readiness_artifact_root,
+            ),
+            public_launch_package_schema_version: evidence.public_launch_package_schema_version,
+            expected_public_launch_package_schema_version: Some(
+                expected_public_launch_package_schema_version,
+            ),
+            public_launch_package_chain_id: Some(evidence.public_launch_package_chain_id.clone()),
+            expected_public_launch_package_chain_id: Some(expected_public_launch_package_chain_id),
+            public_launch_package_version: Some(evidence.public_launch_package_version.clone()),
+            expected_public_launch_package_version: Some(expected_public_launch_package_version),
+            public_launch_package_manifest_id: Some(
+                evidence.public_launch_package_manifest_id.clone(),
+            ),
+            expected_public_launch_package_manifest_id: Some(
+                expected_public_launch_package_manifest_id,
+            ),
+            public_launch_package_testnet_id: Some(
+                evidence.public_launch_package_testnet_id.clone(),
+            ),
+            expected_public_launch_package_testnet_id: Some(
+                expected_public_launch_package_testnet_id,
             ),
             release_approval_template_root: Some(evidence.release_approval_template_root.clone()),
             expected_release_approval_template_root: Some(expected_release_approval_template_root),
@@ -7797,6 +7895,11 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
             "missing-public-deployment-evidence",
         ]),
         evidence_root: None,
+        expected_evidence_root: None,
+        evidence_root_bound: false,
+        provenance_root: None,
+        expected_provenance_root: None,
+        provenance_root_bound: false,
         evidence_shape_verified: false,
         placeholders_absent: false,
         public_bootstrap_profile_passed: false,
@@ -7812,6 +7915,12 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         public_launch_package_handoff_root_bound: false,
         public_launch_package_manifest_root_bound: false,
         public_launch_readiness_artifact_root_bound: false,
+        public_launch_package_identity_bound: false,
+        public_launch_package_schema_version_bound: false,
+        public_launch_package_chain_id_bound: false,
+        public_launch_package_version_bound: false,
+        public_launch_package_manifest_id_bound: false,
+        public_launch_package_testnet_id_bound: false,
         release_approval_template_root_bound: false,
         release_authority_registry_template_root_bound: false,
         bootstrap_profile_bound: false,
@@ -7889,6 +7998,16 @@ fn missing_public_deployment_report(manifest_id: &str) -> PublicDeploymentReport
         expected_public_launch_package_manifest_root: None,
         public_launch_readiness_artifact_root: None,
         expected_public_launch_readiness_artifact_root: None,
+        public_launch_package_schema_version: 0,
+        expected_public_launch_package_schema_version: None,
+        public_launch_package_chain_id: None,
+        expected_public_launch_package_chain_id: None,
+        public_launch_package_version: None,
+        expected_public_launch_package_version: None,
+        public_launch_package_manifest_id: None,
+        expected_public_launch_package_manifest_id: None,
+        public_launch_package_testnet_id: None,
+        expected_public_launch_package_testnet_id: None,
         release_approval_template_root: None,
         expected_release_approval_template_root: None,
         release_authority_registry_template_root: None,
@@ -8564,6 +8683,14 @@ fn public_deployment_repair_roots(
         .collect::<BTreeSet<_>>();
     let candidates = [
         (
+            "evidence_root_bound",
+            report.expected_evidence_root.as_deref(),
+        ),
+        (
+            "provenance_root_bound",
+            report.expected_provenance_root.as_deref(),
+        ),
+        (
             "capture_plan_root_bound",
             report.expected_capture_plan_root.as_deref(),
         ),
@@ -8616,6 +8743,10 @@ fn public_deployment_repair_roots(
             report
                 .expected_public_launch_readiness_artifact_root
                 .as_deref(),
+        ),
+        (
+            "public_launch_package_manifest_id_bound",
+            report.expected_public_launch_package_manifest_id.as_deref(),
         ),
         (
             "release_approval_template_root_bound",
@@ -8808,6 +8939,8 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
         failed.push("public_deployment_attestation_available".to_string());
     }
     for (id, passed) in [
+        ("evidence_root_bound", report.evidence_root_bound),
+        ("provenance_root_bound", report.provenance_root_bound),
         (
             "public_deployment_evidence_shape_verified",
             report.evidence_shape_verified,
@@ -8855,6 +8988,30 @@ fn public_deployment_failed_subchecks(report: &PublicDeploymentReport) -> Vec<St
         (
             "public_launch_readiness_artifact_root_bound",
             report.public_launch_readiness_artifact_root_bound,
+        ),
+        (
+            "public_launch_package_identity_bound",
+            report.public_launch_package_identity_bound,
+        ),
+        (
+            "public_launch_package_schema_version_bound",
+            report.public_launch_package_schema_version_bound,
+        ),
+        (
+            "public_launch_package_chain_id_bound",
+            report.public_launch_package_chain_id_bound,
+        ),
+        (
+            "public_launch_package_version_bound",
+            report.public_launch_package_version_bound,
+        ),
+        (
+            "public_launch_package_manifest_id_bound",
+            report.public_launch_package_manifest_id_bound,
+        ),
+        (
+            "public_launch_package_testnet_id_bound",
+            report.public_launch_package_testnet_id_bound,
         ),
         (
             "release_approval_template_root_bound",
@@ -38294,6 +38451,84 @@ mod tests {
                 .expect("expected readiness artifact root"),
             public_launch_readiness_artifact_root_for_summary(&summary)
         );
+        assert!(summary.public_deployment.evidence_shape_verified);
+        assert!(summary.public_deployment.evidence_root_bound);
+        assert!(summary.public_deployment.provenance_root_bound);
+        assert_eq!(
+            summary.public_deployment.evidence_root.as_deref(),
+            summary.public_deployment.expected_evidence_root.as_deref()
+        );
+        assert_eq!(
+            summary.public_deployment.provenance_root.as_deref(),
+            summary
+                .public_deployment
+                .expected_provenance_root
+                .as_deref()
+        );
+        assert!(
+            summary
+                .public_deployment
+                .public_launch_package_identity_bound
+        );
+        assert!(
+            summary
+                .public_deployment
+                .public_launch_package_schema_version_bound
+        );
+        assert!(
+            summary
+                .public_deployment
+                .public_launch_package_chain_id_bound
+        );
+        assert!(
+            summary
+                .public_deployment
+                .public_launch_package_version_bound
+        );
+        assert!(
+            summary
+                .public_deployment
+                .public_launch_package_manifest_id_bound
+        );
+        assert!(
+            summary
+                .public_deployment
+                .public_launch_package_testnet_id_bound
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_package_schema_version,
+            Some(1)
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_package_chain_id
+                .as_deref(),
+            Some(CHAIN_ID)
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_package_version
+                .as_deref(),
+            Some(VERSION)
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_package_manifest_id
+                .as_deref(),
+            Some(summary.manifest_id.as_str())
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_package_testnet_id
+                .as_deref(),
+            Some(summary.testnet_id.as_str())
+        );
         assert!(is_hex_root(
             summary
                 .public_deployment
@@ -38356,6 +38591,139 @@ mod tests {
         verify_public_deployment_evidence(&evidence_path, &summary)
             .expect("filled public deployment evidence should verify against this run");
         let _ = fs::remove_file(evidence_path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_typed_schema_mismatch() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path =
+            write_public_deployment_evidence(&valid_public_deployment_evidence(&base_summary));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        evidence.schema_version = PUBLIC_DEPLOYMENT_EVIDENCE_SCHEMA_VERSION - 1;
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.evidence_shape_verified);
+        assert!(summary.public_deployment.evidence_root_bound);
+        assert!(summary.public_deployment.provenance_root_bound);
+        assert!(!summary.acceptance.public_deployment_attestation_available);
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        assert!(remediation
+            .failed_subchecks
+            .contains(&"public_deployment_evidence_shape_verified".to_string()));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_re_rooted_typed_provenance() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path =
+            write_public_deployment_evidence(&valid_public_deployment_evidence(&base_summary));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let expected_provenance_root = evidence.provenance_root.clone();
+        let expected_evidence_root = evidence.evidence_root.clone();
+        evidence.provenance_root = root(&["test-public-deployment", "wrong-provenance-root"]);
+        evidence.evidence_root = public_deployment_attestation_root(&evidence);
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(!summary.public_deployment.provenance_root_bound);
+        assert!(!summary.public_deployment.evidence_root_bound);
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_provenance_root
+                .as_deref(),
+            Some(expected_provenance_root.as_str())
+        );
+        assert_eq!(
+            summary.public_deployment.expected_evidence_root.as_deref(),
+            Some(expected_evidence_root.as_str())
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        for failed_subcheck in ["provenance_root_bound", "evidence_root_bound"] {
+            assert!(remediation
+                .failed_subchecks
+                .contains(&failed_subcheck.to_string()));
+            assert!(remediation.repair_roots.contains_key(failed_subcheck));
+        }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_deployment_report_rejects_re_rooted_package_identity() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let path =
+            write_public_deployment_evidence(&valid_public_deployment_evidence(&base_summary));
+        let mut evidence =
+            load_public_deployment_evidence(&path).expect("public deployment evidence");
+        evidence.public_launch_package_chain_id = "nebula-wrong-chain".to_string();
+        evidence.provenance_root = public_deployment_provenance_root(&evidence);
+        evidence.evidence_root = public_deployment_attestation_root(&evidence);
+        base_testnet.cli.public_deployment_evidence = Some(evidence);
+        let summary = base_testnet.summary(Vec::new());
+        assert!(!summary.public_deployment.passed);
+        assert!(summary.public_deployment.evidence_root_bound);
+        assert!(summary.public_deployment.provenance_root_bound);
+        assert!(
+            !summary
+                .public_deployment
+                .public_launch_package_identity_bound
+        );
+        assert!(
+            !summary
+                .public_deployment
+                .public_launch_package_chain_id_bound
+        );
+        assert_eq!(
+            summary
+                .public_deployment
+                .expected_public_launch_package_chain_id
+                .as_deref(),
+            Some(CHAIN_ID)
+        );
+        let remediation = summary
+            .public_launch_readiness
+            .remediations
+            .iter()
+            .find(|remediation| remediation.blocker_id == "public-launch-deployment-attestation")
+            .expect("deployment remediation");
+        for failed_subcheck in [
+            "public_launch_package_identity_bound",
+            "public_launch_package_chain_id_bound",
+        ] {
+            assert!(
+                remediation
+                    .failed_subchecks
+                    .contains(&failed_subcheck.to_string()),
+                "missing failed subcheck {failed_subcheck}"
+            );
+        }
+        let _ = fs::remove_file(path);
     }
 
     #[test]
