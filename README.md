@@ -3282,10 +3282,11 @@ real XMR.
   release-template roots, package-binding booleans for both release handoff
   templates, package-bound public deployment evidence-template, capture-plan,
   and capture-todo roots, the capture-contract root, binding booleans for those
-  capture handoff artifacts, blocking gaps, rooted remediation commands for capture audit, audit
-  verification, strict capture verification, assembly, and launch verification,
-  a rooted command sequence for that order, and whether external capture is still
-  required in
+  capture handoff artifacts, the deferred repair-root subcheck list/count/root
+  and its capture-todo root binding, blocking gaps, rooted remediation commands
+  for capture audit, audit verification, strict capture verification, assembly,
+  and launch verification, a rooted command sequence for that order, and whether
+  external capture is still required in
   `nebula-public-testnet-certification.json`. It is deliberately
   operator-local and remains blocked until the filled schema v5 deployment
   attestation passes.

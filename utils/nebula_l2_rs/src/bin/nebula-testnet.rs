@@ -10284,6 +10284,18 @@ fn public_testnet_certification_artifact(
         required_root(&public_deployment_capture_plan, "capture_contract_root")?;
     let public_capture_todo = public_capture_todo_artifact(summary);
     let public_capture_todo_root = required_root(&public_capture_todo, "public_capture_todo_root")?;
+    let deferred_repair_root_subchecks =
+        public_launch_deferred_repair_root_subchecks_for_remediations(
+            &summary.public_launch_readiness.remediations,
+        );
+    let deferred_repair_root_subcheck_root = collection_root(
+        "public-capture-todo-deferred-repair-root-subchecks",
+        deferred_repair_root_subchecks.clone(),
+    );
+    let capture_todo_deferred_repair_root_subcheck_root =
+        required_root(&public_capture_todo, "deferred_repair_root_subcheck_root")?;
+    let deferred_repair_root_subcheck_root_bound_to_capture_todo =
+        deferred_repair_root_subcheck_root == capture_todo_deferred_repair_root_subcheck_root;
     let public_launch_package_handoff_root = public_launch_package_handoff_root_from_roots(
         &package_file_set_root,
         &package_manifest_root,
@@ -10339,6 +10351,11 @@ fn public_testnet_certification_artifact(
         "blocking_gaps": &summary.public_launch_readiness.blocking_gaps,
         "remediation_count": summary.public_launch_readiness.remediations.len(),
         "remediations": &summary.public_launch_readiness.remediations,
+        "deferred_repair_root_subcheck_count": deferred_repair_root_subchecks.len(),
+        "deferred_repair_root_subchecks": deferred_repair_root_subchecks,
+        "deferred_repair_root_subcheck_root": deferred_repair_root_subcheck_root,
+        "capture_todo_deferred_repair_root_subcheck_root": capture_todo_deferred_repair_root_subcheck_root,
+        "deferred_repair_root_subcheck_root_bound_to_capture_todo": deferred_repair_root_subcheck_root_bound_to_capture_todo,
         "external_capture_required": external_capture_required,
         "certification_file_set_root": certification_file_set_root,
         "package_verified": true,
@@ -33392,6 +33409,11 @@ mod tests {
         let certification: Value =
             serde_json::from_slice(&fs::read(&certification_path).expect("read certification"))
                 .expect("certification json");
+        let capture_todo: Value = serde_json::from_slice(
+            &fs::read(package_dir.join("nebula-public-capture-todo.json"))
+                .expect("read capture todo"),
+        )
+        .expect("capture todo json");
         assert_eq!(certification["kind"], "nebula-public-testnet-certification");
         assert_eq!(certification["local_testnet_ready"], true);
         assert_eq!(
@@ -33460,6 +33482,34 @@ mod tests {
         assert_eq!(
             certification["blocking_gaps"][0],
             "public-launch-deployment-attestation"
+        );
+        assert_eq!(
+            certification["deferred_repair_root_subchecks"],
+            json!([
+                "public_launch_package_handoff_root_bound",
+                "public_launch_package_manifest_root_bound",
+                "public_launch_readiness_artifact_root_bound"
+            ])
+        );
+        assert_eq!(certification["deferred_repair_root_subcheck_count"], 3);
+        assert_eq!(
+            certification["deferred_repair_root_subcheck_root"],
+            collection_root(
+                "public-capture-todo-deferred-repair-root-subchecks",
+                vec![
+                    "public_launch_package_handoff_root_bound".to_string(),
+                    "public_launch_package_manifest_root_bound".to_string(),
+                    "public_launch_readiness_artifact_root_bound".to_string()
+                ],
+            )
+        );
+        assert_eq!(
+            certification["capture_todo_deferred_repair_root_subcheck_root"],
+            capture_todo["deferred_repair_root_subcheck_root"]
+        );
+        assert_eq!(
+            certification["deferred_repair_root_subcheck_root_bound_to_capture_todo"],
+            true
         );
         assert!(is_hex_root(
             certification["public_launch_package_file_set_root"]
@@ -33643,6 +33693,26 @@ mod tests {
         let error = verify_public_testnet_certification(&cert_dir_string, &summary)
             .expect_err("tampered certification should fail verification");
         assert!(error.contains("does not match this run"));
+
+        write_public_testnet_certification(&cert_dir_string, &summary)
+            .expect("rewrite public testnet certification");
+        let mut certification: Value =
+            serde_json::from_slice(&fs::read(&certification_path).expect("read certification"))
+                .expect("certification json");
+        certification["deferred_repair_root_subcheck_count"] = json!(2);
+        if let Some(object) = certification.as_object_mut() {
+            object.remove("certification_root");
+        }
+        let certification_root = value_root("public-testnet-certification", &certification);
+        certification["certification_root"] = json!(certification_root);
+        fs::write(
+            &certification_path,
+            serde_json::to_string_pretty(&certification).expect("certification json"),
+        )
+        .expect("write deferred-root tampered certification");
+        let error = verify_public_testnet_certification(&cert_dir_string, &summary)
+            .expect_err("deferred-root tampered certification should fail verification");
+        assert!(error.contains("public testnet certification does not match this run"));
 
         write_public_testnet_certification(&cert_dir_string, &summary)
             .expect("rewrite public testnet certification");

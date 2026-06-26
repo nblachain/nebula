@@ -504,8 +504,9 @@ release-template roots, the public deployment evidence root, its
 readiness-report binding boolean, package-bound release-template roots,
 package-binding booleans for both release handoff templates, package-bound
 public deployment evidence-template, capture-plan, and capture-todo roots, the
-capture-contract root, binding booleans for those capture handoff artifacts, remediations,
-whether external capture is still required, and the
+capture-contract root, binding booleans for those capture handoff artifacts,
+the deferred repair-root subcheck list/count/root and its capture-todo root
+binding, remediations, whether external capture is still required, and the
 exact capture-audit, audit-verification, strict capture-verification, assemble,
 and launch-gate commands plus rooted next steps and a rooted command sequence
 for that order.
