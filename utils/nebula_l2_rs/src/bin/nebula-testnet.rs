@@ -10878,6 +10878,140 @@ fn verify_public_testnet_certification(path: &str, summary: &TestnetSummary) -> 
 
     let expected_certification =
         public_testnet_certification_artifact(summary, &package_manifest, &actual_launch_report)?;
+    ensure_current_run_pointer_bindings(
+        &actual_certification,
+        &expected_certification,
+        "public testnet certification",
+        &[
+            ("local_testnet_ready", "/local_testnet_ready"),
+            ("public_launch_ready", "/public_launch_ready"),
+            ("public_launch_level", "/public_launch_level"),
+            (
+                "public_deployment_attestation_available",
+                "/public_deployment_attestation_available",
+            ),
+            (
+                "public_deployment_evidence_root",
+                "/public_deployment_evidence_root",
+            ),
+            (
+                "readiness_public_deployment_evidence_root",
+                "/readiness_public_deployment_evidence_root",
+            ),
+            (
+                "public_deployment_evidence_root_bound_to_report",
+                "/public_deployment_evidence_root_bound_to_report",
+            ),
+            ("blocking_gap_count", "/blocking_gap_count"),
+            ("remediation_count", "/remediation_count"),
+            (
+                "deferred_repair_root_subcheck_count",
+                "/deferred_repair_root_subcheck_count",
+            ),
+            (
+                "deferred_repair_root_subcheck_root",
+                "/deferred_repair_root_subcheck_root",
+            ),
+            (
+                "capture_todo_deferred_repair_root_subcheck_root",
+                "/capture_todo_deferred_repair_root_subcheck_root",
+            ),
+            (
+                "deferred_repair_root_subcheck_root_bound_to_capture_todo",
+                "/deferred_repair_root_subcheck_root_bound_to_capture_todo",
+            ),
+            ("external_capture_required", "/external_capture_required"),
+            (
+                "certification_file_set_root",
+                "/certification_file_set_root",
+            ),
+            (
+                "public_launch_package_file_set_root",
+                "/public_launch_package_file_set_root",
+            ),
+            (
+                "public_launch_package_handoff_root",
+                "/public_launch_package_handoff_root",
+            ),
+            (
+                "public_launch_package_manifest_root",
+                "/public_launch_package_manifest_root",
+            ),
+            (
+                "public_launch_readiness_report_root",
+                "/public_launch_readiness_report_root",
+            ),
+            (
+                "public_launch_readiness_artifact_root",
+                "/public_launch_readiness_artifact_root",
+            ),
+            (
+                "release_approval_template_root",
+                "/release_approval_template_root",
+            ),
+            (
+                "package_release_approval_template_root",
+                "/package_release_approval_template_root",
+            ),
+            (
+                "release_approval_template_root_bound_to_package",
+                "/release_approval_template_root_bound_to_package",
+            ),
+            (
+                "release_authority_registry_template_root",
+                "/release_authority_registry_template_root",
+            ),
+            (
+                "package_release_authority_registry_template_root",
+                "/package_release_authority_registry_template_root",
+            ),
+            (
+                "release_authority_registry_template_root_bound_to_package",
+                "/release_authority_registry_template_root_bound_to_package",
+            ),
+            (
+                "public_deployment_evidence_template_root",
+                "/public_deployment_evidence_template_root",
+            ),
+            (
+                "package_public_deployment_evidence_template_root",
+                "/package_public_deployment_evidence_template_root",
+            ),
+            (
+                "public_deployment_evidence_template_root_bound_to_package",
+                "/public_deployment_evidence_template_root_bound_to_package",
+            ),
+            (
+                "public_deployment_capture_plan_root",
+                "/public_deployment_capture_plan_root",
+            ),
+            (
+                "package_public_deployment_capture_plan_root",
+                "/package_public_deployment_capture_plan_root",
+            ),
+            (
+                "public_deployment_capture_plan_root_bound_to_package",
+                "/public_deployment_capture_plan_root_bound_to_package",
+            ),
+            (
+                "public_deployment_capture_contract_root",
+                "/public_deployment_capture_contract_root",
+            ),
+            ("public_capture_todo_root", "/public_capture_todo_root"),
+            (
+                "package_public_capture_todo_root",
+                "/package_public_capture_todo_root",
+            ),
+            (
+                "public_capture_todo_root_bound_to_package",
+                "/public_capture_todo_root_bound_to_package",
+            ),
+            ("commands_root", "/commands_root"),
+            ("next_steps_root", "/next_steps_root"),
+            ("command_sequence_root", "/command_sequence_root"),
+            ("certification_root", "/certification_root"),
+        ],
+    )?;
     ensure(
         actual_certification == expected_certification,
         "public testnet certification does not match this run",
@@ -35152,7 +35286,7 @@ mod tests {
         .expect("write tampered certification");
         let error = verify_public_testnet_certification(&cert_dir_string, &summary)
             .expect_err("tampered certification should fail verification");
-        assert!(error.contains("does not match this run"));
+        assert!(error.contains("public_launch_ready mismatch"));
 
         write_public_testnet_certification(&cert_dir_string, &summary)
             .expect("rewrite public testnet certification");
@@ -35172,7 +35306,7 @@ mod tests {
         .expect("write deferred-root tampered certification");
         let error = verify_public_testnet_certification(&cert_dir_string, &summary)
             .expect_err("deferred-root tampered certification should fail verification");
-        assert!(error.contains("public testnet certification does not match this run"));
+        assert!(error.contains("deferred_repair_root_subcheck_count mismatch"));
 
         write_public_testnet_certification(&cert_dir_string, &summary)
             .expect("rewrite public testnet certification");
@@ -35230,7 +35364,7 @@ mod tests {
         .expect("write package-bound release root tamper");
         let error = verify_public_testnet_certification(&cert_dir_string, &summary)
             .expect_err("tampered package-bound release root should fail verification");
-        assert!(error.contains("public testnet certification does not match this run"));
+        assert!(error.contains("package_release_approval_template_root mismatch"));
 
         write_public_testnet_certification(&cert_dir_string, &summary)
             .expect("rewrite public testnet certification");
@@ -35251,7 +35385,7 @@ mod tests {
         .expect("write package handoff tampered certification");
         let error = verify_public_testnet_certification(&cert_dir_string, &summary)
             .expect_err("tampered package handoff root should fail verification");
-        assert!(error.contains("public testnet certification does not match this run"));
+        assert!(error.contains("public_launch_package_handoff_root mismatch"));
 
         write_public_testnet_certification(&cert_dir_string, &summary)
             .expect("rewrite public testnet certification");
@@ -35273,7 +35407,7 @@ mod tests {
         .expect("write capture-plan tampered certification");
         let error = verify_public_testnet_certification(&cert_dir_string, &summary)
             .expect_err("tampered certification capture-plan root should fail verification");
-        assert!(error.contains("public testnet certification does not match this run"));
+        assert!(error.contains("public_deployment_capture_plan_root mismatch"));
 
         write_public_testnet_certification(&cert_dir_string, &summary)
             .expect("rewrite public testnet certification");
