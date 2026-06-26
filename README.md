@@ -3214,7 +3214,9 @@ real XMR.
   coverage before the profile passes, and the filled deployment evidence must
   derive the same operator count from `bootstrap_nodes`. Public
   endpoint deployment happens outside the runner and must not weaken the
-  no-mainnet-custody boundary.
+  no-mainnet-custody boundary. Its template guard pins schema, chain, version,
+  public-alpha, and no-custody identity before accepting the rooted redacted
+  payload.
 - Public testnet status surfaces expose a redacted
   `nebula-public-status-manifest` with chain, latest-block, finality,
   no-mainnet-custody, and public-bootstrap root commitments only. Full bridge

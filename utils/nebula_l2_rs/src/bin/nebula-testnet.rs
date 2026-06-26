@@ -21837,6 +21837,18 @@ fn ensure_public_bootstrap_profile_template_redacted(value: &Value) -> Result<()
         "public bootstrap profile kind mismatch",
     )?;
     ensure(
+        value.get("schema_version").and_then(Value::as_u64) == Some(1),
+        "public bootstrap profile schema_version mismatch",
+    )?;
+    ensure(
+        value.get("chain_id").and_then(Value::as_str) == Some(CHAIN_ID),
+        "public bootstrap profile chain_id mismatch",
+    )?;
+    ensure(
+        value.get("version").and_then(Value::as_str) == Some(VERSION),
+        "public bootstrap profile version mismatch",
+    )?;
+    ensure(
         value.get("template_only").and_then(Value::as_bool) == Some(true),
         "public bootstrap profile must be a template",
     )?;
@@ -21850,6 +21862,14 @@ fn ensure_public_bootstrap_profile_template_redacted(value: &Value) -> Result<()
             .and_then(Value::as_bool)
             == Some(false),
         "public bootstrap profile must not be usable as mainnet custody approval",
+    )?;
+    ensure(
+        value.get("custody_mode").and_then(Value::as_str) == Some("no-mainnet-custody"),
+        "public bootstrap profile custody mode mismatch",
+    )?;
+    ensure(
+        value.get("public_alpha_only").and_then(Value::as_bool) == Some(true),
+        "public bootstrap profile must be public-alpha only",
     )?;
     for key in PUBLIC_STATUS_FORBIDDEN_KEYS {
         ensure(
@@ -35487,6 +35507,26 @@ mod tests {
         ensure_public_bootstrap_profile_template_redacted(&value)
             .expect("redacted public bootstrap profile");
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_bootstrap_profile_rejects_re_rooted_wrong_version() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet-readiness CLI should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_bootstrap_profile_template(&summary);
+        value["version"] = json!("nebula-testnet-wrong-version");
+        let mut rootless = value.clone();
+        if let Some(map) = rootless.as_object_mut() {
+            map.remove("template_root");
+        }
+        value["template_root"] = json!(value_root("public-bootstrap-profile-template", &rootless));
+
+        let error = ensure_public_bootstrap_profile_template_redacted(&value)
+            .expect_err("re-rooted wrong-version profile should fail identity guard");
+        assert!(error.contains("public bootstrap profile version mismatch"));
     }
 
     #[test]
