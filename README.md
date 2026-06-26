@@ -3456,7 +3456,8 @@ real XMR.
   and `release_authority_registry_template_root` to match the release
   handoff templates in the verified package, seals the embedded public
   bootstrap profile root, profile report root, and rate-limit policy root
-  against the current bootstrap profile in the report root, seals the local
+  against the current bootstrap profile in the report root, seals the bootstrap
+  operator-registry, public-endpoint, and node-probe counts, seals the local
   finality latency profile report root, and requires the embedded
   `deployment_preflight_receipt_root`, `deployment_preflight_phase_set_root`,
   and phase count to match the completed receipt body. It also requires the

@@ -6173,6 +6173,9 @@ impl Testnet {
             &summary.public_bootstrap_profile.bootstrap_operator_set_root,
             &evidence.bootstrap_operator_count.to_string(),
             &expected_bootstrap_operator_count_string,
+            &evidence.bootstrap_operator_registry_count.to_string(),
+            &evidence.bootstrap_public_endpoint_count.to_string(),
+            &evidence.bootstrap_node_probe_count.to_string(),
             &evidence.bootstrap_region_set_root,
             &summary.public_bootstrap_profile.bootstrap_region_set_root,
             &evidence.public_surface_probe_set_root,
@@ -39272,6 +39275,84 @@ mod tests {
             write_public_deployment_evidence(&valid_public_deployment_evidence(&base_summary));
         let mut evidence =
             load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let mut registry_count_only = evidence.clone();
+        registry_count_only.bootstrap_operator_registry_count =
+            registry_count_only.bootstrap_operator_count.saturating_sub(1);
+        base_testnet.cli.public_deployment_evidence = Some(registry_count_only);
+        let registry_count_only_summary = base_testnet.summary(Vec::new());
+        assert!(!registry_count_only_summary.public_deployment.passed);
+        assert!(
+            !registry_count_only_summary
+                .public_deployment
+                .bootstrap_operator_registry_count_bound
+        );
+        assert!(
+            registry_count_only_summary
+                .public_deployment
+                .bootstrap_public_endpoint_count_bound
+        );
+        assert!(
+            registry_count_only_summary
+                .public_deployment
+                .bootstrap_node_probe_count_bound
+        );
+
+        let mut endpoint_count_only = evidence.clone();
+        endpoint_count_only.bootstrap_public_endpoint_count =
+            endpoint_count_only.bootstrap_node_count.saturating_sub(1);
+        base_testnet.cli.public_deployment_evidence = Some(endpoint_count_only);
+        let endpoint_count_only_summary = base_testnet.summary(Vec::new());
+        assert!(!endpoint_count_only_summary.public_deployment.passed);
+        assert!(
+            endpoint_count_only_summary
+                .public_deployment
+                .bootstrap_operator_registry_count_bound
+        );
+        assert!(
+            !endpoint_count_only_summary
+                .public_deployment
+                .bootstrap_public_endpoint_count_bound
+        );
+        assert!(
+            endpoint_count_only_summary
+                .public_deployment
+                .bootstrap_node_probe_count_bound
+        );
+
+        let mut probe_count_only = evidence.clone();
+        probe_count_only.bootstrap_node_probe_count =
+            probe_count_only.bootstrap_node_count.saturating_sub(1);
+        base_testnet.cli.public_deployment_evidence = Some(probe_count_only);
+        let probe_count_only_summary = base_testnet.summary(Vec::new());
+        assert!(!probe_count_only_summary.public_deployment.passed);
+        assert!(
+            probe_count_only_summary
+                .public_deployment
+                .bootstrap_operator_registry_count_bound
+        );
+        assert!(
+            probe_count_only_summary
+                .public_deployment
+                .bootstrap_public_endpoint_count_bound
+        );
+        assert!(
+            !probe_count_only_summary
+                .public_deployment
+                .bootstrap_node_probe_count_bound
+        );
+        assert_ne!(
+            registry_count_only_summary.public_deployment.report_root,
+            endpoint_count_only_summary.public_deployment.report_root
+        );
+        assert_ne!(
+            registry_count_only_summary.public_deployment.report_root,
+            probe_count_only_summary.public_deployment.report_root
+        );
+        assert_ne!(
+            endpoint_count_only_summary.public_deployment.report_root,
+            probe_count_only_summary.public_deployment.report_root
+        );
+
         evidence.bootstrap_node_set_root =
             root(&["test-public-deployment", "wrong-bootstrap-node-set"]);
         evidence.bootstrap_node_count = base_summary
