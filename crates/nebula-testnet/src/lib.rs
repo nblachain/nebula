@@ -365,6 +365,11 @@ pub struct LaunchPackageReport {
     pub launch_package_ready: bool,
     pub level: &'static str,
     pub deployment_attestation_root: String,
+    pub public_status_manifest_root: String,
+    pub public_probe_root: String,
+    pub endpoint_url: String,
+    pub launch_bundle_root: String,
+    pub fee_policy_root: String,
     pub validator_set_root: String,
     pub genesis_root: String,
     pub validator_count: usize,
@@ -603,8 +608,12 @@ pub fn readiness_report() -> NebulaReadiness {
             })),
             "launch_package": stable_root(&json!({
                 "deployment_attestation_verified": true,
+                "public_status_surface_verified": true,
+                "public_probe_surface_verified": true,
                 "validator_set_verified": true,
                 "genesis_manifest_verified": true,
+                "public_status_binds_deployment_attestation": true,
+                "public_probe_binds_deployment_attestation": true,
                 "genesis_binds_deployment_attestation_root": true,
                 "genesis_binds_validator_set_root": true,
                 "genesis_binds_validator_count": true,
@@ -1179,13 +1188,62 @@ pub fn verify_genesis_manifest_json(
 
 pub fn verify_launch_package_jsons(
     deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
     validator_set_json: &str,
     genesis_manifest_json: &str,
 ) -> Result<LaunchPackageReport, AttestationError> {
     let deployment_report = verify_deployment_attestation_json(deployment_attestation_json)?;
+    let deployment_attestation = serde_json::from_str::<DeploymentAttestation>(
+        deployment_attestation_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let public_status_manifest = serde_json::from_str::<PublicStatusManifest>(
+        public_status_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let public_probe =
+        serde_json::from_str::<PublicProbe>(public_probe_json.trim_start_matches('\u{feff}'))
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
     let validator_set_report = verify_validator_set_json(validator_set_json)?;
     let genesis_report = verify_genesis_manifest_json(genesis_manifest_json)?;
     let mut errors = Vec::new();
+    let readiness = readiness_report();
+    let economics_root = readiness.status_roots["economics"]
+        .as_str()
+        .expect("economics root is a string");
+
+    verify_public_status_manifest(
+        &mut errors,
+        &public_status_manifest,
+        &deployment_attestation.launch_bundle.root,
+    );
+    verify_public_probe(
+        &mut errors,
+        &public_probe,
+        &deployment_attestation.public_endpoint.url,
+        &deployment_attestation.launch_bundle.root,
+        economics_root,
+    );
+
+    if public_status_manifest.root != deployment_attestation.public_status_manifest.root {
+        errors.push(format!(
+            "public status root does not match deployment attestation public status root {}",
+            deployment_attestation.public_status_manifest.root
+        ));
+    }
+    if public_status_manifest.endpoint_url != deployment_attestation.public_endpoint.url {
+        errors.push(format!(
+            "public status endpoint_url expected {} but got {}",
+            deployment_attestation.public_endpoint.url, public_status_manifest.endpoint_url
+        ));
+    }
+    if public_probe.root != deployment_attestation.public_probe.root {
+        errors.push(format!(
+            "public probe root does not match deployment attestation public probe root {}",
+            deployment_attestation.public_probe.root
+        ));
+    }
 
     if genesis_report.deployment_attestation_root != deployment_report.evidence_root {
         errors.push(format!(
@@ -1220,6 +1278,11 @@ pub fn verify_launch_package_jsons(
         launch_package_ready: true,
         level: "launch-package-attested",
         deployment_attestation_root: deployment_report.evidence_root,
+        public_status_manifest_root: public_status_manifest.root,
+        public_probe_root: public_probe.root,
+        endpoint_url: public_status_manifest.endpoint_url,
+        launch_bundle_root: deployment_attestation.launch_bundle.root,
+        fee_policy_root: economics_root.to_string(),
         validator_set_root: validator_set_report.validator_set_root,
         genesis_root: genesis_report.genesis_root,
         validator_count: validator_set_report.validator_count,
@@ -2451,10 +2514,19 @@ mod public_launch {
     #[test]
     fn launch_package_verifies_consistent_artifacts() {
         let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
         let validators = sample_validator_set_json_pretty();
         let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
 
-        let report = verify_launch_package_jsons(&deployment, &validators, &genesis).unwrap();
+        let report = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &genesis,
+        )
+        .unwrap();
 
         assert!(report.launch_package_ready);
         assert_eq!(report.level, "launch-package-attested");
@@ -2462,6 +2534,11 @@ mod public_launch {
         assert_eq!(report.total_genesis_power, 2);
         assert_eq!(report.activation_height, 1);
         assert_eq!(report.deployment_attestation_root.len(), 64);
+        assert_eq!(report.public_status_manifest_root.len(), 64);
+        assert_eq!(report.public_probe_root.len(), 64);
+        assert_eq!(report.endpoint_url, "https://testnet.nebula.example/status");
+        assert_eq!(report.launch_bundle_root.len(), 64);
+        assert_eq!(report.fee_policy_root.len(), 64);
         assert_eq!(report.validator_set_root.len(), 64);
         assert_eq!(report.genesis_root.len(), 64);
     }
@@ -2469,6 +2546,8 @@ mod public_launch {
     #[test]
     fn launch_package_rejects_mismatched_genesis_roots() {
         let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
         let validators = sample_validator_set_json_pretty();
         let mut genesis = serde_json::from_str::<Value>(
             &build_genesis_manifest_json_pretty(&deployment, &validators).unwrap(),
@@ -2479,8 +2558,14 @@ mod public_launch {
             &serde_json::from_value::<GenesisManifest>(genesis.clone()).unwrap()
         ));
 
-        let error = verify_launch_package_jsons(&deployment, &validators, &genesis.to_string())
-            .unwrap_err();
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &genesis.to_string(),
+        )
+        .unwrap_err();
 
         match error {
             AttestationError::Invalid(errors) => {
@@ -2488,6 +2573,42 @@ mod public_launch {
                     .iter()
                     .any(|error| error
                         .starts_with("genesis deployment_attestation_root does not match")));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_rejects_mismatched_public_probe() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let mut public_probe =
+            serde_json::from_str::<Value>(&sample_public_probe_json_pretty()).unwrap();
+        let validators = sample_validator_set_json_pretty();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+
+        public_probe["body"]["launch_bundle_root"] = json!(hex_64("different-launch-bundle"));
+        public_probe["root"] = json!(public_probe_root(
+            &serde_json::from_value::<PublicProbe>(public_probe.clone()).unwrap()
+        ));
+
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe.to_string(),
+            &validators,
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("public_probe.body.launch_bundle_root expected")
+                }));
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("public probe root does not match deployment attestation")
+                }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }

@@ -60,7 +60,7 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-set /tmp/nebula-validator-set.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json > /tmp/nebula-genesis.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-genesis-manifest /tmp/nebula-genesis.json --json
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json --genesis-manifest /tmp/nebula-genesis.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --genesis-manifest /tmp/nebula-genesis.json --json
 cmp docs/NEBULA_LAYER2.md README.md
 ```
 
@@ -72,6 +72,7 @@ The public launch suite covers:
 - public status manifest redaction
 - public endpoint and TLS pin evidence
 - standalone public status/probe surface exact-shape validation
+- final package binding for the public status/probe surface
 - standalone preflight/runbook receipt exact-shape validation
 - policy claim and public probe body exact-shape validation
 - preflight and runbook receipt exact-shape validation
@@ -79,8 +80,8 @@ The public launch suite covers:
 - validator-set admission, reward-unit, uniqueness, and region-spread validation
 - genesis manifest root binding across deployment evidence, validator set, and
   fee policy
-- launch package coherence across deployment attestation, validator set, and
-  genesis manifest artifacts
+- launch package coherence across deployment attestation, public surface,
+  validator set, and genesis manifest artifacts
 
 ## Hybrid Fees And Validator Rewards
 
@@ -199,15 +200,17 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 
 ## Launch Package Gate
 
-The final package check verifies the deployment attestation, validator-set
-manifest, and genesis manifest together. It rejects a package when the genesis
-manifest does not bind the exact deployment evidence root, validator-set root,
-validator count, and total genesis power produced by the other verified files.
+The final package check verifies the deployment attestation, public status
+manifest, public probe, validator-set manifest, and genesis manifest together.
+It rejects a package when the public surface roots do not match the deployment
+attestation, or when the genesis manifest does not bind the exact deployment
+evidence root, validator-set root, validator count, and total genesis power
+produced by the other verified files.
 
 Operators can verify the full package with:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json --genesis-manifest /tmp/nebula-genesis.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --genesis-manifest /tmp/nebula-genesis.json --json
 ```
 
 ## License

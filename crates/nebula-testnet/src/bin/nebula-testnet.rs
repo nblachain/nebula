@@ -75,11 +75,46 @@ fn arg_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .map(|window| window[1].as_str())
 }
 
+fn read_text_file(path: &str) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|error| format!("failed to read {path}: {error}"))?;
+
+    if bytes.starts_with(&[0xff, 0xfe]) {
+        return decode_utf16_file(path, &bytes[2..], Endian::Little);
+    }
+    if bytes.starts_with(&[0xfe, 0xff]) {
+        return decode_utf16_file(path, &bytes[2..], Endian::Big);
+    }
+
+    String::from_utf8(bytes).map_err(|error| format!("failed to read {path}: {error}"))
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Endian {
+    Little,
+    Big,
+}
+
+fn decode_utf16_file(path: &str, bytes: &[u8], endian: Endian) -> Result<String, String> {
+    let chunks = bytes.chunks_exact(2);
+    if !chunks.remainder().is_empty() {
+        return Err(format!("failed to read {path}: odd-length UTF-16 input"));
+    }
+
+    let units = chunks
+        .map(|chunk| match endian {
+            Endian::Little => u16::from_le_bytes([chunk[0], chunk[1]]),
+            Endian::Big => u16::from_be_bytes([chunk[0], chunk[1]]),
+        })
+        .collect::<Vec<_>>();
+
+    String::from_utf16(&units).map_err(|error| format!("failed to read {path}: {error}"))
+}
+
 fn verify_public_status(path: &str, wants_json: bool) {
-    let input = match fs::read_to_string(path) {
+    let input = match read_text_file(path) {
         Ok(input) => input,
         Err(error) => {
-            print_public_status_error(wants_json, &[format!("failed to read {path}: {error}")]);
+            print_public_status_error(wants_json, &[error]);
             process::exit(1);
         }
     };
@@ -110,10 +145,10 @@ fn verify_public_status(path: &str, wants_json: bool) {
 }
 
 fn verify_public_probe(path: &str, wants_json: bool) {
-    let input = match fs::read_to_string(path) {
+    let input = match read_text_file(path) {
         Ok(input) => input,
         Err(error) => {
-            print_public_probe_error(wants_json, &[format!("failed to read {path}: {error}")]);
+            print_public_probe_error(wants_json, &[error]);
             process::exit(1);
         }
     };
@@ -141,10 +176,10 @@ fn verify_public_probe(path: &str, wants_json: bool) {
 }
 
 fn verify_preflight_receipt(path: &str, wants_json: bool) {
-    let input = match fs::read_to_string(path) {
+    let input = match read_text_file(path) {
         Ok(input) => input,
         Err(error) => {
-            print_receipt_error(wants_json, &[format!("failed to read {path}: {error}")]);
+            print_receipt_error(wants_json, &[error]);
             process::exit(1);
         }
     };
@@ -163,10 +198,10 @@ fn verify_preflight_receipt(path: &str, wants_json: bool) {
 }
 
 fn verify_runbook_receipt(path: &str, wants_json: bool) {
-    let input = match fs::read_to_string(path) {
+    let input = match read_text_file(path) {
         Ok(input) => input,
         Err(error) => {
-            print_receipt_error(wants_json, &[format!("failed to read {path}: {error}")]);
+            print_receipt_error(wants_json, &[error]);
             process::exit(1);
         }
     };
@@ -185,10 +220,10 @@ fn verify_runbook_receipt(path: &str, wants_json: bool) {
 }
 
 fn verify_attestation(path: &str, wants_json: bool) {
-    let input = match fs::read_to_string(path) {
+    let input = match read_text_file(path) {
         Ok(input) => input,
         Err(error) => {
-            print_verification_error(wants_json, &[format!("failed to read {path}: {error}")]);
+            print_verification_error(wants_json, &[error]);
             process::exit(1);
         }
     };
@@ -226,6 +261,14 @@ fn verify_launch_package(args: &[String], wants_json: bool) {
         );
         process::exit(1);
     };
+    let Some(public_status_path) = arg_value(args, "--public-status") else {
+        print_launch_package_error(wants_json, &["missing --public-status <path>".to_string()]);
+        process::exit(1);
+    };
+    let Some(public_probe_path) = arg_value(args, "--public-probe") else {
+        print_launch_package_error(wants_json, &["missing --public-probe <path>".to_string()]);
+        process::exit(1);
+    };
     let Some(validator_set_path) = arg_value(args, "--validator-set") else {
         print_launch_package_error(wants_json, &["missing --validator-set <path>".to_string()]);
         process::exit(1);
@@ -238,39 +281,46 @@ fn verify_launch_package(args: &[String], wants_json: bool) {
         process::exit(1);
     };
 
-    let deployment_input = match fs::read_to_string(deployment_path) {
+    let deployment_input = match read_text_file(deployment_path) {
         Ok(input) => input,
         Err(error) => {
-            print_launch_package_error(
-                wants_json,
-                &[format!("failed to read {deployment_path}: {error}")],
-            );
+            print_launch_package_error(wants_json, &[error]);
             process::exit(1);
         }
     };
-    let validator_set_input = match fs::read_to_string(validator_set_path) {
+    let public_status_input = match read_text_file(public_status_path) {
         Ok(input) => input,
         Err(error) => {
-            print_launch_package_error(
-                wants_json,
-                &[format!("failed to read {validator_set_path}: {error}")],
-            );
+            print_launch_package_error(wants_json, &[error]);
             process::exit(1);
         }
     };
-    let genesis_input = match fs::read_to_string(genesis_path) {
+    let public_probe_input = match read_text_file(public_probe_path) {
         Ok(input) => input,
         Err(error) => {
-            print_launch_package_error(
-                wants_json,
-                &[format!("failed to read {genesis_path}: {error}")],
-            );
+            print_launch_package_error(wants_json, &[error]);
+            process::exit(1);
+        }
+    };
+    let validator_set_input = match read_text_file(validator_set_path) {
+        Ok(input) => input,
+        Err(error) => {
+            print_launch_package_error(wants_json, &[error]);
+            process::exit(1);
+        }
+    };
+    let genesis_input = match read_text_file(genesis_path) {
+        Ok(input) => input,
+        Err(error) => {
+            print_launch_package_error(wants_json, &[error]);
             process::exit(1);
         }
     };
 
     match nebula_testnet::verify_launch_package_jsons(
         &deployment_input,
+        &public_status_input,
+        &public_probe_input,
         &validator_set_input,
         &genesis_input,
     ) {
@@ -309,23 +359,17 @@ fn build_genesis_manifest(args: &[String], wants_json: bool) {
         process::exit(1);
     };
 
-    let deployment_input = match fs::read_to_string(deployment_path) {
+    let deployment_input = match read_text_file(deployment_path) {
         Ok(input) => input,
         Err(error) => {
-            print_genesis_manifest_error(
-                wants_json,
-                &[format!("failed to read {deployment_path}: {error}")],
-            );
+            print_genesis_manifest_error(wants_json, &[error]);
             process::exit(1);
         }
     };
-    let validator_set_input = match fs::read_to_string(validator_set_path) {
+    let validator_set_input = match read_text_file(validator_set_path) {
         Ok(input) => input,
         Err(error) => {
-            print_genesis_manifest_error(
-                wants_json,
-                &[format!("failed to read {validator_set_path}: {error}")],
-            );
+            print_genesis_manifest_error(wants_json, &[error]);
             process::exit(1);
         }
     };
@@ -347,10 +391,10 @@ fn build_genesis_manifest(args: &[String], wants_json: bool) {
 }
 
 fn verify_genesis_manifest(path: &str, wants_json: bool) {
-    let input = match fs::read_to_string(path) {
+    let input = match read_text_file(path) {
         Ok(input) => input,
         Err(error) => {
-            print_genesis_manifest_error(wants_json, &[format!("failed to read {path}: {error}")]);
+            print_genesis_manifest_error(wants_json, &[error]);
             process::exit(1);
         }
     };
@@ -379,10 +423,10 @@ fn verify_genesis_manifest(path: &str, wants_json: bool) {
 }
 
 fn verify_validator_set(path: &str, wants_json: bool) {
-    let input = match fs::read_to_string(path) {
+    let input = match read_text_file(path) {
         Ok(input) => input,
         Err(error) => {
-            print_validator_set_error(wants_json, &[format!("failed to read {path}: {error}")]);
+            print_validator_set_error(wants_json, &[error]);
             process::exit(1);
         }
     };
@@ -548,6 +592,6 @@ fn print_launch_package_error(wants_json: bool, errors: &[String]) {
 
 fn print_help() {
     println!(
-        "nebula-testnet\n\nUSAGE:\n    nebula-testnet [--mainnet-readiness] [--json]\n    nebula-testnet --sample-public-status\n    nebula-testnet --verify-public-status <path> [--json]\n    nebula-testnet --sample-public-probe\n    nebula-testnet --verify-public-probe <path> [--json]\n    nebula-testnet --sample-preflight-receipt\n    nebula-testnet --verify-preflight-receipt <path> [--json]\n    nebula-testnet --sample-runbook-receipt\n    nebula-testnet --verify-runbook-receipt <path> [--json]\n    nebula-testnet --sample-deployment-attestation\n    nebula-testnet --verify-deployment-attestation <path> [--json]\n    nebula-testnet --sample-validator-set\n    nebula-testnet --verify-validator-set <path> [--json]\n    nebula-testnet --sample-genesis-manifest\n    nebula-testnet --build-genesis-manifest --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-genesis-manifest <path> [--json]\n    nebula-testnet --verify-launch-package --deployment-attestation <path> --validator-set <path> --genesis-manifest <path> [--json]\n\nOPTIONS:\n    --mainnet-readiness              Emit the public launch readiness contract\n    --sample-public-status           Emit a public status manifest sample\n    --verify-public-status           Verify a public status manifest file\n    --sample-public-probe            Emit a public probe sample\n    --verify-public-probe            Verify a public probe file\n    --sample-preflight-receipt       Emit a preflight receipt sample\n    --verify-preflight-receipt       Verify a preflight receipt file\n    --sample-runbook-receipt         Emit a runbook receipt sample\n    --verify-runbook-receipt         Verify a runbook receipt file\n    --sample-deployment-attestation  Emit a fillable deployment attestation sample\n    --verify-deployment-attestation  Verify a deployment attestation file\n    --sample-validator-set           Emit a fillable validator-set manifest sample\n    --verify-validator-set           Verify a validator-set manifest file\n    --sample-genesis-manifest        Emit a sample genesis manifest built from samples\n    --build-genesis-manifest         Build genesis manifest from attestation and validator set\n    --deployment-attestation         Deployment attestation input for genesis build/package verification\n    --validator-set                  Validator-set input for genesis build/package verification\n    --genesis-manifest               Genesis manifest input for launch package verification\n    --verify-genesis-manifest        Verify a genesis manifest file\n    --verify-launch-package          Verify deployment, validator set, and genesis agree\n    --json                           Emit JSON output\n    -h, --help                       Show this help"
+        "nebula-testnet\n\nUSAGE:\n    nebula-testnet [--mainnet-readiness] [--json]\n    nebula-testnet --sample-public-status\n    nebula-testnet --verify-public-status <path> [--json]\n    nebula-testnet --sample-public-probe\n    nebula-testnet --verify-public-probe <path> [--json]\n    nebula-testnet --sample-preflight-receipt\n    nebula-testnet --verify-preflight-receipt <path> [--json]\n    nebula-testnet --sample-runbook-receipt\n    nebula-testnet --verify-runbook-receipt <path> [--json]\n    nebula-testnet --sample-deployment-attestation\n    nebula-testnet --verify-deployment-attestation <path> [--json]\n    nebula-testnet --sample-validator-set\n    nebula-testnet --verify-validator-set <path> [--json]\n    nebula-testnet --sample-genesis-manifest\n    nebula-testnet --build-genesis-manifest --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-genesis-manifest <path> [--json]\n    nebula-testnet --verify-launch-package --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --genesis-manifest <path> [--json]\n\nOPTIONS:\n    --mainnet-readiness              Emit the public launch readiness contract\n    --sample-public-status           Emit a public status manifest sample\n    --verify-public-status           Verify a public status manifest file\n    --sample-public-probe            Emit a public probe sample\n    --verify-public-probe            Verify a public probe file\n    --sample-preflight-receipt       Emit a preflight receipt sample\n    --verify-preflight-receipt       Verify a preflight receipt file\n    --sample-runbook-receipt         Emit a runbook receipt sample\n    --verify-runbook-receipt         Verify a runbook receipt file\n    --sample-deployment-attestation  Emit a fillable deployment attestation sample\n    --verify-deployment-attestation  Verify a deployment attestation file\n    --sample-validator-set           Emit a fillable validator-set manifest sample\n    --verify-validator-set           Verify a validator-set manifest file\n    --sample-genesis-manifest        Emit a sample genesis manifest built from samples\n    --build-genesis-manifest         Build genesis manifest from attestation and validator set\n    --deployment-attestation         Deployment attestation input for genesis build/package verification\n    --public-status                  Public status manifest input for launch package verification\n    --public-probe                   Public probe input for launch package verification\n    --validator-set                  Validator-set input for genesis build/package verification\n    --genesis-manifest               Genesis manifest input for launch package verification\n    --verify-genesis-manifest        Verify a genesis manifest file\n    --verify-launch-package          Verify deployment, public surface, validator set, and genesis agree\n    --json                           Emit JSON output\n    -h, --help                       Show this help"
     );
 }
