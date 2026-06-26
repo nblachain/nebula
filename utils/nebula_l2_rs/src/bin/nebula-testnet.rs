@@ -390,6 +390,80 @@ const PUBLIC_TLS_ENDPOINT_PIN_FIELDS: &[&str] = &[
     "deployment_run_id",
     "pin_record_root",
 ];
+const PUBLIC_PROXY_POLICY_CLAIMS_FIELDS: &[&str] = &[
+    "status",
+    "chain_id",
+    "public_launch_bundle_root",
+    "public_status_manifest_root",
+    "public_bootstrap_profile_root",
+    "public_rpc_url",
+    "public_p2p_endpoint",
+    "status_page_url",
+    "health_check_url",
+    "metrics_url",
+    "incident_contact_url",
+    "faucet_url",
+    "reset_runbook_url",
+    "proxy_required",
+    "tls_required",
+    "runner_public_listener_allowed",
+    "serve_public_status_manifest_only",
+    "full_operator_summary_publication_allowed",
+    "private_summary_probe_required",
+    "public_status_manifest_redacted",
+    "health_check_root",
+    "rate_limit_policy_root",
+    "allowed_public_surfaces",
+];
+const PUBLIC_FIREWALL_POLICY_CLAIMS_FIELDS: &[&str] = &[
+    "status",
+    "chain_id",
+    "public_launch_bundle_root",
+    "public_status_manifest_root",
+    "public_rpc_url",
+    "public_p2p_endpoint",
+    "status_page_url",
+    "health_check_url",
+    "metrics_url",
+    "incident_contact_url",
+    "faucet_url",
+    "reset_runbook_url",
+    "public_rpc_https_only",
+    "status_page_https_only",
+    "health_check_https_only",
+    "metrics_https_only",
+    "incident_contact_https_only",
+    "faucet_https_only",
+    "reset_runbook_https_only",
+    "runner_public_listener_allowed",
+    "loopback_runner_not_exposed",
+    "private_summary_paths_blocked",
+    "admin_routes_blocked",
+    "debug_routes_blocked",
+    "non_public_ports_blocked",
+    "firewall_allows_public_only",
+];
+const PUBLIC_RATE_LIMIT_POLICY_CLAIMS_FIELDS: &[&str] = &[
+    "status",
+    "chain_id",
+    "public_launch_bundle_root",
+    "public_status_manifest_root",
+    "rate_limit_policy_root",
+    "rpc_rate_limit_per_minute",
+    "p2p_max_peers",
+    "faucet_policy_root",
+    "faucet_daily_cap_piconero",
+    "faucet_per_account_cap_piconero",
+    "rate_limits_enforced",
+    "rpc_route_coverage_count",
+    "observed_rpc_rejection_http_status",
+    "observed_rpc_retry_after_seconds",
+    "observed_accepted_requests_per_minute",
+    "observed_rejected_requests_over_limit",
+    "observed_max_public_peers",
+    "p2p_peer_limit_observed",
+    "faucet_cap_enforced",
+];
 const PUBLIC_SURFACE_PROBE_FIELDS: &[&str] = &[
     "status",
     "chain_id",
@@ -29646,6 +29720,11 @@ fn validate_public_proxy_policy_claims(
     reset_runbook_url: &str,
 ) -> Result<(), String> {
     let bootstrap = required_section(public_status_manifest, "public_bootstrap")?;
+    ensure_allowed_object_fields(
+        value,
+        PUBLIC_PROXY_POLICY_CLAIMS_FIELDS,
+        "public deployment proxy policy claims",
+    )?;
     ensure(
         required_str(value, "status")? == "ok",
         "public deployment proxy policy claims status must be ok",
@@ -29759,6 +29838,11 @@ fn validate_public_firewall_policy_claims(
     faucet_url: &str,
     reset_runbook_url: &str,
 ) -> Result<(), String> {
+    ensure_allowed_object_fields(
+        value,
+        PUBLIC_FIREWALL_POLICY_CLAIMS_FIELDS,
+        "public deployment firewall policy claims",
+    )?;
     ensure(
         required_str(value, "status")? == "ok",
         "public deployment firewall policy claims status must be ok",
@@ -29832,6 +29916,11 @@ fn validate_public_rate_limit_policy_claims(
     rate_limit_policy_root: &str,
 ) -> Result<(), String> {
     let bootstrap = required_section(public_status_manifest, "public_bootstrap")?;
+    ensure_allowed_object_fields(
+        value,
+        PUBLIC_RATE_LIMIT_POLICY_CLAIMS_FIELDS,
+        "public deployment rate limit policy claims",
+    )?;
     ensure(
         required_str(value, "status")? == "ok",
         "public deployment rate limit policy claims status must be ok",
@@ -46937,6 +47026,47 @@ mod tests {
             .expect_err("rate limit over-cap claims should be rejected");
         assert!(error.contains("rate limit policy claims"));
         let _ = fs::remove_file(bad_path);
+    }
+
+    #[test]
+    fn public_deployment_evidence_rejects_extra_policy_claim_fields() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let base_value: Value =
+            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
+                .expect("deployment evidence json");
+        for (section, description) in [
+            (
+                "proxy_policy_claims",
+                "public deployment proxy policy claims",
+            ),
+            (
+                "firewall_policy_claims",
+                "public deployment firewall policy claims",
+            ),
+            (
+                "rate_limit_policy_claims",
+                "public deployment rate limit policy claims",
+            ),
+        ] {
+            let mut value = base_value.clone();
+            value[section]["operator_note"] = json!("uncommitted policy side-band claim");
+            let bad_path = write_public_deployment_evidence(
+                &serde_json::to_string_pretty(&value).expect("bad evidence json"),
+            );
+            let error = load_public_deployment_evidence(&bad_path)
+                .expect_err("extra policy claim field should be rejected");
+            assert!(
+                error.contains(&format!(
+                    "{description} contains unexpected field 'operator_note'"
+                )),
+                "unexpected error for {section}: {error}"
+            );
+            let _ = fs::remove_file(bad_path);
+        }
     }
 
     #[test]
