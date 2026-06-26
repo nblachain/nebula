@@ -22400,6 +22400,21 @@ fn ensure_public_launch_readiness_roots_match_report(
         .get("checks")
         .and_then(Value::as_array)
         .ok_or_else(|| "public launch readiness missing checks".to_string())?;
+    let check_ids = checks
+        .iter()
+        .map(|check| {
+            required_nested_str(check, "id", "public launch readiness check").map(str::to_string)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut seen_check_ids = BTreeSet::new();
+    for check_id in &check_ids {
+        ensure(
+            seen_check_ids.insert(check_id.as_str()),
+            &format!(
+                "public launch readiness checks must not contain duplicate check id {check_id}"
+            ),
+        )?;
+    }
     let check_roots = checks
         .iter()
         .map(|check| {
@@ -36074,6 +36089,27 @@ mod tests {
         assert!(
             error.contains("public launch readiness report must remain a dry-run readiness report")
         );
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_duplicate_check_id() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        let duplicate_check = value["public_launch_readiness"]["checks"][0].clone();
+        value["public_launch_readiness"]["checks"]
+            .as_array_mut()
+            .expect("readiness checks")
+            .push(duplicate_check);
+
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("duplicate check id should fail safety checks");
+        assert!(error.contains(
+            "public launch readiness checks must not contain duplicate check id public-launch-no-mainnet-custody"
+        ));
     }
 
     #[test]
