@@ -3263,7 +3263,8 @@ real XMR.
   non-evidence/non-custody flags, package `artifact_set_root`, package
   `package_file_set_root`, release-candidate manifest id, launch level,
   ready/blocker counts, readiness report/artifact roots, no-mainnet-custody
-  boundary, rooted `next_steps`, and rooted capture command sequence so
+  boundary, rooted `next_steps` that include package-bound capture scaffold
+  creation, and rooted capture command sequence so
   deployment automation can reject stale, swapped, cross-run, extra, or
   metadata-tampered handoff files before public endpoint evidence is assembled.
   When combined with the export step in the same runner invocation,
@@ -3284,8 +3285,9 @@ real XMR.
   and capture-todo roots, the capture-contract root, binding booleans for those
   capture handoff artifacts, the deferred repair-root subcheck list/count/root
   and its capture-todo root binding, blocking gaps, rooted remediation commands
-  for capture audit, audit verification, strict capture verification, assembly,
-  and launch verification, a rooted command sequence for that order, and whether
+  for capture scaffold creation, capture audit, audit verification, strict
+  capture verification, assembly, and launch verification, a rooted command
+  sequence for the strict verification order, and whether
   external capture is still required in
   `nebula-public-testnet-certification.json`. It is deliberately
   operator-local and remains blocked until the filled schema v5 deployment
@@ -3597,9 +3599,9 @@ real XMR.
   required. When the deployment attestation is still absent, the remediation
   still seeds the current capture-plan, package file-set, status, runbook, and
   bootstrap topology roots so deployment CI can start capture from deterministic
-  expected bindings, and it carries rooted next steps plus the audit,
-  audit-verification, strict-verification, assembly, and final launch-gate
-  command sequence. That private operator report is intentionally absent from the public status
+  expected bindings, and it carries rooted next steps plus scaffold creation,
+  audit, audit-verification, strict-verification, assembly, and final
+  launch-gate commands. That private operator report is intentionally absent from the public status
   manifest and launch bundle.
 - External review evidence must bind the release-candidate manifest id, latest
   height, and local run-profile, Wasm runtime, crypto-inventory,

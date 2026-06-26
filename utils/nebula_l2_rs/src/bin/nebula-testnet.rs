@@ -7803,7 +7803,7 @@ fn public_launch_remediation_for_check(
                 "nebula-public-launch-artifacts.json + nebula-public-deployment.json",
                 "public-deployment-attestation",
                 "nebula-public-deployment.json",
-                "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-artifact-manifest nebula-public-launch-artifacts.json --write-public-deployment-capture-plan nebula-public-deployment-capture-plan.json --write-public-capture-todo nebula-public-capture-todo.json --verify-public-capture-todo nebula-public-capture-todo.json --write-public-deployment-evidence-template nebula-public-deployment-template.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --fail-on-public-launch-gaps --json",
+                "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-artifact-manifest nebula-public-launch-artifacts.json --write-public-deployment-capture-plan nebula-public-deployment-capture-plan.json --write-public-capture-todo nebula-public-capture-todo.json --verify-public-capture-todo nebula-public-capture-todo.json --write-public-deployment-evidence-template nebula-public-deployment-template.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-package nebula-public-launch-package --verify-public-launch-package nebula-public-launch-package --write-public-deployment-capture-scaffold capture.json --verify-public-deployment-capture-scaffold capture.json --public-deployment-capture-scaffold-package nebula-public-launch-package --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --assemble-public-deployment-evidence capture.json --write-public-deployment-evidence nebula-public-deployment.json --json; cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-evidence nebula-public-deployment.json --fail-on-public-launch-gaps --json",
                 "external-capture",
                 "operator-captured-redacted",
                 true,
@@ -9270,6 +9270,7 @@ fn public_launch_readiness_report_artifact(summary: &TestnetSummary) -> Value {
 
 fn public_deployment_capture_commands() -> Value {
     json!({
+        "write_capture_scaffold": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --write-public-launch-package nebula-public-launch-package --verify-public-launch-package nebula-public-launch-package --write-public-deployment-capture-scaffold capture.json --verify-public-deployment-capture-scaffold capture.json --public-deployment-capture-scaffold-package nebula-public-launch-package --json",
         "audit_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --write-public-deployment-capture-audit capture-audit.json --json",
         "verify_capture_audit": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --audit-public-deployment-capture capture.json --verify-public-deployment-capture-audit capture-audit.json --json",
         "verify_capture": "cargo run --manifest-path utils/nebula_l2_rs/testnet_runner/Cargo.toml -- --mainnet-readiness --verify-public-deployment-capture capture.json --fail-on-public-launch-gaps --json",
@@ -9285,6 +9286,7 @@ fn public_deployment_capture_next_steps(
     let commands = public_deployment_capture_commands();
     let mut steps = json!({
         "capture_public_deployment": capture_instructions,
+        "write_capture_scaffold": commands["write_capture_scaffold"].clone(),
         "audit_capture": commands["audit_capture"].clone(),
         "verify_capture_audit": commands["verify_capture_audit"].clone(),
         "verify_capture": commands["verify_capture"].clone(),
@@ -9850,7 +9852,7 @@ fn write_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<(
     let package_file_set_root =
         public_launch_package_file_set_root(&summary.manifest_id, &summary.testnet_id);
     let next_steps = public_deployment_capture_next_steps(
-        "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+        "Run write_capture_scaffold, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
         false,
     );
     let next_steps_root = public_deployment_capture_next_steps_root(&next_steps);
@@ -9967,7 +9969,7 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
         &manifest,
         "public launch package",
         public_deployment_capture_next_steps(
-            "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+            "Run write_capture_scaffold, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
             false,
         ),
     )?;
@@ -10104,7 +10106,7 @@ fn verify_public_launch_package(path: &str, summary: &TestnetSummary) -> Result<
         "public launch package file_set_root mismatch",
     )?;
     let expected_next_steps = public_deployment_capture_next_steps(
-        "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+        "Run write_capture_scaffold, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
         false,
     );
     let expected_next_steps_root = public_deployment_capture_next_steps_root(&expected_next_steps);
@@ -10227,7 +10229,7 @@ fn verify_public_testnet_certification(path: &str, summary: &TestnetSummary) -> 
         &actual_certification,
         "public testnet certification",
         public_deployment_capture_next_steps(
-            "Fill nebula-public-launch-package/nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+            "Run write_capture_scaffold from nebula-public-launch-package, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
             true,
         ),
     )?;
@@ -10345,7 +10347,7 @@ fn public_testnet_certification_artifact(
         .iter()
         .any(|remediation| remediation.external_capture_required);
     let next_steps = public_deployment_capture_next_steps(
-        "Fill nebula-public-launch-package/nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+        "Run write_capture_scaffold from nebula-public-launch-package, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
         true,
     );
     let next_steps_root = public_deployment_capture_next_steps_root(&next_steps);
@@ -10704,7 +10706,7 @@ fn public_launch_package_manifest_root_for_summary(summary: &TestnetSummary) -> 
     let public_launch_readiness_artifact_root =
         public_launch_readiness_artifact_root_for_summary(&handoff_summary);
     let next_steps = public_deployment_capture_next_steps(
-        "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+        "Run write_capture_scaffold, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
         false,
     );
     let next_steps_root = public_deployment_capture_next_steps_root(&next_steps);
@@ -33294,10 +33296,18 @@ mod tests {
             .as_str()
             .expect("package verify command")
             .contains("--fail-on-public-launch-gaps"));
+        assert!(manifest["next_steps"]["write_capture_scaffold"]
+            .as_str()
+            .expect("package scaffold command")
+            .contains("--write-public-deployment-capture-scaffold"));
+        assert!(manifest["next_steps"]["write_capture_scaffold"]
+            .as_str()
+            .expect("package scaffold command")
+            .contains("--verify-public-deployment-capture-scaffold"));
         assert_eq!(
             manifest["next_steps"],
             public_deployment_capture_next_steps(
-                "Fill nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+                "Run write_capture_scaffold, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
                 false,
             )
         );
@@ -33489,10 +33499,18 @@ mod tests {
             .as_str()
             .expect("certification verify command")
             .contains("--fail-on-public-launch-gaps"));
+        assert!(certification["next_steps"]["write_capture_scaffold"]
+            .as_str()
+            .expect("certification scaffold command")
+            .contains("--write-public-launch-package"));
+        assert!(certification["next_steps"]["write_capture_scaffold"]
+            .as_str()
+            .expect("certification scaffold command")
+            .contains("--public-deployment-capture-scaffold-package"));
         assert_eq!(
             certification["next_steps"],
             public_deployment_capture_next_steps(
-                "Fill nebula-public-launch-package/nebula-public-deployment-template.json with captured public endpoint, TLS, probe, observer, operator-registry, preflight, and runbook receipt evidence.",
+                "Run write_capture_scaffold from nebula-public-launch-package, then replace capture.json placeholders with captured public endpoint, TLS, probe, observer, operator-registry, freshness, preflight receipt, runbook receipt, and evidence-root evidence.",
                 true,
             )
         );
@@ -41396,6 +41414,12 @@ mod tests {
             .contains("--write-public-deployment-capture-audit"));
         assert!(remediation
             .command
+            .contains("--write-public-deployment-capture-scaffold"));
+        assert!(remediation
+            .command
+            .contains("--verify-public-deployment-capture-scaffold"));
+        assert!(remediation
+            .command
             .contains("--verify-public-deployment-capture-audit"));
         assert!(remediation
             .command
@@ -41406,6 +41430,10 @@ mod tests {
         assert_eq!(
             remediation.next_steps["audit_capture"],
             public_deployment_capture_commands()["audit_capture"]
+        );
+        assert_eq!(
+            remediation.next_steps["write_capture_scaffold"],
+            public_deployment_capture_commands()["write_capture_scaffold"]
         );
         assert_eq!(
             remediation.next_steps["verify_capture_audit"],

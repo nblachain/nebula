@@ -507,9 +507,9 @@ public deployment evidence-template, capture-plan, and capture-todo roots, the
 capture-contract root, binding booleans for those capture handoff artifacts,
 the deferred repair-root subcheck list/count/root and its capture-todo root
 binding, remediations, whether external capture is still required, and the
-exact capture-audit, audit-verification, strict capture-verification, assemble,
-and launch-gate commands plus rooted next steps and a rooted command sequence
-for that order.
+exact package-bound scaffold, capture-audit, audit-verification, strict
+capture-verification, assemble, and launch-gate commands plus rooted next steps
+and a rooted command sequence for the strict verification order.
 The certification artifact is
 operator-local, not public deployment evidence and not mainnet custody approval;
 it truthfully remains `public-launch-blocked` until a filled schema v5
@@ -883,9 +883,9 @@ the current capture-plan, package file-set, status, runbook, and bootstrap
 topology roots so deployment CI can begin external capture from deterministic expected
 bindings; package handoff/manifest/readiness roots are listed as deferred
 self-referential subchecks until the readiness report root is finalized. The same
-remediation also carries rooted next steps plus the audit,
-audit-verification, strict-verification, assembly, and final launch-gate command
-sequence for CI handoff. The redacted public status manifest does not include that local
+remediation also carries rooted next steps plus scaffold creation, audit,
+audit-verification, strict-verification, assembly, and final launch-gate commands
+for CI handoff. The redacted public status manifest does not include that local
 operator report.
 
 `--fail-on-readiness-gaps` also requires `--mainnet-readiness` and turns the
