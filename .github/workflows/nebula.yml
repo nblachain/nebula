@@ -30,8 +30,8 @@ jobs:
       - name: Build Nebula testnet binary
         run: cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
 
-      - name: Run public launch test suite
-        run: cargo test --manifest-path crates/nebula-testnet/Cargo.toml public_launch -- --test-threads=1
+      - name: Run Nebula test suite
+        run: cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
 
       - name: Check public launch readiness contract
         shell: bash
@@ -46,11 +46,16 @@ jobs:
           payload = json.loads(os.environ["NEBULA_READINESS_JSON"])
           acceptance = payload["acceptance"]
           readiness = payload["public_launch_readiness"]
+          economics = payload["economics"]
           assert acceptance["testnet_ready"] is True
           assert readiness["public_launch_ready"] is False
           assert readiness["level"] == "public-launch-blocked"
           assert readiness["blocking_gaps"] == ["public-launch-deployment-attestation"]
           assert readiness["remediation_root"]
+          assert economics["native_fee_token"] == "NBLA"
+          assert economics["bridged_fee_token"] == "nXMR"
+          assert economics["nxmr_reserve_backing_bps"] == 9000
+          assert economics["nxmr_validator_reward_bps"] == 1000
           PY
 
       - name: Verify Nebula guide mirror

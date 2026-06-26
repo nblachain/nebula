@@ -44,7 +44,7 @@ Run the public testnet checks from the repository root:
 ```bash
 cargo fmt --manifest-path crates/nebula-testnet/Cargo.toml -- --check
 cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
-cargo test --manifest-path crates/nebula-testnet/Cargo.toml public_launch -- --test-threads=1
+cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
 cmp docs/NEBULA_LAYER2.md README.md
 ```
@@ -60,6 +60,21 @@ The public launch suite covers:
 - preflight and runbook receipt exact-shape validation
 - bootstrap node/operator and observer attestation exact-shape validation
 
+## Hybrid Fees And Validator Rewards
+
+Nebula testnet uses a hybrid fee policy:
+
+- Gas can be paid in native `NBLA`.
+- Gas can also be paid in bridged `nXMR`.
+- `NBLA` gas is credited directly to the validator reward ledger.
+- `nXMR` gas is converted into NBLA accounting value before distribution.
+- Converted `nXMR` value is split with `90%` reserved as NBLA backing and `10%`
+  credited to the validator reward ledger.
+
+Public testnet rewards are non-transferable validator points. Points mirror the
+validator reward ledger so validators can prove uptime, attestation quality, and
+fee contribution before any live-value reward policy is enabled.
+
 ## CI
 
 The active GitHub Actions workflow is Nebula-owned:
@@ -67,7 +82,7 @@ The active GitHub Actions workflow is Nebula-owned:
 1. Install stable Rust.
 2. Check Rust formatting.
 3. Build `nebula-testnet`.
-4. Run the `public_launch` test suite.
+4. Run the Nebula test suite.
 5. Assert the current readiness contract.
 6. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
 

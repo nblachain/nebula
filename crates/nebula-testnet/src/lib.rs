@@ -6,6 +6,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const VERSION: &str = "nebula-testnet-runner/0.2.0";
 pub const CHAIN_ID: &str = "nebula-private-l2-testnet";
 pub const PUBLIC_LAUNCH_BLOCKER: &str = "public-launch-deployment-attestation";
+pub const NBLA_SYMBOL: &str = "NBLA";
+pub const NXMR_SYMBOL: &str = "nXMR";
+pub const FEE_BASIS_POINTS: u128 = 10_000;
+pub const NXMR_RESERVE_BACKING_BPS: u128 = 9_000;
+pub const NXMR_VALIDATOR_REWARD_BPS: u128 = 1_000;
+pub const TESTNET_POINTS_PER_MICRO_NBLA: u128 = 1;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Acceptance {
@@ -33,6 +39,147 @@ pub struct NebulaReadiness {
     pub acceptance: Acceptance,
     pub public_launch_readiness: PublicLaunchReadiness,
     pub status_roots: Value,
+    pub economics: HybridFeePolicy,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeeAsset {
+    Nbla,
+    NXmr,
+}
+
+impl FeeAsset {
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Self::Nbla => NBLA_SYMBOL,
+            Self::NXmr => NXMR_SYMBOL,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HybridFeePolicy {
+    pub native_fee_token: &'static str,
+    pub bridged_fee_token: &'static str,
+    pub bridged_fee_conversion: &'static str,
+    pub nxmr_reserve_backing_bps: u128,
+    pub nxmr_validator_reward_bps: u128,
+    pub nbla_validator_reward_bps: u128,
+    pub testnet_reward_unit: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HybridFeeQuote {
+    pub payment_asset: FeeAsset,
+    pub payment_asset_symbol: &'static str,
+    pub gas_units: u128,
+    pub price_per_gas_micro_nbla: u128,
+    pub required_fee_micro_nbla: u128,
+    pub nxmr_to_nbla_rate_micro: Option<u128>,
+    pub paid_amount_units: u128,
+    pub converted_nbla_micro_units: u128,
+    pub reserve_backing_micro_nbla: u128,
+    pub validator_reward_micro_nbla: u128,
+    pub validator_points: u128,
+    pub settlement_note: &'static str,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum FeeError {
+    ZeroGas,
+    ZeroGasPrice,
+    MissingNXmrRate,
+    ZeroNXmrRate,
+    ArithmeticOverflow,
+}
+
+pub fn hybrid_fee_policy() -> HybridFeePolicy {
+    HybridFeePolicy {
+        native_fee_token: NBLA_SYMBOL,
+        bridged_fee_token: NXMR_SYMBOL,
+        bridged_fee_conversion: "nXMR fees are converted into NBLA accounting value before split",
+        nxmr_reserve_backing_bps: NXMR_RESERVE_BACKING_BPS,
+        nxmr_validator_reward_bps: NXMR_VALIDATOR_REWARD_BPS,
+        nbla_validator_reward_bps: FEE_BASIS_POINTS,
+        testnet_reward_unit: "non-transferable validator points",
+    }
+}
+
+pub fn quote_hybrid_fee(
+    payment_asset: FeeAsset,
+    gas_units: u128,
+    price_per_gas_micro_nbla: u128,
+    nxmr_to_nbla_rate_micro: Option<u128>,
+) -> Result<HybridFeeQuote, FeeError> {
+    if gas_units == 0 {
+        return Err(FeeError::ZeroGas);
+    }
+    if price_per_gas_micro_nbla == 0 {
+        return Err(FeeError::ZeroGasPrice);
+    }
+
+    let required_fee_micro_nbla = gas_units
+        .checked_mul(price_per_gas_micro_nbla)
+        .ok_or(FeeError::ArithmeticOverflow)?;
+
+    match payment_asset {
+        FeeAsset::Nbla => Ok(HybridFeeQuote {
+            payment_asset,
+            payment_asset_symbol: payment_asset.symbol(),
+            gas_units,
+            price_per_gas_micro_nbla,
+            required_fee_micro_nbla,
+            nxmr_to_nbla_rate_micro: None,
+            paid_amount_units: required_fee_micro_nbla,
+            converted_nbla_micro_units: required_fee_micro_nbla,
+            reserve_backing_micro_nbla: 0,
+            validator_reward_micro_nbla: required_fee_micro_nbla,
+            validator_points: required_fee_micro_nbla
+                .checked_mul(TESTNET_POINTS_PER_MICRO_NBLA)
+                .ok_or(FeeError::ArithmeticOverflow)?,
+            settlement_note: "NBLA gas is paid directly to the validator reward ledger",
+        }),
+        FeeAsset::NXmr => {
+            let rate = nxmr_to_nbla_rate_micro.ok_or(FeeError::MissingNXmrRate)?;
+            if rate == 0 {
+                return Err(FeeError::ZeroNXmrRate);
+            }
+
+            let paid_amount_units = ceil_div(
+                required_fee_micro_nbla
+                    .checked_mul(1_000_000)
+                    .ok_or(FeeError::ArithmeticOverflow)?,
+                rate,
+            );
+            let converted_nbla_micro_units = paid_amount_units
+                .checked_mul(rate)
+                .ok_or(FeeError::ArithmeticOverflow)?
+                / 1_000_000;
+            let reserve_backing_micro_nbla =
+                split_basis_points(converted_nbla_micro_units, NXMR_RESERVE_BACKING_BPS)?;
+            let validator_reward_micro_nbla =
+                converted_nbla_micro_units - reserve_backing_micro_nbla;
+
+            Ok(HybridFeeQuote {
+                payment_asset,
+                payment_asset_symbol: payment_asset.symbol(),
+                gas_units,
+                price_per_gas_micro_nbla,
+                required_fee_micro_nbla,
+                nxmr_to_nbla_rate_micro: Some(rate),
+                paid_amount_units,
+                converted_nbla_micro_units,
+                reserve_backing_micro_nbla,
+                validator_reward_micro_nbla,
+                validator_points: validator_reward_micro_nbla
+                    .checked_mul(TESTNET_POINTS_PER_MICRO_NBLA)
+                    .ok_or(FeeError::ArithmeticOverflow)?,
+                settlement_note:
+                    "nXMR gas is converted to NBLA value: 90% backs NBLA, 10% rewards validators",
+            })
+        }
+    }
 }
 
 pub fn readiness_report() -> NebulaReadiness {
@@ -78,10 +225,17 @@ pub fn readiness_report() -> NebulaReadiness {
                 "checks": [
                     "format",
                     "build",
-                    "public-launch-tests",
+                    "test-suite",
                     "readiness-contract",
                     "guide-mirror"
                 ],
+            })),
+            "economics": stable_root(&json!({
+                "native_fee_token": NBLA_SYMBOL,
+                "bridged_fee_token": NXMR_SYMBOL,
+                "nxmr_reserve_backing_bps": NXMR_RESERVE_BACKING_BPS,
+                "nxmr_validator_reward_bps": NXMR_VALIDATOR_REWARD_BPS,
+                "testnet_reward_unit": "non-transferable validator points",
             })),
             "guide": stable_root(&json!({
                 "root_readme": "README.md",
@@ -91,6 +245,7 @@ pub fn readiness_report() -> NebulaReadiness {
         }),
         acceptance,
         public_launch_readiness,
+        economics: hybrid_fee_policy(),
     }
 }
 
@@ -110,6 +265,17 @@ fn stable_root(value: &Value) -> String {
     let bytes = serde_json::to_vec(value).expect("status root input serializes");
     let digest = Sha3_256::digest(bytes);
     hex::encode(digest)
+}
+
+fn split_basis_points(amount: u128, bps: u128) -> Result<u128, FeeError> {
+    amount
+        .checked_mul(bps)
+        .ok_or(FeeError::ArithmeticOverflow)
+        .map(|scaled| scaled / FEE_BASIS_POINTS)
+}
+
+fn ceil_div(numerator: u128, denominator: u128) -> u128 {
+    numerator / denominator + u128::from(numerator % denominator != 0)
 }
 
 fn unix_ms() -> u128 {
@@ -149,5 +315,53 @@ mod public_launch {
             .remediation_root
             .chars()
             .all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn public_launch_readiness_includes_hybrid_fee_policy() {
+        let report = readiness_report();
+
+        assert_eq!(report.economics.native_fee_token, NBLA_SYMBOL);
+        assert_eq!(report.economics.bridged_fee_token, NXMR_SYMBOL);
+        assert_eq!(report.economics.nxmr_reserve_backing_bps, 9_000);
+        assert_eq!(report.economics.nxmr_validator_reward_bps, 1_000);
+    }
+}
+
+#[cfg(test)]
+mod economics {
+    use super::*;
+
+    #[test]
+    fn nbla_fee_goes_directly_to_validator_rewards() {
+        let quote = quote_hybrid_fee(FeeAsset::Nbla, 25, 4_000, None).unwrap();
+
+        assert_eq!(quote.payment_asset_symbol, NBLA_SYMBOL);
+        assert_eq!(quote.required_fee_micro_nbla, 100_000);
+        assert_eq!(quote.paid_amount_units, 100_000);
+        assert_eq!(quote.reserve_backing_micro_nbla, 0);
+        assert_eq!(quote.validator_reward_micro_nbla, 100_000);
+        assert_eq!(quote.validator_points, 100_000);
+    }
+
+    #[test]
+    fn nxmr_fee_converts_to_nbla_and_splits_ninety_ten() {
+        let quote = quote_hybrid_fee(FeeAsset::NXmr, 100, 10_000, Some(2_000_000)).unwrap();
+
+        assert_eq!(quote.payment_asset_symbol, NXMR_SYMBOL);
+        assert_eq!(quote.required_fee_micro_nbla, 1_000_000);
+        assert_eq!(quote.paid_amount_units, 500_000);
+        assert_eq!(quote.converted_nbla_micro_units, 1_000_000);
+        assert_eq!(quote.reserve_backing_micro_nbla, 900_000);
+        assert_eq!(quote.validator_reward_micro_nbla, 100_000);
+        assert_eq!(quote.validator_points, 100_000);
+    }
+
+    #[test]
+    fn nxmr_fee_requires_conversion_rate() {
+        assert_eq!(
+            quote_hybrid_fee(FeeAsset::NXmr, 1, 1, None).unwrap_err(),
+            FeeError::MissingNXmrRate
+        );
     }
 }
