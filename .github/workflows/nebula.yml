@@ -65,6 +65,7 @@ jobs:
           assert economics["nxmr_validator_reward_bps"] == 1000
           assert roots["validator_admission"]
           assert roots["genesis_manifest"]
+          assert roots["launch_package"]
           PY
 
       - name: Verify deployment attestation gate
@@ -132,6 +133,32 @@ jobs:
           assert len(payload["validator_set_root"]) == 64
           assert payload["initial_validator_count"] >= 2
           assert payload["initial_total_power"] > 0
+          assert payload["activation_height"] > 0
+          PY
+
+      - name: Verify launch package gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          attestation="$(mktemp)"
+          validators="$(mktemp)"
+          genesis="$(mktemp)"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > "$attestation"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-validator-set > "$validators"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation "$attestation" --validator-set "$validators" > "$genesis"
+          output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation "$attestation" --validator-set "$validators" --genesis-manifest "$genesis" --json)"
+          NEBULA_LAUNCH_PACKAGE_JSON="$output" python3 - <<'PY'
+          import json
+          import os
+
+          payload = json.loads(os.environ["NEBULA_LAUNCH_PACKAGE_JSON"])
+          assert payload["launch_package_ready"] is True
+          assert payload["level"] == "launch-package-attested"
+          assert len(payload["deployment_attestation_root"]) == 64
+          assert len(payload["validator_set_root"]) == 64
+          assert len(payload["genesis_root"]) == 64
+          assert payload["validator_count"] >= 2
+          assert payload["total_genesis_power"] > 0
           assert payload["activation_height"] > 0
           PY
 

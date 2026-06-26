@@ -360,6 +360,18 @@ pub struct GenesisManifestReport {
     pub activation_height: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct LaunchPackageReport {
+    pub launch_package_ready: bool,
+    pub level: &'static str,
+    pub deployment_attestation_root: String,
+    pub validator_set_root: String,
+    pub genesis_root: String,
+    pub validator_count: usize,
+    pub total_genesis_power: u64,
+    pub activation_height: u64,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum FeeError {
     ZeroGas,
@@ -551,6 +563,15 @@ pub fn readiness_report() -> NebulaReadiness {
                 "native_fee_token": NBLA_SYMBOL,
                 "native_base_unit": NEBULAI_UNIT,
                 "bridged_fee_token": NXMR_SYMBOL,
+            })),
+            "launch_package": stable_root(&json!({
+                "deployment_attestation_verified": true,
+                "validator_set_verified": true,
+                "genesis_manifest_verified": true,
+                "genesis_binds_deployment_attestation_root": true,
+                "genesis_binds_validator_set_root": true,
+                "genesis_binds_validator_count": true,
+                "genesis_binds_total_power": true,
             })),
             "guide": stable_root(&json!({
                 "root_readme": "README.md",
@@ -1006,6 +1027,57 @@ pub fn verify_genesis_manifest_json(
         initial_validator_count: manifest.initial_validator_count,
         initial_total_power: manifest.initial_total_power,
         activation_height: manifest.activation_height,
+    })
+}
+
+pub fn verify_launch_package_jsons(
+    deployment_attestation_json: &str,
+    validator_set_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<LaunchPackageReport, AttestationError> {
+    let deployment_report = verify_deployment_attestation_json(deployment_attestation_json)?;
+    let validator_set_report = verify_validator_set_json(validator_set_json)?;
+    let genesis_report = verify_genesis_manifest_json(genesis_manifest_json)?;
+    let mut errors = Vec::new();
+
+    if genesis_report.deployment_attestation_root != deployment_report.evidence_root {
+        errors.push(format!(
+            "genesis deployment_attestation_root does not match deployment evidence root {}",
+            deployment_report.evidence_root
+        ));
+    }
+    if genesis_report.validator_set_root != validator_set_report.validator_set_root {
+        errors.push(format!(
+            "genesis validator_set_root does not match validator set root {}",
+            validator_set_report.validator_set_root
+        ));
+    }
+    if genesis_report.initial_validator_count != validator_set_report.validator_count {
+        errors.push(format!(
+            "genesis initial_validator_count expected {} but got {}",
+            validator_set_report.validator_count, genesis_report.initial_validator_count
+        ));
+    }
+    if genesis_report.initial_total_power != validator_set_report.total_genesis_power {
+        errors.push(format!(
+            "genesis initial_total_power expected {} but got {}",
+            validator_set_report.total_genesis_power, genesis_report.initial_total_power
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    Ok(LaunchPackageReport {
+        launch_package_ready: true,
+        level: "launch-package-attested",
+        deployment_attestation_root: deployment_report.evidence_root,
+        validator_set_root: validator_set_report.validator_set_root,
+        genesis_root: genesis_report.genesis_root,
+        validator_count: validator_set_report.validator_count,
+        total_genesis_power: validator_set_report.total_genesis_power,
+        activation_height: genesis_report.activation_height,
     })
 }
 
@@ -2056,6 +2128,51 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "activation_height must be greater than zero"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_verifies_consistent_artifacts() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+
+        let report = verify_launch_package_jsons(&deployment, &validators, &genesis).unwrap();
+
+        assert!(report.launch_package_ready);
+        assert_eq!(report.level, "launch-package-attested");
+        assert_eq!(report.validator_count, 2);
+        assert_eq!(report.total_genesis_power, 2);
+        assert_eq!(report.activation_height, 1);
+        assert_eq!(report.deployment_attestation_root.len(), 64);
+        assert_eq!(report.validator_set_root.len(), 64);
+        assert_eq!(report.genesis_root.len(), 64);
+    }
+
+    #[test]
+    fn launch_package_rejects_mismatched_genesis_roots() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let mut genesis = serde_json::from_str::<Value>(
+            &build_genesis_manifest_json_pretty(&deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        genesis["deployment_attestation_root"] = json!(hex_64("different-deployment-root"));
+        genesis["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(genesis.clone()).unwrap()
+        ));
+
+        let error = verify_launch_package_jsons(&deployment, &validators, &genesis.to_string())
+            .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error
+                        .starts_with("genesis deployment_attestation_root does not match")));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }

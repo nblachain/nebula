@@ -17,6 +17,7 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-set /tmp/nebula-validator-set.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json > /tmp/nebula-genesis.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-genesis-manifest /tmp/nebula-genesis.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json --genesis-manifest /tmp/nebula-genesis.json --json
 ```
 
 The readiness report keeps local testnet acceptance separate from public launch
@@ -35,3 +36,6 @@ two regions. Validator admission rewards are denominated in `nebulai`.
 
 The genesis manifest builder binds verified deployment evidence and validator
 admission into the root artifact used to start a public testnet.
+
+The launch-package verifier checks that the deployment, validator set, and
+genesis artifacts all agree before operators advance to a live rollout.

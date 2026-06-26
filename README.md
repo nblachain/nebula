@@ -52,6 +52,7 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-set /tmp/nebula-validator-set.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json > /tmp/nebula-genesis.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-genesis-manifest /tmp/nebula-genesis.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json --genesis-manifest /tmp/nebula-genesis.json --json
 cmp docs/NEBULA_LAYER2.md README.md
 ```
 
@@ -68,6 +69,8 @@ The public launch suite covers:
 - validator-set admission, reward-unit, uniqueness, and region-spread validation
 - genesis manifest root binding across deployment evidence, validator set, and
   fee policy
+- launch package coherence across deployment attestation, validator set, and
+  genesis manifest artifacts
 
 ## Hybrid Fees And Validator Rewards
 
@@ -100,7 +103,8 @@ The active GitHub Actions workflow is Nebula-owned:
 6. Generate and verify a deployment attestation sample.
 7. Generate and verify a validator-set manifest sample.
 8. Build and verify a genesis manifest from the verified samples.
-9. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
+9. Verify the launch package is internally coherent.
+10. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
 
 Legacy upstream CI for daemon, wallet, Guix, depends, Docker daemon images, and
 source archives has been removed.
@@ -159,6 +163,19 @@ Operators can build and verify the launch manifest with:
 ```bash
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json > /tmp/nebula-genesis.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-genesis-manifest /tmp/nebula-genesis.json --json
+```
+
+## Launch Package Gate
+
+The final package check verifies the deployment attestation, validator-set
+manifest, and genesis manifest together. It rejects a package when the genesis
+manifest does not bind the exact deployment evidence root, validator-set root,
+validator count, and total genesis power produced by the other verified files.
+
+Operators can verify the full package with:
+
+```bash
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json --genesis-manifest /tmp/nebula-genesis.json --json
 ```
 
 ## License
