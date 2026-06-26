@@ -9935,6 +9935,24 @@ fn public_launch_checks(summary: &TestnetSummary) -> Vec<ReadinessCheck> {
     ]
 }
 
+const PUBLIC_LAUNCH_CHECK_IDS: &[&str] = &[
+    "public-launch-no-mainnet-custody",
+    "public-launch-finality-target",
+    "public-launch-bootstrap-profile",
+    "public-launch-policy-bounds",
+    "public-launch-runner-loopback-only",
+    "public-launch-status-manifest-redacted",
+    "public-launch-bundle-redacted",
+    "public-launch-deployment-attestation",
+    "public-launch-reserve-monitoring",
+    "public-launch-operations-drills",
+    "public-launch-privacy-surface",
+    "public-launch-da-watchtower-coverage",
+    "public-launch-wallet-recovery-audit",
+    "public-launch-mempool-accountability",
+    "public-launch-bridge-release-safety",
+];
+
 fn public_launch_check_detail(id: &str) -> Option<&'static str> {
     match id {
         "public-launch-no-mainnet-custody" => {
@@ -22466,6 +22484,10 @@ fn ensure_public_launch_readiness_roots_match_report(
             ),
         )?;
     }
+    ensure(
+        check_ids.iter().map(String::as_str).collect::<Vec<_>>() == PUBLIC_LAUNCH_CHECK_IDS,
+        "public launch readiness checks must match the canonical ordered check set",
+    )?;
     for check in checks {
         let id = required_nested_str(check, "id", "public launch readiness check")?;
         let status = required_nested_str(check, "status", "public launch readiness check")?;
@@ -36238,6 +36260,25 @@ mod tests {
         assert!(error.contains(
             "public launch readiness check detail mismatch for public-launch-no-mainnet-custody"
         ));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_reordered_check_set() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["checks"]
+            .as_array_mut()
+            .expect("readiness checks")
+            .swap(0, 1);
+
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("reordered check set should fail safety checks");
+        assert!(error
+            .contains("public launch readiness checks must match the canonical ordered check set"));
     }
 
     #[test]
