@@ -868,7 +868,7 @@ classification, and whether external deployment capture is required.
 Deployment-attestation remediations
 also list failed subchecks, including capture-plan, launch-bundle, package
 file-set, bootstrap profile/report/rate-limit policy roots, status-manifest
-root/payload, preflight, runbook, bootstrap topology/count/registry/probe
+root/payload repair roots, preflight, runbook, bootstrap topology/count/registry/probe
 bindings, aggregate probe repair roots/counts, per-endpoint publicness, TLS pin repair roots/counts,
 proxy/firewall/rate-limit policy repair roots, per-surface probe roots/counts,
 placeholder hygiene, local bootstrap/finality dependencies, wallet recovery,

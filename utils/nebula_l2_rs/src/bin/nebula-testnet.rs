@@ -8174,7 +8174,15 @@ fn public_deployment_repair_roots(
             report.expected_rate_limit_policy_root.as_deref(),
         ),
         (
+            "status_manifest_root_bound",
+            report.expected_public_status_manifest_root.as_deref(),
+        ),
+        (
             "public_status_manifest_root_bound",
+            report.expected_public_status_manifest_root.as_deref(),
+        ),
+        (
+            "public_status_manifest_payload_bound",
             report.expected_public_status_manifest_root.as_deref(),
         ),
         (
@@ -40795,6 +40803,23 @@ mod tests {
         assert!(remediation
             .failed_subchecks
             .contains(&"public_status_manifest_payload_bound".to_string()));
+        for failed_subcheck in [
+            "status_manifest_root_bound",
+            "public_status_manifest_root_bound",
+            "public_status_manifest_payload_bound",
+        ] {
+            assert_eq!(
+                remediation
+                    .repair_roots
+                    .get(failed_subcheck)
+                    .map(String::as_str),
+                summary
+                    .public_deployment
+                    .expected_public_status_manifest_root
+                    .as_deref(),
+                "missing repair root for {failed_subcheck}"
+            );
+        }
         let _ = fs::remove_file(stale_path);
     }
 
