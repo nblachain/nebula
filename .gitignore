@@ -128,8 +128,11 @@ target/
 *.rmeta
 
 # Keep the Nebula CLI wrapper trackable despite the broad IDE bin/ ignore.
-!utils/nebula_l2_rs/src/bin/
-!utils/nebula_l2_rs/src/bin/**
+!crates/
+!crates/nebula-testnet/
+!crates/nebula-testnet/src/
+!crates/nebula-testnet/src/bin/
+!crates/nebula-testnet/src/bin/**
 
 # Local L2 progress panel and generated dashboards
 utils/l2_progress_panel/

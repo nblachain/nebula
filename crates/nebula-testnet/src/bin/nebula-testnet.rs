@@ -12,9 +12,9 @@ fn main() {
     let wants_readiness = args.iter().any(|arg| arg == "--mainnet-readiness");
 
     if wants_json || wants_readiness {
-        println!("{}", nebula_l2_rs::readiness_json_pretty());
+        println!("{}", nebula_testnet::readiness_json_pretty());
     } else {
-        println!("{}", nebula_l2_rs::readiness_summary());
+        println!("{}", nebula_testnet::readiness_summary());
     }
 }
 

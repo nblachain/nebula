@@ -7,10 +7,10 @@ node, wallet, mining, reproducible-build, or daemon surfaces.
 ## Commands
 
 ```bash
-cargo fmt --manifest-path utils/nebula_l2_rs/Cargo.toml -- --check
-cargo build --manifest-path utils/nebula_l2_rs/Cargo.toml --bin nebula-testnet
-cargo test --manifest-path utils/nebula_l2_rs/Cargo.toml public_launch -- --test-threads=1
-cargo run --manifest-path utils/nebula_l2_rs/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
+cargo fmt --manifest-path crates/nebula-testnet/Cargo.toml -- --check
+cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
+cargo test --manifest-path crates/nebula-testnet/Cargo.toml public_launch -- --test-threads=1
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
 ```
 
 The readiness report keeps local testnet acceptance separate from public launch

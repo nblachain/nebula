@@ -29,8 +29,8 @@ provided live public deployment evidence.
 
 ## Repository Layout
 
-- `utils/nebula_l2_rs/` - Nebula Rust runtime and testnet tooling.
-- `utils/nebula_l2_rs/src/bin/nebula-testnet.rs` - standalone public testnet,
+- `crates/nebula-testnet/` - Nebula Rust runtime and testnet tooling.
+- `crates/nebula-testnet/src/bin/nebula-testnet.rs` - standalone public testnet,
   public launch, readiness, package, and deployment-attestation verifier.
 - `docs/NEBULA_LAYER2.md` - mirrored operator guide. This file intentionally
   matches this README so CI can enforce one source of truth.
@@ -42,10 +42,10 @@ provided live public deployment evidence.
 Run the public testnet checks from the repository root:
 
 ```bash
-cargo fmt --manifest-path utils/nebula_l2_rs/Cargo.toml -- --check
-cargo build --manifest-path utils/nebula_l2_rs/Cargo.toml --bin nebula-testnet
-cargo test --manifest-path utils/nebula_l2_rs/Cargo.toml public_launch -- --test-threads=1
-cargo run --manifest-path utils/nebula_l2_rs/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
+cargo fmt --manifest-path crates/nebula-testnet/Cargo.toml -- --check
+cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
+cargo test --manifest-path crates/nebula-testnet/Cargo.toml public_launch -- --test-threads=1
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
 cmp docs/NEBULA_LAYER2.md README.md
 ```
 

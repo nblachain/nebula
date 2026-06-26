@@ -20,24 +20,24 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            utils/nebula_l2_rs/target
-          key: nebula-cargo-${{ runner.os }}-${{ hashFiles('utils/nebula_l2_rs/Cargo.lock') }}
+            crates/nebula-testnet/target
+          key: nebula-cargo-${{ runner.os }}-${{ hashFiles('crates/nebula-testnet/Cargo.lock') }}
           restore-keys: nebula-cargo-${{ runner.os }}-
 
       - name: Check Rust formatting
-        run: cargo fmt --manifest-path utils/nebula_l2_rs/Cargo.toml -- --check
+        run: cargo fmt --manifest-path crates/nebula-testnet/Cargo.toml -- --check
 
       - name: Build Nebula testnet binary
-        run: cargo build --manifest-path utils/nebula_l2_rs/Cargo.toml --bin nebula-testnet
+        run: cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
 
       - name: Run public launch test suite
-        run: cargo test --manifest-path utils/nebula_l2_rs/Cargo.toml public_launch -- --test-threads=1
+        run: cargo test --manifest-path crates/nebula-testnet/Cargo.toml public_launch -- --test-threads=1
 
       - name: Check public launch readiness contract
         shell: bash
         run: |
           set -euo pipefail
-          output="$(cargo run --manifest-path utils/nebula_l2_rs/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json)"
+          output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json)"
           NEBULA_READINESS_JSON="$output" python3 - <<'PY'
           import json
           import os
