@@ -3562,8 +3562,8 @@ real XMR.
   routable HTTPS endpoints, the exact capture plan root, capture contract root,
   public deployment evidence-template root, deployment preflight checklist
   root, package file-set root, package schema/version/chain/run identity,
-  release approval template root, release-authority registry template root, completed
-  preflight receipt root and phase-set root, completed runbook receipt root and
+  release approval template root, release-authority registry template root, exact-shaped completed
+  preflight receipt root and phase-set root, exact-shaped completed runbook receipt root and
   step-receipt-set root, typed TLS endpoint-pin records for public RPC,
   status-page, health, metrics, incident-contact, faucet, and reset-runbook surfaces, typed bootstrap node
   records whose derived node/operator/region roots must match the public bootstrap profile,

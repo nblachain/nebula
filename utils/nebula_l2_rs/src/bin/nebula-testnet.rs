@@ -559,6 +559,59 @@ const PUBLIC_PRIVATE_SUMMARY_PROBE_FIELDS: &[&str] = &[
     "full_operator_summary_publication_allowed",
     "no_private_summary_exposed",
 ];
+const PUBLIC_PREFLIGHT_RECEIPT_FIELDS: &[&str] = &[
+    "schema_version",
+    "kind",
+    "chain_id",
+    "completed",
+    "deployment_run_id",
+    "deployment_preflight_checklist_root",
+    "capture_contract_root",
+    "public_launch_bundle_root",
+    "public_status_manifest_root",
+    "required_phase_ids",
+    "phase_count",
+    "phases",
+    "phase_set_root",
+    "receipt_root",
+];
+const PUBLIC_PREFLIGHT_RECEIPT_PHASE_FIELDS: &[&str] = &[
+    "order",
+    "id",
+    "required",
+    "completed",
+    "completed_at_unix_ms",
+    "phase_evidence_root",
+    "phase_root",
+];
+const PUBLIC_RUNBOOK_RECEIPT_FIELDS: &[&str] = &[
+    "schema_version",
+    "kind",
+    "chain_id",
+    "completed",
+    "deployment_run_id",
+    "public_deployment_runbook_root",
+    "public_deployment_runbook_step_set_root",
+    "capture_contract_root",
+    "public_launch_bundle_root",
+    "public_status_manifest_root",
+    "required_step_ids",
+    "step_count",
+    "steps",
+    "step_receipt_set_root",
+    "receipt_root",
+];
+const PUBLIC_RUNBOOK_RECEIPT_STEP_FIELDS: &[&str] = &[
+    "order",
+    "step_id",
+    "required",
+    "completed",
+    "completed_at_unix_ms",
+    "step_root",
+    "source_root",
+    "step_evidence_root",
+    "step_receipt_root",
+];
 const PUBLIC_SURFACE_PROBE_FIELDS: &[&str] = &[
     "status",
     "chain_id",
@@ -18414,6 +18467,22 @@ fn validate_public_deployment_preflight_receipt(
     observed_at_unix_ms: u64,
     expires_at_unix_ms: u64,
 ) -> Result<PublicDeploymentPreflightReceiptValidation, String> {
+    ensure_allowed_object_fields(
+        receipt,
+        PUBLIC_PREFLIGHT_RECEIPT_FIELDS,
+        "public deployment preflight receipt",
+    )?;
+    let phases = receipt
+        .get("phases")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "public deployment preflight receipt missing phases".to_string())?;
+    for phase in phases {
+        ensure_allowed_object_fields(
+            phase,
+            PUBLIC_PREFLIGHT_RECEIPT_PHASE_FIELDS,
+            "public deployment preflight receipt phase",
+        )?;
+    }
     let mut canonical = receipt.clone();
     let validation = derive_public_deployment_preflight_receipt(
         &mut canonical,
@@ -18690,6 +18759,22 @@ fn validate_public_deployment_runbook_receipt(
     observed_at_unix_ms: u64,
     expires_at_unix_ms: u64,
 ) -> Result<PublicDeploymentRunbookReceiptValidation, String> {
+    ensure_allowed_object_fields(
+        receipt,
+        PUBLIC_RUNBOOK_RECEIPT_FIELDS,
+        "public deployment runbook receipt",
+    )?;
+    let steps = receipt
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "public deployment runbook receipt missing steps".to_string())?;
+    for step in steps {
+        ensure_allowed_object_fields(
+            step,
+            PUBLIC_RUNBOOK_RECEIPT_STEP_FIELDS,
+            "public deployment runbook receipt step",
+        )?;
+    }
     let mut canonical = receipt.clone();
     let validation = derive_public_deployment_runbook_receipt(
         &mut canonical,
@@ -44229,6 +44314,60 @@ mod tests {
             .expect_err("tampered runbook receipt root should be rejected");
         assert!(error.contains("runbook receipt roots mismatch"));
         let _ = fs::remove_file(bad_path);
+    }
+
+    #[test]
+    fn public_deployment_evidence_rejects_extra_receipt_fields() {
+        let base_cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut base_testnet = Testnet::new(base_cli);
+        base_testnet.run().expect("base testnet run");
+        let base_summary = base_testnet.summary(Vec::new());
+        let base_value: Value =
+            serde_json::from_str(&valid_public_deployment_evidence(&base_summary))
+                .expect("deployment evidence json");
+        for (target, description) in [
+            ("preflight_receipt", "public deployment preflight receipt"),
+            (
+                "preflight_phase",
+                "public deployment preflight receipt phase",
+            ),
+            ("runbook_receipt", "public deployment runbook receipt"),
+            ("runbook_step", "public deployment runbook receipt step"),
+        ] {
+            let mut value = base_value.clone();
+            match target {
+                "preflight_receipt" => {
+                    value["deployment_preflight_receipt"]["operator_note"] =
+                        json!("uncommitted receipt side-band claim");
+                }
+                "preflight_phase" => {
+                    value["deployment_preflight_receipt"]["phases"][0]["operator_note"] =
+                        json!("uncommitted phase side-band claim");
+                }
+                "runbook_receipt" => {
+                    value["public_deployment_runbook_receipt"]["operator_note"] =
+                        json!("uncommitted receipt side-band claim");
+                }
+                "runbook_step" => {
+                    value["public_deployment_runbook_receipt"]["steps"][0]["operator_note"] =
+                        json!("uncommitted step side-band claim");
+                }
+                _ => unreachable!("unknown receipt target"),
+            }
+            let bad_path = write_public_deployment_evidence(
+                &serde_json::to_string_pretty(&value).expect("bad evidence json"),
+            );
+            let error = load_public_deployment_evidence(&bad_path)
+                .expect_err("extra receipt field should be rejected");
+            assert!(
+                error.contains(&format!(
+                    "{description} contains unexpected field 'operator_note'"
+                )),
+                "unexpected error for {description}: {error}"
+            );
+            let _ = fs::remove_file(bad_path);
+        }
     }
 
     #[test]
