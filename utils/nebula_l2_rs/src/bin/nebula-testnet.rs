@@ -6128,7 +6128,12 @@ impl Testnet {
             &expected_release_authority_registry_template_root,
             &evidence.public_status_manifest_root,
             &expected_public_status_manifest_root,
+            &evidence.public_bootstrap_profile_root,
+            &summary.public_bootstrap_profile.profile_root,
+            &evidence.public_bootstrap_profile_report_root,
             &summary.public_bootstrap_profile.report_root,
+            &evidence.rate_limit_policy_root,
+            &summary.public_bootstrap_profile.rate_limit_policy_root,
             &evidence.tls_spki_pin_root,
             expected_tls_spki_pin_root
                 .as_deref()
@@ -38601,6 +38606,84 @@ mod tests {
         let path =
             write_public_deployment_evidence(&valid_public_deployment_evidence(&base_summary));
         let evidence = load_public_deployment_evidence(&path).expect("public deployment evidence");
+        let mut profile_root_only = evidence.clone();
+        profile_root_only.public_bootstrap_profile_root =
+            root(&["test-public-deployment", "wrong-bootstrap-profile"]);
+        base_testnet.cli.public_deployment_evidence = Some(profile_root_only);
+        let profile_root_only_summary = base_testnet.summary(Vec::new());
+        assert!(!profile_root_only_summary.public_deployment.passed);
+        assert!(
+            !profile_root_only_summary
+                .public_deployment
+                .public_bootstrap_profile_root_bound
+        );
+        assert!(
+            profile_root_only_summary
+                .public_deployment
+                .public_bootstrap_profile_report_root_bound
+        );
+        assert!(
+            profile_root_only_summary
+                .public_deployment
+                .rate_limit_policy_root_bound
+        );
+
+        let mut profile_report_only = evidence.clone();
+        profile_report_only.public_bootstrap_profile_report_root =
+            root(&["test-public-deployment", "wrong-bootstrap-profile-report"]);
+        base_testnet.cli.public_deployment_evidence = Some(profile_report_only);
+        let profile_report_only_summary = base_testnet.summary(Vec::new());
+        assert!(!profile_report_only_summary.public_deployment.passed);
+        assert!(
+            profile_report_only_summary
+                .public_deployment
+                .public_bootstrap_profile_root_bound
+        );
+        assert!(
+            !profile_report_only_summary
+                .public_deployment
+                .public_bootstrap_profile_report_root_bound
+        );
+        assert!(
+            profile_report_only_summary
+                .public_deployment
+                .rate_limit_policy_root_bound
+        );
+
+        let mut rate_limit_only = evidence.clone();
+        rate_limit_only.rate_limit_policy_root =
+            root(&["test-public-deployment", "wrong-rate-limit-policy"]);
+        base_testnet.cli.public_deployment_evidence = Some(rate_limit_only);
+        let rate_limit_only_summary = base_testnet.summary(Vec::new());
+        assert!(!rate_limit_only_summary.public_deployment.passed);
+        assert!(
+            rate_limit_only_summary
+                .public_deployment
+                .public_bootstrap_profile_root_bound
+        );
+        assert!(
+            rate_limit_only_summary
+                .public_deployment
+                .public_bootstrap_profile_report_root_bound
+        );
+        assert!(
+            !rate_limit_only_summary
+                .public_deployment
+                .rate_limit_policy_root_bound
+        );
+        assert_ne!(
+            profile_root_only_summary.public_deployment.report_root,
+            profile_report_only_summary.public_deployment.report_root
+        );
+        assert_ne!(
+            profile_root_only_summary.public_deployment.report_root,
+            rate_limit_only_summary.public_deployment.report_root
+        );
+        assert_ne!(
+            profile_report_only_summary.public_deployment.report_root,
+            rate_limit_only_summary.public_deployment.report_root
+        );
+
         base_testnet.cli.public_bootstrap_node_count = 1;
         base_testnet.cli.public_deployment_evidence = Some(evidence);
         let summary = base_testnet.summary(Vec::new());

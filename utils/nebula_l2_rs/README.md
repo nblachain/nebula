@@ -733,8 +733,10 @@ and the roots carried in the capture, require the embedded
 `public_launch_readiness_artifact_root` to match the pre-capture launch package
 handoff, require the embedded `release_approval_template_root` and
 `release_authority_registry_template_root` to match the release handoff
-templates in the verified package, and require the embedded preflight receipt root,
-phase-set root, and phase count to match the completed receipt body. Schema v5 also requires the embedded
+templates in the verified package, seal the embedded public bootstrap profile
+root, profile report root, and rate-limit policy root against the current
+bootstrap profile in the report root, and require the embedded preflight receipt
+root, phase-set root, and phase count to match the completed receipt body. Schema v5 also requires the embedded
 public deployment runbook root, step-set root, runbook receipt root,
 step-receipt-set root, and step receipt count to match the completed runbook
 receipt body and the current generated runbook. A self-consistent attestation
