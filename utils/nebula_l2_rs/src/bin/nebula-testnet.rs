@@ -9935,6 +9935,57 @@ fn public_launch_checks(summary: &TestnetSummary) -> Vec<ReadinessCheck> {
     ]
 }
 
+fn public_launch_check_detail(id: &str) -> Option<&'static str> {
+    match id {
+        "public-launch-no-mainnet-custody" => {
+            Some("public launch must keep Monero mainnet custody disabled")
+        }
+        "public-launch-finality-target" => Some(
+            "public launch requires local quorum-certificate finality under the configured <=200ms target",
+        ),
+        "public-launch-bootstrap-profile" => Some(
+            "public bootstrap profile must bind endpoint commitments, bootnodes, rate limits, faucet/reset policy, monitoring, and runbook roots",
+        ),
+        "public-launch-policy-bounds" => Some(
+            "public launch policies must keep bootstrap count, RPC/P2P limits, faucet caps, and reset windows inside bounded public-alpha limits",
+        ),
+        "public-launch-runner-loopback-only" => Some(
+            "local runner must remain loopback-only while deployment proxies expose only committed public endpoints",
+        ),
+        "public-launch-status-manifest-redacted" => {
+            Some("public status manifest must be redacted and root-bound before publication")
+        }
+        "public-launch-bundle-redacted" => {
+            Some("public launch handoff bundle must be redacted and keep full operator summary private")
+        }
+        "public-launch-deployment-attestation" => Some(
+            "schema v5 public deployment evidence must bind incident-contact probes, runbook receipts, fresh multi-observer policy, status/P2P/health/ops/finality, and private-summary denial transcripts to the launch bundle",
+        ),
+        "public-launch-reserve-monitoring" => Some(
+            "public launch requires local reserve monitoring with independent reporters and underreserve alert drill",
+        ),
+        "public-launch-operations-drills" => Some(
+            "public launch requires incident, rollback, queue-drain, pause/resume, and reserve reconciliation drills",
+        ),
+        "public-launch-privacy-surface" => Some(
+            "public launch requires the local public surface to exclude raw Monero or wallet-secret identifiers",
+        ),
+        "public-launch-da-watchtower-coverage" => {
+            Some("public launch requires DA/proof/watchtower coverage for every produced block")
+        }
+        "public-launch-wallet-recovery-audit" => Some(
+            "public launch requires wallet recovery audit roots for admissions, block status, DA/proof, anchors, and bridge history",
+        ),
+        "public-launch-mempool-accountability" => Some(
+            "public launch requires admission/preconfirmation accountability with no expired omissions",
+        ),
+        "public-launch-bridge-release-safety" => Some(
+            "public launch requires reserve, signer quorum, delay, rate-limit, pause, and challenge-hold release safety",
+        ),
+        _ => None,
+    }
+}
+
 fn run_profile_report_from_cli(cli: &Cli) -> RunProfileReport {
     let no_mainnet_network = cli.monero_network != "mainnet";
     let network_profile_allowed =
@@ -22418,8 +22469,15 @@ fn ensure_public_launch_readiness_roots_match_report(
     for check in checks {
         let id = required_nested_str(check, "id", "public launch readiness check")?;
         let status = required_nested_str(check, "status", "public launch readiness check")?;
+        let detail = required_nested_str(check, "detail", "public launch readiness check")?;
         let evidence_root =
             required_nested_str(check, "evidence_root", "public launch readiness check")?;
+        let expected_detail = public_launch_check_detail(id)
+            .ok_or_else(|| format!("public launch readiness check id {id} is not canonical"))?;
+        ensure(
+            detail == expected_detail,
+            &format!("public launch readiness check detail mismatch for {id}"),
+        )?;
         ensure(
             status == "pass" || status == "blocked",
             &format!("public launch readiness check status must be pass or blocked for {id}"),
@@ -36161,6 +36219,24 @@ mod tests {
             .expect_err("malformed check evidence root should fail safety checks");
         assert!(error.contains(
             "public launch readiness check evidence root must be a hex root or missing deployment evidence placeholder for public-launch-no-mainnet-custody"
+        ));
+    }
+
+    #[test]
+    fn public_launch_readiness_report_rejects_tampered_check_detail() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["public_launch_readiness"]["checks"][0]["detail"] =
+            json!("altered operator guidance");
+
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("tampered check detail should fail safety checks");
+        assert!(error.contains(
+            "public launch readiness check detail mismatch for public-launch-no-mainnet-custody"
         ));
     }
 
