@@ -3219,7 +3219,9 @@ real XMR.
   `nebula-public-status-manifest` with chain, latest-block, finality,
   no-mainnet-custody, and public-bootstrap root commitments only. Full bridge
   ledgers, run profiles, block roots, probe binds, release approvals, and
-  authority registries remain local operator output.
+  authority registries remain local operator output. Its guard pins schema,
+  chain, version, public-alpha, and no-custody identity before accepting the
+  rooted redacted payload.
 - A typed public deployment runbook export gives launch operators a rooted
   `nebula-public-deployment-runbook` handoff before external capture. It is
   not evidence and not custody approval; it binds the public status manifest

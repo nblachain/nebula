@@ -21771,6 +21771,37 @@ fn ensure_release_signoff_template_set(section: &Value) -> Result<(), String> {
 }
 
 fn ensure_public_status_manifest_redacted(value: &Value) -> Result<(), String> {
+    ensure(
+        value.get("kind").and_then(Value::as_str) == Some("nebula-public-status-manifest"),
+        "public status manifest kind mismatch",
+    )?;
+    ensure(
+        value.get("schema_version").and_then(Value::as_u64) == Some(1),
+        "public status manifest schema_version mismatch",
+    )?;
+    ensure(
+        value.get("chain_id").and_then(Value::as_str) == Some(CHAIN_ID),
+        "public status manifest chain_id mismatch",
+    )?;
+    ensure(
+        value.get("version").and_then(Value::as_str) == Some(VERSION),
+        "public status manifest version mismatch",
+    )?;
+    ensure(
+        value.get("public_alpha_only").and_then(Value::as_bool) == Some(true),
+        "public status manifest must remain public-alpha-only",
+    )?;
+    ensure(
+        value
+            .get("usable_as_mainnet_custody_approval")
+            .and_then(Value::as_bool)
+            == Some(false),
+        "public status manifest must not be usable as mainnet custody approval",
+    )?;
+    ensure(
+        value.get("custody_mode").and_then(Value::as_str) == Some("no-mainnet-custody"),
+        "public status manifest custody_mode mismatch",
+    )?;
     for key in PUBLIC_STATUS_FORBIDDEN_KEYS {
         ensure(
             !value_contains_exact_key(value, key),
@@ -35548,6 +35579,27 @@ mod tests {
         ));
         ensure_public_status_manifest_redacted(&value).expect("redacted exported manifest");
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn public_status_manifest_rejects_re_rooted_wrong_version() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_status_manifest(&summary);
+        value["version"] = json!("nebula-testnet-wrong-version");
+        value
+            .as_object_mut()
+            .expect("public status manifest object")
+            .remove("public_status_manifest_root");
+        let manifest_root = value_root("public-status-manifest", &value);
+        value["public_status_manifest_root"] = json!(manifest_root);
+
+        let error = ensure_public_status_manifest_redacted(&value)
+            .expect_err("re-rooted status manifest with wrong version should fail redaction guard");
+        assert!(error.contains("public status manifest version mismatch"));
     }
 
     #[test]
