@@ -3340,8 +3340,9 @@ real XMR.
   pins the schema, chain, version, public-alpha/operator-local boundary, and
   nested dry-run readiness boundary,
   recomputes the nested check, remediation, canonical next-step map, command-map, command-sequence,
-  report, and artifact roots against the current run, requires the deployment-
-  attestation remediation artifact id/path, command, kind, privacy boundary, and
+  report, and artifact roots against the current run, binds the package file-set
+  root to the report manifest/testnet identity, requires the deployment-attestation
+  remediation artifact id/path, command, kind, privacy boundary, and
   external-capture flag to stay canonical, pins deterministic missing-evidence
   failed-subcheck list and repair roots to the package, status, bundle,
   capture-plan, capture-contract, evidence-template, and preflight roots in the

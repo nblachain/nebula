@@ -22061,6 +22061,17 @@ fn ensure_public_launch_readiness_report_artifact_safe(value: &Value) -> Result<
         value.get("custody_mode").and_then(Value::as_str) == Some("no-mainnet-custody"),
         "public launch readiness report custody mode mismatch",
     )?;
+    let manifest_id = required_nested_str(value, "manifest_id", "public launch readiness report")?;
+    let testnet_id = required_nested_str(value, "testnet_id", "public launch readiness report")?;
+    let expected_package_file_set_root =
+        public_launch_package_file_set_root(manifest_id, testnet_id);
+    ensure(
+        value
+            .get("public_launch_package_file_set_root")
+            .and_then(Value::as_str)
+            == Some(expected_package_file_set_root.as_str()),
+        "public launch readiness report package file-set root identity mismatch",
+    )?;
     let readiness = value
         .get("public_launch_readiness")
         .ok_or_else(|| "public launch readiness report missing nested readiness".to_string())?;
@@ -36286,6 +36297,31 @@ mod tests {
     }
 
     #[test]
+    fn public_launch_readiness_report_rejects_package_file_set_identity_mismatch() {
+        let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
+            .expect("mainnet readiness should parse");
+        let mut testnet = Testnet::new(cli);
+        testnet.run().expect("testnet run");
+        let summary = testnet.summary(Vec::new());
+        let mut value = public_launch_readiness_report_artifact(&summary);
+        value["testnet_id"] = json!("nebula-testnet-swapped");
+        let mut rootless = value.clone();
+        rootless
+            .as_object_mut()
+            .expect("readiness report object")
+            .remove("public_launch_readiness_artifact_root");
+        value["public_launch_readiness_artifact_root"] = json!(value_root(
+            "public-launch-readiness-report-artifact",
+            &rootless,
+        ));
+
+        let error = ensure_public_launch_readiness_report_artifact_safe(&value)
+            .expect_err("re-rooted package file-set identity mismatch should fail safety checks");
+        assert!(error
+            .contains("public launch readiness report package file-set root identity mismatch"));
+    }
+
+    #[test]
     fn public_launch_readiness_report_rejects_extra_top_level_field() {
         let cli = parse_cli(vec!["--mainnet-readiness".to_string()])
             .expect("mainnet readiness should parse");
@@ -36871,13 +36907,12 @@ mod tests {
 
         let mut stale: Value = serde_json::from_slice(&fs::read(&path).expect("read report"))
             .expect("public launch readiness report json");
-        stale["public_launch_package_file_set_root"] = json!(root(&[
-            "tampered-public-launch-package-file-set",
+        stale["public_launch_bundle_root"] = json!(root(&[
+            "tampered-public-launch-bundle",
             &summary.manifest_id
         ]));
         stale["public_launch_readiness"]["remediations"][0]["repair_roots"]
-            ["public_launch_package_file_set_root_bound"] =
-            stale["public_launch_package_file_set_root"].clone();
+            ["public_launch_bundle_root_bound"] = stale["public_launch_bundle_root"].clone();
         let remediation_root = public_launch_remediation_root_from_value(
             &stale["public_launch_readiness"]["remediations"][0],
         )
