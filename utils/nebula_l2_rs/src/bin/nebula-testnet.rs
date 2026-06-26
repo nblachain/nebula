@@ -11965,6 +11965,13 @@ fn public_deployment_capture_audit(
     if structural_ready && !strict_verifier_passed {
         failed_checks.push("strict_public_deployment_verifier_passed".to_string());
     }
+    let next_steps = public_deployment_capture_next_steps(
+        "Repair or fill capture.json until assembler_ready is true, then verify, assemble, and run the public launch gate against the resulting deployment attestation.",
+        true,
+    );
+    let next_steps_root = public_deployment_capture_next_steps_root(&next_steps);
+    let command_sequence = public_deployment_capture_command_sequence();
+    let command_sequence_root = public_deployment_capture_command_sequence_root(&command_sequence);
     let mut audit = json!({
         "kind": "nebula-public-deployment-capture-audit",
         "schema_version": 1,
@@ -12012,6 +12019,10 @@ fn public_deployment_capture_audit(
         "assembler_ready": assembler_ready,
         "failed_check_count": failed_checks.len(),
         "failed_checks": failed_checks,
+        "next_steps_root": next_steps_root,
+        "next_steps": next_steps,
+        "command_sequence_root": command_sequence_root,
+        "command_sequence": command_sequence,
         "next_step": if assembler_ready {
             "--verify-public-deployment-capture <capture.json> --fail-on-public-launch-gaps"
         } else if structural_ready {
@@ -35280,6 +35291,26 @@ mod tests {
 
         write_public_deployment_capture_audit(&scaffold_path, &audit_path, &summary)
             .expect("rewrite public deployment capture audit");
+        let mut audit: Value =
+            serde_json::from_slice(&fs::read(&audit_path).expect("read capture audit"))
+                .expect("capture audit json");
+        audit["command_sequence"][0]["command_key"] = json!("verify_capture");
+        if let Some(object) = audit.as_object_mut() {
+            object.remove("capture_audit_root");
+        }
+        let audit_root = value_root("public-deployment-capture-audit", &audit);
+        audit["capture_audit_root"] = json!(audit_root);
+        fs::write(
+            &audit_path,
+            serde_json::to_string_pretty(&audit).expect("capture audit json"),
+        )
+        .expect("write command-sequence tampered capture audit");
+        let error = verify_public_deployment_capture_audit(&scaffold_path, &audit_path, &summary)
+            .expect_err("command-sequence tampered capture audit should fail verification");
+        assert!(error.contains("does not match this capture and run"));
+
+        write_public_deployment_capture_audit(&scaffold_path, &audit_path, &summary)
+            .expect("rewrite public deployment capture audit");
         let mut scaffold: Value =
             serde_json::from_slice(&fs::read(&scaffold_path).expect("read scaffold"))
                 .expect("scaffold json");
@@ -36913,6 +36944,26 @@ mod tests {
         ));
         assert_eq!(audit["strict_verifier_error"], Value::Null);
         assert_eq!(audit["assembler_ready"], true);
+        assert_eq!(
+            audit["next_steps_root"],
+            public_deployment_capture_next_steps_root(&audit["next_steps"])
+        );
+        assert!(audit["next_steps"]["verify_capture"]
+            .as_str()
+            .expect("audit verify command")
+            .contains("--verify-public-deployment-capture"));
+        assert!(audit["next_steps"]["assemble_public_deployment"]
+            .as_str()
+            .expect("audit assemble command")
+            .contains("--assemble-public-deployment-evidence"));
+        assert_eq!(
+            audit["command_sequence"],
+            public_deployment_capture_command_sequence()
+        );
+        assert_eq!(
+            audit["command_sequence_root"],
+            public_deployment_capture_command_sequence_root(&audit["command_sequence"])
+        );
         assert_eq!(audit["structural_failed_check_count"], 0);
         assert_eq!(
             audit["failed_checks"]

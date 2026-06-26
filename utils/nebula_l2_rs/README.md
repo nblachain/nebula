@@ -653,7 +653,8 @@ capture-plan, capture-contract, evidence-template, and preflight roots, the
 expected package file-set root, expected package handoff root, package
 file-set/handoff root matches, and
 `structural_failed_checks`/`failed_checks` arrays with counts for CI routing,
-plus an `assembler_ready` boolean. It is diagnostic only:
+rooted `next_steps`, the rooted capture command sequence, and an
+`assembler_ready` boolean. It is diagnostic only:
 `usable_as_public_deployment_evidence` is false, so it helps deployment CI
 repair incomplete captures without clearing the public launch gate. The audit
 separates cheap `structural_ready` checks from `strict_verifier_passed`; when a
