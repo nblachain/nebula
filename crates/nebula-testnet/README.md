@@ -92,9 +92,9 @@ Consensus and network public keys must be 64-character hex values, and
 consensus/network key domains must be disjoint.
 
 The genesis manifest builder binds verified deployment evidence and validator
-admission into the root artifact used to start a public testnet. The final
-launch-package check requires the genesis timestamp to fall inside the
-deployment attestation validity window.
+admission into the root artifact used to start a public testnet at activation
+height `1`. The final launch-package check requires the genesis timestamp to
+fall inside the deployment attestation validity window.
 
 The launch-package verifier checks that the deployment, public surface,
 validator set, and genesis artifacts all agree before operators advance to a

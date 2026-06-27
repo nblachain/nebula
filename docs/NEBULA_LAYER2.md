@@ -268,9 +268,9 @@ The final local launch artifact is a genesis manifest. It can only be built from
 a deployment attestation and validator-set manifest that already pass their
 verifiers. The manifest binds the deployment evidence root, validator-set root,
 fee-policy root, validator-admission root, initial validator count, total genesis
-power, activation height, and fee token identities. The final launch-package
-check requires the genesis timestamp to fall inside the deployment attestation
-validity window.
+power, fixed activation height `1`, and fee token identities. The final
+launch-package check requires the genesis timestamp to fall inside the
+deployment attestation validity window.
 
 Operators can build and verify the launch manifest with:
 

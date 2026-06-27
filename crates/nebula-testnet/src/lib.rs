@@ -27,6 +27,7 @@ pub const MIN_PUBLIC_TESTNET_OPERATORS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_OBSERVERS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_REGIONS: usize = 2;
 pub const MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS: u128 = 5_000;
+pub const PUBLIC_TESTNET_ACTIVATION_HEIGHT: u64 = 1;
 pub const FUTURE_CLOCK_SKEW_MS: u128 = 300_000;
 pub const PUBLIC_ATTESTATION_MAX_AGE_MS: u128 = 86_400_000;
 pub const PUBLIC_ATTESTATION_MAX_TTL_MS: u128 = 604_800_000;
@@ -634,6 +635,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "validator_set_root_required": true,
                 "fee_policy_root_required": true,
                 "validator_admission_root_required": true,
+                "activation_height": PUBLIC_TESTNET_ACTIVATION_HEIGHT,
                 "native_fee_token": NBLA_SYMBOL,
                 "native_base_unit": NEBULAI_UNIT,
                 "bridged_fee_token": NXMR_SYMBOL,
@@ -1198,7 +1200,7 @@ pub fn build_genesis_manifest_json_pretty(
         chain_id: CHAIN_ID.to_string(),
         runtime_version: VERSION.to_string(),
         genesis_time_unix_ms: unix_ms(),
-        activation_height: 1,
+        activation_height: PUBLIC_TESTNET_ACTIVATION_HEIGHT,
         deployment_attestation_root: deployment_report.evidence_root,
         validator_set_root: validator_set_report.validator_set_root,
         fee_policy_root,
@@ -1242,8 +1244,10 @@ pub fn verify_genesis_manifest_json(
     if manifest.genesis_time_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
         errors.push("genesis_time_unix_ms is more than five minutes in the future".to_string());
     }
-    if manifest.activation_height == 0 {
-        errors.push("activation_height must be greater than zero".to_string());
+    if manifest.activation_height != PUBLIC_TESTNET_ACTIVATION_HEIGHT {
+        errors.push(format!(
+            "activation_height must be {PUBLIC_TESTNET_ACTIVATION_HEIGHT}"
+        ));
     }
     require_hex_root(
         &mut errors,
@@ -4809,10 +4813,13 @@ mod public_launch {
     }
 
     #[test]
-    fn genesis_manifest_rejects_zero_activation_height() {
+    fn genesis_manifest_rejects_wrong_activation_height() {
         let mut value =
             serde_json::from_str::<Value>(&sample_genesis_manifest_json_pretty()).unwrap();
-        value["activation_height"] = json!(0);
+        value["activation_height"] = json!(2);
+        value["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(value.clone()).unwrap()
+        ));
 
         let error = verify_genesis_manifest_json(&value.to_string()).unwrap_err();
 
@@ -4820,7 +4827,7 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors
                     .iter()
-                    .any(|error| error == "activation_height must be greater than zero"));
+                    .any(|error| error == "activation_height must be 1"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
