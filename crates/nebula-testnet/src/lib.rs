@@ -640,6 +640,49 @@ pub struct OperatorJoinConfirmationReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct PublicObserverConfirmationManifest {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub operator_join_confirmation_root: String,
+    pub validator_join_root: String,
+    pub public_status_manifest_root: String,
+    pub public_probe_root: String,
+    pub endpoint_url: String,
+    pub observed_at_unix_ms: u128,
+    pub entries: Vec<PublicObserverConfirmationEntry>,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PublicObserverConfirmationEntry {
+    pub observer_id: String,
+    pub region: String,
+    pub observed_endpoint: String,
+    pub observed_public_status_root: String,
+    pub observed_public_probe_root: String,
+    pub operator_join_confirmation_root: String,
+    pub observation_root: String,
+    pub signature: SignatureVerification,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PublicObserverConfirmationReport {
+    pub public_observer_confirmation_ready: bool,
+    pub level: &'static str,
+    pub public_observer_confirmation_root: String,
+    pub operator_join_confirmation_root: String,
+    pub validator_join_root: String,
+    pub public_status_manifest_root: String,
+    pub public_probe_root: String,
+    pub endpoint_url: String,
+    pub confirmed_observer_count: usize,
+    pub confirmed_region_count: usize,
+    pub observed_at_unix_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct OperatorHandoffManifest {
     pub chain_id: String,
     pub runtime_version: String,
@@ -1147,6 +1190,19 @@ pub fn readiness_report() -> NebulaReadiness {
                 "operator_confirmation_signature_roots_verified": true,
                 "operator_confirmation_signatures_verified": true,
                 "all_joined_validators_operator_confirmed": true,
+            })),
+            "public_observer_confirmation": stable_root(&json!({
+                "operator_join_confirmation_root_required": true,
+                "validator_join_root_required": true,
+                "public_status_manifest_root_required": true,
+                "public_probe_root_required": true,
+                "endpoint_url_required": true,
+                "observed_at_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
+                "one_confirmation_entry_per_deployment_observer": true,
+                "minimum_observer_count_required": MIN_PUBLIC_TESTNET_OBSERVERS,
+                "minimum_observer_region_count_required": MIN_PUBLIC_TESTNET_REGIONS,
+                "observer_confirmation_signature_roots_verified": true,
+                "observer_confirmation_signatures_verified": true,
             })),
             "public_status_surface": stable_root(&json!({
                 "status": "deployment-attested",
@@ -3381,6 +3437,233 @@ pub fn verify_operator_join_confirmation_jsons(
         confirmed_operator_count: confirmed_operators.len(),
         confirmed_validator_count: confirmed_validators.len(),
         confirmed_at_unix_ms: manifest.confirmed_at_unix_ms,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_public_observer_confirmation_json_pretty(
+    operator_join_confirmation_json: &str,
+    validator_join_receipt_json: &str,
+    validator_activation_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<String, AttestationError> {
+    let join_confirmation_report = verify_operator_join_confirmation_jsons(
+        operator_join_confirmation_json,
+        validator_join_receipt_json,
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let public_status_report = verify_public_status_manifest_json(public_status_json)?;
+    let public_probe_report = verify_public_probe_json(public_probe_json)?;
+    let deployment_attestation =
+        verified_deployment_attestation_manifest(deployment_attestation_json)?;
+    let manifest = public_observer_confirmation_manifest(
+        &deployment_attestation,
+        &join_confirmation_report,
+        &public_status_report,
+        &public_probe_report,
+        unix_ms(),
+    );
+
+    serde_json::to_string_pretty(&manifest)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_public_observer_confirmation_jsons(
+    public_observer_confirmation_json: &str,
+    operator_join_confirmation_json: &str,
+    validator_join_receipt_json: &str,
+    validator_activation_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<PublicObserverConfirmationReport, AttestationError> {
+    let manifest = serde_json::from_str::<PublicObserverConfirmationManifest>(
+        public_observer_confirmation_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let join_confirmation_report = verify_operator_join_confirmation_jsons(
+        operator_join_confirmation_json,
+        validator_join_receipt_json,
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let public_status_report = verify_public_status_manifest_json(public_status_json)?;
+    let public_probe_report = verify_public_probe_json(public_probe_json)?;
+    let deployment_attestation =
+        verified_deployment_attestation_manifest(deployment_attestation_json)?;
+    let now = unix_ms();
+    let expected = public_observer_confirmation_manifest(
+        &deployment_attestation,
+        &join_confirmation_report,
+        &public_status_report,
+        &public_probe_report,
+        manifest.observed_at_unix_ms,
+    );
+    let mut errors = Vec::new();
+
+    if manifest.observed_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
+        errors.push("observed_at_unix_ms is more than five minutes in the future".to_string());
+    }
+    if manifest.observed_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("observed_at_unix_ms is older than 24 hours".to_string());
+    }
+    require_eq(
+        &mut errors,
+        "chain_id",
+        &manifest.chain_id,
+        &expected.chain_id,
+    );
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &manifest.runtime_version,
+        &expected.runtime_version,
+    );
+    require_root(
+        &mut errors,
+        "operator_join_confirmation_root",
+        &manifest.operator_join_confirmation_root,
+        &expected.operator_join_confirmation_root,
+    );
+    require_root(
+        &mut errors,
+        "validator_join_root",
+        &manifest.validator_join_root,
+        &expected.validator_join_root,
+    );
+    require_root(
+        &mut errors,
+        "public_status_manifest_root",
+        &manifest.public_status_manifest_root,
+        &expected.public_status_manifest_root,
+    );
+    require_root(
+        &mut errors,
+        "public_probe_root",
+        &manifest.public_probe_root,
+        &expected.public_probe_root,
+    );
+    require_eq(
+        &mut errors,
+        "endpoint_url",
+        &manifest.endpoint_url,
+        &expected.endpoint_url,
+    );
+    if manifest.entries != expected.entries {
+        errors.push(
+            "public observer confirmation entries do not match verified deployment observers and public surface"
+                .to_string(),
+        );
+    }
+    for (index, entry) in manifest.entries.iter().enumerate() {
+        require_eq(
+            &mut errors,
+            &format!("entries[{index}].observed_endpoint"),
+            &entry.observed_endpoint,
+            &manifest.endpoint_url,
+        );
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].observed_public_status_root"),
+            &entry.observed_public_status_root,
+            &manifest.public_status_manifest_root,
+        );
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].observed_public_probe_root"),
+            &entry.observed_public_probe_root,
+            &manifest.public_probe_root,
+        );
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].operator_join_confirmation_root"),
+            &entry.operator_join_confirmation_root,
+            &manifest.operator_join_confirmation_root,
+        );
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].observation_root"),
+            &entry.observation_root,
+            &public_observer_confirmation_entry_root(entry, manifest.observed_at_unix_ms),
+        );
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].signature.signature_sha3_256"),
+            &entry.signature.signature_sha3_256,
+            &public_observer_confirmation_signature_root(entry),
+        );
+        if !entry.signature.verified {
+            errors.push(format!("entries[{index}].signature.verified must be true"));
+        }
+    }
+    require_root(
+        &mut errors,
+        "root",
+        &manifest.root,
+        &public_observer_confirmation_manifest_root(&manifest),
+    );
+    if manifest.root != expected.root {
+        errors.push(format!(
+            "public observer confirmation root does not match expected root {}",
+            expected.root
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    let confirmed_observers = manifest
+        .entries
+        .iter()
+        .map(|entry| entry.observer_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let confirmed_regions = manifest
+        .entries
+        .iter()
+        .map(|entry| entry.region.as_str())
+        .collect::<BTreeSet<_>>();
+
+    Ok(PublicObserverConfirmationReport {
+        public_observer_confirmation_ready: true,
+        level: "public-observer-confirmed",
+        public_observer_confirmation_root: manifest.root,
+        operator_join_confirmation_root: manifest.operator_join_confirmation_root,
+        validator_join_root: manifest.validator_join_root,
+        public_status_manifest_root: manifest.public_status_manifest_root,
+        public_probe_root: manifest.public_probe_root,
+        endpoint_url: manifest.endpoint_url,
+        confirmed_observer_count: confirmed_observers.len(),
+        confirmed_region_count: confirmed_regions.len(),
+        observed_at_unix_ms: manifest.observed_at_unix_ms,
     })
 }
 
@@ -6282,6 +6565,110 @@ fn operator_join_confirmation_manifest_root(manifest: &OperatorJoinConfirmationM
     }))
 }
 
+fn public_observer_confirmation_manifest(
+    attestation: &DeploymentAttestation,
+    join_confirmation_report: &OperatorJoinConfirmationReport,
+    public_status_report: &PublicStatusReport,
+    public_probe_report: &PublicProbeReport,
+    observed_at_unix_ms: u128,
+) -> PublicObserverConfirmationManifest {
+    let mut entries = attestation
+        .observers
+        .iter()
+        .map(|observer| {
+            let mut entry = PublicObserverConfirmationEntry {
+                observer_id: observer.observer_id.clone(),
+                region: observer.region.clone(),
+                observed_endpoint: public_status_report.endpoint_url.clone(),
+                observed_public_status_root: public_status_report
+                    .public_status_manifest_root
+                    .clone(),
+                observed_public_probe_root: public_probe_report.public_probe_root.clone(),
+                operator_join_confirmation_root: join_confirmation_report
+                    .operator_join_confirmation_root
+                    .clone(),
+                observation_root: String::new(),
+                signature: SignatureVerification {
+                    algorithm: "ed25519-testnet-public-observer-confirmation".to_string(),
+                    public_key: observer.signature.public_key.clone(),
+                    signature_sha3_256: String::new(),
+                    verified: true,
+                },
+            };
+            entry.observation_root =
+                public_observer_confirmation_entry_root(&entry, observed_at_unix_ms);
+            entry.signature.signature_sha3_256 =
+                public_observer_confirmation_signature_root(&entry);
+            entry
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        (left.observer_id.as_str(), left.region.as_str())
+            .cmp(&(right.observer_id.as_str(), right.region.as_str()))
+    });
+
+    let mut manifest = PublicObserverConfirmationManifest {
+        chain_id: CHAIN_ID.to_string(),
+        runtime_version: VERSION.to_string(),
+        operator_join_confirmation_root: join_confirmation_report
+            .operator_join_confirmation_root
+            .clone(),
+        validator_join_root: join_confirmation_report.validator_join_root.clone(),
+        public_status_manifest_root: public_status_report.public_status_manifest_root.clone(),
+        public_probe_root: public_probe_report.public_probe_root.clone(),
+        endpoint_url: public_status_report.endpoint_url.clone(),
+        observed_at_unix_ms,
+        entries,
+        root: String::new(),
+    };
+    manifest.root = public_observer_confirmation_manifest_root(&manifest);
+    manifest
+}
+
+fn public_observer_confirmation_entry_root(
+    entry: &PublicObserverConfirmationEntry,
+    observed_at_unix_ms: u128,
+) -> String {
+    stable_root(&json!({
+        "observer_confirmation_entry_domain": "nebula-public-observer-confirmation-entry-v1",
+        "observer_id": entry.observer_id,
+        "region": entry.region,
+        "observed_endpoint": entry.observed_endpoint,
+        "observed_public_status_root": entry.observed_public_status_root,
+        "observed_public_probe_root": entry.observed_public_probe_root,
+        "operator_join_confirmation_root": entry.operator_join_confirmation_root,
+        "observed_at_unix_ms": observed_at_unix_ms,
+    }))
+}
+
+fn public_observer_confirmation_signature_root(entry: &PublicObserverConfirmationEntry) -> String {
+    stable_root(&json!({
+        "signature_domain": "nebula-public-observer-confirmation-signature-v1",
+        "algorithm": entry.signature.algorithm,
+        "observer_id": entry.observer_id,
+        "region": entry.region,
+        "public_key": entry.signature.public_key,
+        "observation_root": entry.observation_root,
+    }))
+}
+
+fn public_observer_confirmation_manifest_root(
+    manifest: &PublicObserverConfirmationManifest,
+) -> String {
+    stable_root(&json!({
+        "observer_confirmation_domain": "nebula-public-observer-confirmation-v1",
+        "chain_id": manifest.chain_id,
+        "runtime_version": manifest.runtime_version,
+        "operator_join_confirmation_root": manifest.operator_join_confirmation_root,
+        "validator_join_root": manifest.validator_join_root,
+        "public_status_manifest_root": manifest.public_status_manifest_root,
+        "public_probe_root": manifest.public_probe_root,
+        "endpoint_url": manifest.endpoint_url,
+        "observed_at_unix_ms": manifest.observed_at_unix_ms,
+        "entries": manifest.entries,
+    }))
+}
+
 fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
     stable_root(&json!({
         "chain_id": manifest.chain_id,
@@ -6572,6 +6959,7 @@ mod public_launch {
             "validator_activation",
             "validator_join",
             "operator_join_confirmation",
+            "public_observer_confirmation",
         ] {
             let root = report.status_roots[root_name].as_str().unwrap();
             assert_eq!(root.len(), 64);
@@ -9183,6 +9571,208 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error
                         == "operator join confirmation entries do not match verified validator join and operator acceptance"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn public_observer_confirmation_verifies_after_operator_join_confirmation() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let activation = build_validator_activation_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join = build_validator_join_receipt_json_pretty(
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join_confirmation = build_operator_join_confirmation_json_pretty(
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let observer_confirmation = build_public_observer_confirmation_json_pretty(
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        let report = verify_public_observer_confirmation_jsons(
+            &observer_confirmation,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        assert!(report.public_observer_confirmation_ready);
+        assert_eq!(report.level, "public-observer-confirmed");
+        assert_eq!(report.public_observer_confirmation_root.len(), 64);
+        assert_eq!(report.operator_join_confirmation_root.len(), 64);
+        assert_eq!(report.confirmed_observer_count, 2);
+        assert_eq!(report.confirmed_region_count, 2);
+        assert_eq!(report.endpoint_url, "https://testnet.nebula.example/status");
+    }
+
+    #[test]
+    fn public_observer_confirmation_rejects_wrong_probe_root() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let activation = build_validator_activation_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join = build_validator_join_receipt_json_pretty(
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join_confirmation = build_operator_join_confirmation_json_pretty(
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let mut observer_confirmation = serde_json::from_str::<Value>(
+            &build_public_observer_confirmation_json_pretty(
+                &join_confirmation,
+                &join,
+                &activation,
+                &bundle,
+                &deployment,
+                &public_status,
+                &public_probe,
+                &validators,
+                &handoff,
+                &acceptance,
+                &genesis,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        observer_confirmation["entries"][0]["observed_public_probe_root"] =
+            json!(hex_64("different-public-probe-root"));
+
+        let error = verify_public_observer_confirmation_jsons(
+            &observer_confirmation.to_string(),
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("entries[0].observed_public_probe_root does not match")
+                }));
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "public observer confirmation entries do not match verified deployment observers and public surface"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

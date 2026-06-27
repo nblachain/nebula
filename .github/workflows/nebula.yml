@@ -70,6 +70,7 @@ jobs:
           assert roots["validator_activation"]
           assert roots["validator_join"]
           assert roots["operator_join_confirmation"]
+          assert roots["public_observer_confirmation"]
           assert roots["public_status_surface"]
           assert roots["public_probe_surface"]
           assert roots["preflight_receipt"]
@@ -219,6 +220,7 @@ jobs:
           activation="$(mktemp)"
           join_receipt="$(mktemp)"
           join_confirmation="$(mktemp)"
+          observer_confirmation="$(mktemp)"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > "$attestation"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > "$public_status"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-probe > "$public_probe"
@@ -235,7 +237,9 @@ jobs:
           join_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-join "$join_receipt" --validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-operator-join-confirmation --validator-join "$join_receipt" --validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" > "$join_confirmation"
           confirmation_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-operator-join-confirmation "$join_confirmation" --validator-join "$join_receipt" --validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
-          NEBULA_LAUNCH_PACKAGE_JSON="$output" NEBULA_LAUNCH_PACKAGE_BUNDLE_JSON="$bundle_output" NEBULA_VALIDATOR_ACTIVATION_JSON="$activation_output" NEBULA_VALIDATOR_JOIN_JSON="$join_output" NEBULA_OPERATOR_JOIN_CONFIRMATION_JSON="$confirmation_output" python3 - <<'PY'
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-public-observer-confirmation --operator-join-confirmation "$join_confirmation" --validator-join "$join_receipt" --validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" > "$observer_confirmation"
+          observer_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-observer-confirmation "$observer_confirmation" --operator-join-confirmation "$join_confirmation" --validator-join "$join_receipt" --validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
+          NEBULA_LAUNCH_PACKAGE_JSON="$output" NEBULA_LAUNCH_PACKAGE_BUNDLE_JSON="$bundle_output" NEBULA_VALIDATOR_ACTIVATION_JSON="$activation_output" NEBULA_VALIDATOR_JOIN_JSON="$join_output" NEBULA_OPERATOR_JOIN_CONFIRMATION_JSON="$confirmation_output" NEBULA_PUBLIC_OBSERVER_CONFIRMATION_JSON="$observer_output" python3 - <<'PY'
           import json
           import os
 
@@ -244,6 +248,7 @@ jobs:
           activation = json.loads(os.environ["NEBULA_VALIDATOR_ACTIVATION_JSON"])
           join = json.loads(os.environ["NEBULA_VALIDATOR_JOIN_JSON"])
           confirmation = json.loads(os.environ["NEBULA_OPERATOR_JOIN_CONFIRMATION_JSON"])
+          observer = json.loads(os.environ["NEBULA_PUBLIC_OBSERVER_CONFIRMATION_JSON"])
           assert payload["launch_package_ready"] is True
           assert payload["level"] == "launch-package-attested"
           assert len(payload["deployment_attestation_root"]) == 64
@@ -293,6 +298,16 @@ jobs:
           assert confirmation["operator_acceptance_root"] == bundle["operator_acceptance_root"]
           assert confirmation["confirmed_validator_count"] == payload["validator_count"]
           assert confirmation["confirmed_operator_count"] == payload["matched_operator_count"]
+          assert observer["public_observer_confirmation_ready"] is True
+          assert observer["level"] == "public-observer-confirmed"
+          assert len(observer["public_observer_confirmation_root"]) == 64
+          assert observer["operator_join_confirmation_root"] == confirmation["operator_join_confirmation_root"]
+          assert observer["validator_join_root"] == join["validator_join_root"]
+          assert observer["public_status_manifest_root"] == payload["public_status_manifest_root"]
+          assert observer["public_probe_root"] == payload["public_probe_root"]
+          assert observer["endpoint_url"] == payload["endpoint_url"]
+          assert observer["confirmed_observer_count"] >= 2
+          assert observer["confirmed_region_count"] >= 2
           PY
 
       - name: Verify Nebula guide mirror
