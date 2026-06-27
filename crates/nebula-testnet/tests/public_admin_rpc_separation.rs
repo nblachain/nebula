@@ -9,9 +9,9 @@ use nebula_testnet::{
         serve_runtime_rpc_with_options, withdrawal_authorization_root,
         withdrawal_operator_approval_root, withdrawal_operator_finalization_payload_root,
         NebulaRuntime, RuntimeBridgeDeposit, RuntimeBridgeObserverEvidence, RuntimeConfig,
-        RuntimeLaunchBinding, RuntimeNodeOptions, RuntimeSequencerKeyRotationApproval,
-        RuntimeStorage, RuntimeTransaction, RuntimeWithdrawalOperatorApproval,
-        RuntimeWithdrawalRequest, MIN_BRIDGE_CONFIRMATIONS,
+        RuntimeLaunchBinding, RuntimeNodeOptions, RuntimePublicTestnetPeerManifestBinding,
+        RuntimeSequencerKeyRotationApproval, RuntimeStorage, RuntimeTransaction,
+        RuntimeWithdrawalOperatorApproval, RuntimeWithdrawalRequest, MIN_BRIDGE_CONFIRMATIONS,
     },
     sample_deployment_attestation_json_pretty, sample_public_probe_json_pretty,
     sample_public_status_manifest_json_pretty, sample_validator_set_json_pretty,
@@ -870,8 +870,14 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
         RuntimeNodeOptions {
             data_dir: Some(temp_data_dir("follower")),
             bootstrap_rpc_url: Some(snapshot_url.clone()),
-            sync_rpc_url: Some(snapshot_url),
+            sync_rpc_url: Some(snapshot_url.clone()),
             sync_peer_quorum: 1,
+            public_testnet_peer_manifest: Some(RuntimePublicTestnetPeerManifestBinding {
+                public_testnet_peer_manifest_root: "a".repeat(64),
+                launch_package_bundle_root: follower_binding.launch_package_bundle_root.clone(),
+                snapshot_peer_urls: vec![snapshot_url],
+                sync_peer_quorum: 1,
+            }),
             max_requests_per_minute: 10_000,
             trusted_proxy_ips: vec!["127.0.0.1".to_string()],
             ..RuntimeNodeOptions::default()
@@ -902,6 +908,13 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
         ops["launch_package_bundle_root"],
         follower_binding.launch_package_bundle_root
     );
+    assert_eq!(ops["public_testnet_peer_manifest_present"], true);
+    assert_eq!(
+        ops["public_testnet_peer_manifest_root"],
+        json!("a".repeat(64))
+    );
+    assert_eq!(ops["public_testnet_peer_manifest_snapshot_peer_count"], 1);
+    assert_eq!(ops["public_testnet_peer_manifest_sync_peer_quorum"], 1);
     assert!(ops["blocking_gaps"].as_array().unwrap().is_empty());
 
     let evidence = wait_for_runtime_surface_evidence(&follower_addr, &endpoint_url);

@@ -31,6 +31,26 @@ fn run_nebula_strings(args: &[String]) -> String {
     String::from_utf8(output.stdout).expect("stdout should be utf8")
 }
 
+fn run_nebula_failure_strings(args: &[String]) -> String {
+    let output = Command::new(binary())
+        .args(args)
+        .output()
+        .expect("run nebula-testnet");
+
+    assert!(
+        !output.status.success(),
+        "command unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
 fn write_nebula_output(args: &[String], path: &Path) {
     fs::write(path, run_nebula_strings(args)).expect("write nebula-testnet output");
 }
@@ -454,6 +474,26 @@ fn public_testnet_peer_manifest_cli_builds_and_verifies_launch_bound_peers() {
             .as_str()
             .expect("peer manifest root should be a string")
     ));
+
+    let first_validator_id = peers[0]["validator_id"]
+        .as_str()
+        .expect("peer validator_id should be a string");
+    let mut rejected_run_args = vec![
+        "--run-rpc".to_string(),
+        "--follower".to_string(),
+        "--validator-id".to_string(),
+        first_validator_id.to_string(),
+        "--public-testnet-peer-manifest".to_string(),
+        path_arg(&peer_manifest_path),
+        "--sync-rpc".to_string(),
+        "https://unattested-peer.nebula.example/snapshot".to_string(),
+    ];
+    rejected_run_args.extend(launch_artifact_args(&artifacts));
+    let rejected = run_nebula_failure_strings(&rejected_run_args);
+    assert!(
+        rejected.contains("not in the verified public testnet peer manifest"),
+        "{rejected}"
+    );
 
     fs::remove_dir_all(&dir).expect("remove temp rehearsal dir");
 }

@@ -2539,8 +2539,14 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
         runtime::RuntimeNodeOptions {
             data_dir: Some(live_temp_data_dir("follower")),
             bootstrap_rpc_url: Some(snapshot_url.clone()),
-            sync_rpc_url: Some(snapshot_url),
+            sync_rpc_url: Some(snapshot_url.clone()),
             sync_peer_quorum: 1,
+            public_testnet_peer_manifest: Some(runtime::RuntimePublicTestnetPeerManifestBinding {
+                public_testnet_peer_manifest_root: hex_64("live-peer-manifest"),
+                launch_package_bundle_root: follower_binding.launch_package_bundle_root.clone(),
+                snapshot_peer_urls: vec![snapshot_url],
+                sync_peer_quorum: 1,
+            }),
             max_requests_per_minute: 10_000,
             trusted_proxy_ips: vec!["127.0.0.1".to_string()],
             ..runtime::RuntimeNodeOptions::default()
@@ -7655,6 +7661,11 @@ const RUNTIME_STATUS_DURABLE_FIELDS: &[&str] = &[
     "sequencer_accountability_clean",
     "sync_peer_count",
     "sync_peer_quorum",
+    "public_testnet_peer_manifest_present",
+    "public_testnet_peer_manifest_root",
+    "public_testnet_peer_manifest_launch_package_bundle_root",
+    "public_testnet_peer_manifest_snapshot_peer_count",
+    "public_testnet_peer_manifest_sync_peer_quorum",
     "sync_quorum_met",
     "sync_quorum_peer_count",
     "sync_quorum_height",
@@ -7743,6 +7754,11 @@ const RUNTIME_OPS_DURABLE_FIELDS: &[&str] = &[
     "storage_snapshot_matches_runtime",
     "sync_peer_count",
     "sync_peer_quorum",
+    "public_testnet_peer_manifest_present",
+    "public_testnet_peer_manifest_root",
+    "public_testnet_peer_manifest_launch_package_bundle_root",
+    "public_testnet_peer_manifest_snapshot_peer_count",
+    "public_testnet_peer_manifest_sync_peer_quorum",
     "sync_quorum_met",
     "sync_quorum_peer_count",
     "sync_quorum_height",
@@ -7833,6 +7849,11 @@ const RUNTIME_BACKUP_DURABLE_FIELDS: &[&str] = &[
     "bridge_policy_root",
     "sync_peer_count",
     "sync_peer_quorum",
+    "public_testnet_peer_manifest_present",
+    "public_testnet_peer_manifest_root",
+    "public_testnet_peer_manifest_launch_package_bundle_root",
+    "public_testnet_peer_manifest_snapshot_peer_count",
+    "public_testnet_peer_manifest_sync_peer_quorum",
     "sync_quorum_met",
     "sync_quorum_peer_count",
     "sync_quorum_height",
@@ -8045,6 +8066,11 @@ fn require_health_status_agreement(errors: &mut Vec<String>, health: &Value, sta
         "bridge_policy_root",
         "sync_peer_count",
         "sync_peer_quorum",
+        "public_testnet_peer_manifest_present",
+        "public_testnet_peer_manifest_root",
+        "public_testnet_peer_manifest_launch_package_bundle_root",
+        "public_testnet_peer_manifest_snapshot_peer_count",
+        "public_testnet_peer_manifest_sync_peer_quorum",
         "sync_quorum_met",
         "sync_quorum_peer_count",
         "sync_quorum_height",
@@ -8219,6 +8245,12 @@ fn require_ops_backup_snapshot_agreement(
     for field in [
         "storage_snapshot_matches_runtime",
         "sync_peer_count",
+        "sync_peer_quorum",
+        "public_testnet_peer_manifest_present",
+        "public_testnet_peer_manifest_root",
+        "public_testnet_peer_manifest_launch_package_bundle_root",
+        "public_testnet_peer_manifest_snapshot_peer_count",
+        "public_testnet_peer_manifest_sync_peer_quorum",
         "sync_successful_peer_count",
         "rpc_max_request_bytes",
         "rpc_max_requests_per_minute",
@@ -8338,6 +8370,28 @@ fn require_metrics_agreement(
         "nebula_sync_peer_quorum",
         status,
         "sync_peer_quorum",
+    );
+    require_metric_value(
+        errors,
+        metrics_text,
+        "nebula_public_testnet_peer_manifest_present",
+        u8::from(json_bool(status, "public_testnet_peer_manifest_present").unwrap_or(false)),
+    );
+    require_metric_from_json(
+        errors,
+        metrics_text,
+        "nebula_public_testnet_peer_manifest_snapshot_peer_count",
+        status,
+        "public_testnet_peer_manifest_snapshot_peer_count",
+    );
+    require_metric_value(
+        errors,
+        metrics_text,
+        "nebula_public_testnet_peer_manifest_sync_peer_quorum",
+        status
+            .get("public_testnet_peer_manifest_sync_peer_quorum")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
     );
     require_metric_value(
         errors,

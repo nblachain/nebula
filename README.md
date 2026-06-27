@@ -365,12 +365,19 @@ verified launch package artifacts: `--deployment-attestation`, `--public-status`
 `--public-probe`, `--validator-set`, `--operator-handoff`,
 `--operator-acceptance`, `--genesis-manifest`, and `--launch-package-bundle`.
 Build and verify `--build-public-testnet-peer-manifest` from that same bundle
-before choosing the public follower `--sync-rpc` peers.
+before starting public followers. Launch-bound followers can pass
+`--public-testnet-peer-manifest <path>` to `--run-rpc`; the CLI verifies the
+manifest against the launch artifacts, excludes the local `--validator-id`, and
+derives the follower `--sync-rpc`, `--bootstrap-rpc`, and `--sync-peer-quorum`
+from the manifest unless explicitly supplied values match it.
 `--run-rpc` verifies those artifacts, confirms `--validator-id` is admitted in
 the validator set, binds the live status/ops/backup surfaces to their roots, and
 rejects imported snapshots whose embedded launch binding differs. Nodes without
 this binding can still serve local rehearsal RPC, but `/health` and `/ops`
 report `missing-launch-package-binding` and public ops readiness stays false.
+Launch-bound followers without a verified peer-manifest binding report
+`missing-public-testnet-peer-manifest-binding`, and any configured bootstrap or
+sync URL outside the verified manifest is rejected at startup.
 Launch-bound public candidates must also disable the public NBLA faucet with
 `--disable-nbla-faucet`; `/ops` reports `public-nbla-faucet-enabled` until
 `faucet_nbla_nebulai` is zero.
@@ -496,7 +503,10 @@ This gives public replicas a Base-style failover shape: each follower can sync
 from the sequencer or another verified replica, skip stale or unreachable peers,
 and keep serving from its persisted local snapshot. `/health`, `/status`, and
 `nebula_status` expose the configured `sync_peer_urls` list, per-peer
-`sync_peer_telemetry`, `sync_peer_quorum`, `sync_quorum_met`,
+`sync_peer_telemetry`, `sync_peer_quorum`,
+`public_testnet_peer_manifest_root`,
+`public_testnet_peer_manifest_snapshot_peer_count`,
+`public_testnet_peer_manifest_sync_peer_quorum`, `sync_quorum_met`,
 `sync_quorum_peer_count`, `sync_quorum_height`, `sync_quorum_latest_hash`,
 `sync_quorum_state_root`, successful peer count, last seen peer identities,
 attempt/success/failure/import counts, stale snapshot count, fork rejection

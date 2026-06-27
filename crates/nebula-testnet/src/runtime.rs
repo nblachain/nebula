@@ -4,6 +4,8 @@ use crate::{
     TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT, VERSION,
 };
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use rustls::pki_types::ServerName;
+use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha3::{Digest, Sha3_256};
@@ -48,6 +50,15 @@ const RPC_RATE_LIMIT_WINDOW_MS: u128 = 60_000;
 pub const DEFAULT_DEV_SEQUENCER_SECRET_KEY_HEX: &str =
     "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePublicTestnetPeerManifestBinding {
+    pub public_testnet_peer_manifest_root: String,
+    pub launch_package_bundle_root: String,
+    pub snapshot_peer_urls: Vec<String>,
+    pub sync_peer_quorum: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeNodeOptions {
     pub data_dir: Option<String>,
@@ -55,6 +66,7 @@ pub struct RuntimeNodeOptions {
     pub sync_rpc_url: Option<String>,
     pub sync_rpc_urls: Vec<String>,
     pub sync_peer_quorum: usize,
+    pub public_testnet_peer_manifest: Option<RuntimePublicTestnetPeerManifestBinding>,
     pub auto_produce_blocks: bool,
     pub sequencer_secret_key_hex: Option<String>,
     pub admin_rpc_bind_addr: Option<String>,
@@ -76,6 +88,7 @@ impl Default for RuntimeNodeOptions {
             sync_rpc_url: None,
             sync_rpc_urls: Vec::new(),
             sync_peer_quorum: DEFAULT_SYNC_PEER_QUORUM,
+            public_testnet_peer_manifest: None,
             auto_produce_blocks: true,
             sequencer_secret_key_hex: None,
             admin_rpc_bind_addr: None,
@@ -705,6 +718,11 @@ pub struct RuntimeOpsStatus {
     pub storage_snapshot_matches_runtime: bool,
     pub sync_peer_count: usize,
     pub sync_peer_quorum: usize,
+    pub public_testnet_peer_manifest_present: bool,
+    pub public_testnet_peer_manifest_root: Option<String>,
+    pub public_testnet_peer_manifest_launch_package_bundle_root: Option<String>,
+    pub public_testnet_peer_manifest_snapshot_peer_count: usize,
+    pub public_testnet_peer_manifest_sync_peer_quorum: Option<usize>,
     pub sync_quorum_met: bool,
     pub sync_quorum_peer_count: usize,
     pub sync_quorum_height: Option<u64>,
@@ -808,6 +826,11 @@ pub struct RuntimeBackupManifest {
     pub bridge_policy_root: String,
     pub sync_peer_count: usize,
     pub sync_peer_quorum: usize,
+    pub public_testnet_peer_manifest_present: bool,
+    pub public_testnet_peer_manifest_root: Option<String>,
+    pub public_testnet_peer_manifest_launch_package_bundle_root: Option<String>,
+    pub public_testnet_peer_manifest_snapshot_peer_count: usize,
+    pub public_testnet_peer_manifest_sync_peer_quorum: Option<usize>,
     pub sync_quorum_met: bool,
     pub sync_quorum_peer_count: usize,
     pub sync_quorum_height: Option<u64>,
@@ -1061,6 +1084,10 @@ struct RuntimeSyncPeerSet {
     bootstrap_peer_urls: Vec<String>,
     sync_peer_urls: Vec<String>,
     sync_peer_quorum: usize,
+    public_testnet_peer_manifest_root: Option<String>,
+    public_testnet_peer_manifest_launch_package_bundle_root: Option<String>,
+    public_testnet_peer_manifest_snapshot_peer_urls: Vec<String>,
+    public_testnet_peer_manifest_sync_peer_quorum: Option<usize>,
 }
 
 impl Default for RuntimeSyncPeerSet {
@@ -1069,6 +1096,10 @@ impl Default for RuntimeSyncPeerSet {
             bootstrap_peer_urls: Vec::new(),
             sync_peer_urls: Vec::new(),
             sync_peer_quorum: DEFAULT_SYNC_PEER_QUORUM,
+            public_testnet_peer_manifest_root: None,
+            public_testnet_peer_manifest_launch_package_bundle_root: None,
+            public_testnet_peer_manifest_snapshot_peer_urls: Vec::new(),
+            public_testnet_peer_manifest_sync_peer_quorum: None,
         }
     }
 }
@@ -1591,6 +1622,42 @@ impl RuntimeRpcState {
             json!(self.sync_peers.sync_peer_quorum),
         );
         fields.insert(
+            "public_testnet_peer_manifest_present".to_string(),
+            json!(self.sync_peers.public_testnet_peer_manifest_root.is_some()),
+        );
+        fields.insert(
+            "public_testnet_peer_manifest_root".to_string(),
+            json!(self.sync_peers.public_testnet_peer_manifest_root),
+        );
+        fields.insert(
+            "public_testnet_peer_manifest_launch_package_bundle_root".to_string(),
+            json!(
+                self.sync_peers
+                    .public_testnet_peer_manifest_launch_package_bundle_root
+            ),
+        );
+        fields.insert(
+            "public_testnet_peer_manifest_snapshot_peer_urls".to_string(),
+            json!(
+                self.sync_peers
+                    .public_testnet_peer_manifest_snapshot_peer_urls
+            ),
+        );
+        fields.insert(
+            "public_testnet_peer_manifest_snapshot_peer_count".to_string(),
+            json!(self
+                .sync_peers
+                .public_testnet_peer_manifest_snapshot_peer_urls
+                .len()),
+        );
+        fields.insert(
+            "public_testnet_peer_manifest_sync_peer_quorum".to_string(),
+            json!(
+                self.sync_peers
+                    .public_testnet_peer_manifest_sync_peer_quorum
+            ),
+        );
+        fields.insert(
             "sync_quorum_met".to_string(),
             json!(sync_telemetry.quorum_met),
         );
@@ -1732,6 +1799,12 @@ impl RuntimeRpcState {
         if !status.launch_binding_present {
             blocking_gaps.push("missing-launch-package-binding".to_string());
         }
+        if status.launch_binding_present
+            && status.node_role == "follower"
+            && self.sync_peers.public_testnet_peer_manifest_root.is_none()
+        {
+            blocking_gaps.push("missing-public-testnet-peer-manifest-binding".to_string());
+        }
         let default_dev_sequencer_key =
             self.default_dev_sequencer_key(&status.sequencer_public_key_hex);
         if status.launch_binding_present && default_dev_sequencer_key {
@@ -1856,6 +1929,25 @@ impl RuntimeRpcState {
             storage_snapshot_matches_runtime,
             sync_peer_count: self.sync_peers.sync_peer_urls.len(),
             sync_peer_quorum: self.sync_peers.sync_peer_quorum,
+            public_testnet_peer_manifest_present: self
+                .sync_peers
+                .public_testnet_peer_manifest_root
+                .is_some(),
+            public_testnet_peer_manifest_root: self
+                .sync_peers
+                .public_testnet_peer_manifest_root
+                .clone(),
+            public_testnet_peer_manifest_launch_package_bundle_root: self
+                .sync_peers
+                .public_testnet_peer_manifest_launch_package_bundle_root
+                .clone(),
+            public_testnet_peer_manifest_snapshot_peer_count: self
+                .sync_peers
+                .public_testnet_peer_manifest_snapshot_peer_urls
+                .len(),
+            public_testnet_peer_manifest_sync_peer_quorum: self
+                .sync_peers
+                .public_testnet_peer_manifest_sync_peer_quorum,
             sync_quorum_met: sync_telemetry.quorum_met,
             sync_quorum_peer_count: sync_telemetry.quorum_peer_count,
             sync_quorum_height: sync_telemetry.quorum_height,
@@ -1965,6 +2057,14 @@ impl RuntimeRpcState {
             bridge_policy_root: ops_status.bridge_policy_root,
             sync_peer_count: ops_status.sync_peer_count,
             sync_peer_quorum: ops_status.sync_peer_quorum,
+            public_testnet_peer_manifest_present: ops_status.public_testnet_peer_manifest_present,
+            public_testnet_peer_manifest_root: ops_status.public_testnet_peer_manifest_root,
+            public_testnet_peer_manifest_launch_package_bundle_root: ops_status
+                .public_testnet_peer_manifest_launch_package_bundle_root,
+            public_testnet_peer_manifest_snapshot_peer_count: ops_status
+                .public_testnet_peer_manifest_snapshot_peer_count,
+            public_testnet_peer_manifest_sync_peer_quorum: ops_status
+                .public_testnet_peer_manifest_sync_peer_quorum,
             sync_quorum_met: ops_status.sync_quorum_met,
             sync_quorum_peer_count: ops_status.sync_quorum_peer_count,
             sync_quorum_height: ops_status.sync_quorum_height,
@@ -2083,6 +2183,11 @@ impl RuntimeRpcState {
             "sync_peer_urls": self.sync_peers.sync_peer_urls,
             "sync_peer_count": self.sync_peers.sync_peer_urls.len(),
             "sync_peer_quorum": status["sync_peer_quorum"],
+            "public_testnet_peer_manifest_present": status["public_testnet_peer_manifest_present"],
+            "public_testnet_peer_manifest_root": status["public_testnet_peer_manifest_root"],
+            "public_testnet_peer_manifest_launch_package_bundle_root": status["public_testnet_peer_manifest_launch_package_bundle_root"],
+            "public_testnet_peer_manifest_snapshot_peer_count": status["public_testnet_peer_manifest_snapshot_peer_count"],
+            "public_testnet_peer_manifest_sync_peer_quorum": status["public_testnet_peer_manifest_sync_peer_quorum"],
             "sync_quorum_met": status["sync_quorum_met"],
             "sync_quorum_peer_count": status["sync_quorum_peer_count"],
             "sync_quorum_height": status["sync_quorum_height"],
@@ -2290,6 +2395,26 @@ impl RuntimeRpcState {
             "nebula_sync_peer_quorum",
             "Configured matching snapshot peer quorum required before follower import.",
             self.sync_peers.sync_peer_quorum,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_public_testnet_peer_manifest_present",
+            "Whether sync peers are bound to a verified public testnet peer manifest.",
+            ops_status.public_testnet_peer_manifest_present,
+        );
+        push_metric(
+            &mut output,
+            "nebula_public_testnet_peer_manifest_snapshot_peer_count",
+            "Snapshot peer URLs carried by the verified public testnet peer manifest.",
+            ops_status.public_testnet_peer_manifest_snapshot_peer_count,
+        );
+        push_metric(
+            &mut output,
+            "nebula_public_testnet_peer_manifest_sync_peer_quorum",
+            "Snapshot peer quorum declared by the verified public testnet peer manifest.",
+            ops_status
+                .public_testnet_peer_manifest_sync_peer_quorum
+                .unwrap_or(0),
         );
         push_metric_bool(
             &mut output,
@@ -2633,10 +2758,67 @@ impl RuntimeSyncPeerSet {
                 sync_peer_urls.len()
             ));
         }
+        let mut public_testnet_peer_manifest_root = None;
+        let mut public_testnet_peer_manifest_launch_package_bundle_root = None;
+        let mut public_testnet_peer_manifest_snapshot_peer_urls = Vec::new();
+        let mut public_testnet_peer_manifest_sync_peer_quorum = None;
+        if let Some(binding) = &options.public_testnet_peer_manifest {
+            validate_fixed_hex(
+                &binding.public_testnet_peer_manifest_root,
+                "public_testnet_peer_manifest_root",
+                64,
+            )?;
+            validate_fixed_hex(
+                &binding.launch_package_bundle_root,
+                "public_testnet_peer_manifest.launch_package_bundle_root",
+                64,
+            )?;
+            if binding.sync_peer_quorum == 0 {
+                return Err(
+                    "public_testnet_peer_manifest.sync_peer_quorum must be greater than zero"
+                        .to_string(),
+                );
+            }
+            if options.sync_peer_quorum != binding.sync_peer_quorum {
+                return Err(format!(
+                    "--sync-peer-quorum {} must match public testnet peer manifest quorum {}",
+                    options.sync_peer_quorum, binding.sync_peer_quorum
+                ));
+            }
+            public_testnet_peer_manifest_snapshot_peer_urls = collect_peer_urls(
+                None,
+                &binding.snapshot_peer_urls,
+                "public_testnet_peer_manifest.snapshot_peer_urls",
+            )?;
+            if public_testnet_peer_manifest_snapshot_peer_urls.is_empty() {
+                return Err(
+                    "public_testnet_peer_manifest.snapshot_peer_urls must not be empty".to_string(),
+                );
+            }
+            for url in bootstrap_peer_urls.iter().chain(sync_peer_urls.iter()) {
+                if !public_testnet_peer_manifest_snapshot_peer_urls
+                    .iter()
+                    .any(|allowed| allowed == url)
+                {
+                    return Err(format!(
+                        "sync peer URL {url} is not in the verified public testnet peer manifest"
+                    ));
+                }
+            }
+            public_testnet_peer_manifest_root =
+                Some(binding.public_testnet_peer_manifest_root.clone());
+            public_testnet_peer_manifest_launch_package_bundle_root =
+                Some(binding.launch_package_bundle_root.clone());
+            public_testnet_peer_manifest_sync_peer_quorum = Some(binding.sync_peer_quorum);
+        }
         Ok(Self {
             bootstrap_peer_urls,
             sync_peer_urls,
             sync_peer_quorum: options.sync_peer_quorum,
+            public_testnet_peer_manifest_root,
+            public_testnet_peer_manifest_launch_package_bundle_root,
+            public_testnet_peer_manifest_snapshot_peer_urls,
+            public_testnet_peer_manifest_sync_peer_quorum,
         })
     }
 }
@@ -3731,6 +3913,21 @@ pub fn serve_runtime_rpc_with_options(
     if let Some(admin_bind_addr) = admin_rpc_bind_addr.as_deref() {
         validate_admin_rpc_bind_addr(admin_bind_addr).map_err(std::io::Error::other)?;
     }
+    if let (Some(launch_binding), Some(peer_manifest)) = (
+        &config.launch_binding,
+        &options.public_testnet_peer_manifest,
+    ) {
+        if !peer_manifest
+            .launch_package_bundle_root
+            .eq_ignore_ascii_case(&launch_binding.launch_package_bundle_root)
+        {
+            return Err(std::io::Error::other(format!(
+                "public testnet peer manifest bundle root {} does not match runtime launch binding bundle root {}",
+                peer_manifest.launch_package_bundle_root,
+                launch_binding.launch_package_bundle_root
+            )));
+        }
+    }
     let sync_peers = RuntimeSyncPeerSet::from_options(&options).map_err(std::io::Error::other)?;
     let auto_produce_blocks = options.auto_produce_blocks;
     let storage = options.data_dir.as_ref().map(RuntimeStorage::from_data_dir);
@@ -4203,7 +4400,8 @@ fn collect_peer_urls(
         if normalized.is_empty() {
             return Err(format!("{flag_name} must not be empty"));
         }
-        parse_http_url(normalized).map_err(|error| format!("{flag_name} {normalized}: {error}"))?;
+        parse_snapshot_url(normalized, flag_name)
+            .map_err(|error| format!("{flag_name} {normalized}: {error}"))?;
         if !urls.iter().any(|existing| existing == normalized) {
             urls.push(normalized.to_string());
         }
@@ -4230,16 +4428,89 @@ fn fetch_runtime_snapshot(
     url: &str,
     max_snapshot_response_bytes: usize,
 ) -> Result<RuntimeSnapshot, String> {
-    let (host, path) = parse_http_url(url)?;
-    let mut stream = TcpStream::connect(&host)
-        .map_err(|error| format!("failed to connect to bootstrap peer {host}: {error}"))?;
+    let parsed = parse_snapshot_url(url, "bootstrap_rpc_url")?;
+    let response = match parsed {
+        ParsedSnapshotUrl::Http { authority, path } => {
+            fetch_http_snapshot_response(&authority, &path, max_snapshot_response_bytes)?
+        }
+        ParsedSnapshotUrl::Https {
+            host,
+            port,
+            host_header,
+            path,
+        } => fetch_https_snapshot_response(
+            &host,
+            port,
+            &host_header,
+            &path,
+            max_snapshot_response_bytes,
+        )?,
+    };
+    parse_snapshot_response(&response, max_snapshot_response_bytes)
+}
+
+fn fetch_http_snapshot_response(
+    authority: &str,
+    path: &str,
+    max_snapshot_response_bytes: usize,
+) -> Result<String, String> {
+    let mut stream = TcpStream::connect(authority)
+        .map_err(|error| format!("failed to connect to bootstrap peer {authority}: {error}"))?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     write!(
         stream,
-        "GET {path} HTTP/1.1\r\nHost: {host}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
     )
     .map_err(|error| format!("failed to request bootstrap snapshot: {error}"))?;
-    let response = read_http_response_limited(&mut stream, max_snapshot_response_bytes)?;
+    read_http_response_limited(&mut stream, max_snapshot_response_bytes)
+}
+
+fn fetch_https_snapshot_response(
+    host: &str,
+    port: u16,
+    host_header: &str,
+    path: &str,
+    max_snapshot_response_bytes: usize,
+) -> Result<String, String> {
+    let root_store = RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    let config =
+        ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
+            .with_safe_default_protocol_versions()
+            .map_err(|error| format!("failed to configure TLS protocol versions: {error}"))?
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+    let server_name = ServerName::try_from(host.to_string())
+        .map_err(|error| format!("invalid TLS server name {host}: {error}"))?;
+    let stream = TcpStream::connect((host, port)).map_err(|error| {
+        format!("failed to connect to HTTPS bootstrap peer {host}:{port}: {error}")
+    })?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let connection = ClientConnection::new(Arc::new(config), server_name)
+        .map_err(|error| format!("failed to create TLS client: {error}"))?;
+    let mut tls = StreamOwned::new(connection, stream);
+    while tls.conn.is_handshaking() {
+        tls.conn
+            .complete_io(&mut tls.sock)
+            .map_err(|error| format!("TLS handshake failed: {error}"))?;
+    }
+    write!(
+        tls,
+        "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
+    )
+    .map_err(|error| format!("failed to request HTTPS bootstrap snapshot: {error}"))?;
+    tls.flush()
+        .map_err(|error| format!("failed to flush HTTPS bootstrap snapshot request: {error}"))?;
+    read_http_response_limited(&mut tls, max_snapshot_response_bytes)
+}
+
+fn parse_snapshot_response(
+    response: &str,
+    max_snapshot_response_bytes: usize,
+) -> Result<RuntimeSnapshot, String> {
     let Some((head, body)) = response.split_once("\r\n\r\n") else {
         return Err("bootstrap peer returned malformed HTTP response".to_string());
     };
@@ -4267,7 +4538,7 @@ fn fetch_runtime_snapshot(
 }
 
 fn read_http_response_limited(
-    stream: &mut TcpStream,
+    stream: &mut impl Read,
     max_snapshot_response_bytes: usize,
 ) -> Result<String, String> {
     let mut response = Vec::new();
@@ -4294,18 +4565,99 @@ fn read_http_response_limited(
         .map_err(|error| format!("bootstrap peer returned non-UTF-8 HTTP response: {error}"))
 }
 
-fn parse_http_url(url: &str) -> Result<(String, String), String> {
-    let Some(rest) = url.strip_prefix("http://") else {
-        return Err("bootstrap_rpc_url must use http:// for the local testnet RPC".to_string());
-    };
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParsedSnapshotUrl {
+    Http {
+        authority: String,
+        path: String,
+    },
+    Https {
+        host: String,
+        port: u16,
+        host_header: String,
+        path: String,
+    },
+}
+
+fn parse_snapshot_url(url: &str, flag_name: &str) -> Result<ParsedSnapshotUrl, String> {
+    if let Some(rest) = url.strip_prefix("http://") {
+        let (authority, path) = parse_url_authority_and_path(rest);
+        validate_url_authority(flag_name, &authority)?;
+        return Ok(ParsedSnapshotUrl::Http { authority, path });
+    }
+    if let Some(rest) = url.strip_prefix("https://") {
+        let (authority, path) = parse_url_authority_and_path(rest);
+        validate_url_authority(flag_name, &authority)?;
+        let (host, port) = parse_https_authority(flag_name, &authority)?;
+        return Ok(ParsedSnapshotUrl::Https {
+            host,
+            port,
+            host_header: authority,
+            path,
+        });
+    }
+    Err(format!("{flag_name} must use http:// or https://"))
+}
+
+fn parse_url_authority_and_path(rest: &str) -> (String, String) {
     let (host, path) = match rest.split_once('/') {
         Some((host, path)) => (host, format!("/{path}")),
         None => (rest, "/snapshot".to_string()),
     };
-    if host.trim().is_empty() {
-        return Err("bootstrap_rpc_url must include a host".to_string());
+    (host.to_string(), path)
+}
+
+fn validate_url_authority(flag_name: &str, authority: &str) -> Result<(), String> {
+    if authority.trim().is_empty() {
+        return Err(format!("{flag_name} must include a host"));
     }
-    Ok((host.to_string(), path))
+    if authority.contains('@') {
+        return Err(format!("{flag_name} must not include userinfo"));
+    }
+    if authority.contains(char::is_whitespace) {
+        return Err(format!("{flag_name} host must not contain whitespace"));
+    }
+    Ok(())
+}
+
+fn parse_https_authority(flag_name: &str, authority: &str) -> Result<(String, u16), String> {
+    if let Some(rest) = authority.strip_prefix('[') {
+        let Some(end) = rest.find(']') else {
+            return Err(format!("{flag_name} IPv6 host must close ']'"));
+        };
+        let host = &rest[..end];
+        let suffix = &rest[end + 1..];
+        let port = parse_optional_url_port(flag_name, suffix, 443)?;
+        if host.trim().is_empty() {
+            return Err(format!("{flag_name} must include a host"));
+        }
+        return Ok((host.to_string(), port));
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) if !port.is_empty() && port.chars().all(|ch| ch.is_ascii_digit()) => {
+            (host, parse_url_port(flag_name, port)?)
+        }
+        _ => (authority, 443),
+    };
+    if host.trim().is_empty() {
+        return Err(format!("{flag_name} must include a host"));
+    }
+    Ok((host.to_string(), port))
+}
+
+fn parse_optional_url_port(flag_name: &str, suffix: &str, default: u16) -> Result<u16, String> {
+    if suffix.is_empty() {
+        return Ok(default);
+    }
+    let Some(port) = suffix.strip_prefix(':') else {
+        return Err(format!("{flag_name} host has invalid port suffix"));
+    };
+    parse_url_port(flag_name, port)
+}
+
+fn parse_url_port(flag_name: &str, port: &str) -> Result<u16, String> {
+    port.parse::<u16>()
+        .map_err(|error| format!("{flag_name} port is invalid: {error}"))
 }
 
 fn parse_https_url(url: &str) -> Result<(), String> {
@@ -6595,6 +6947,11 @@ fn ops_status_root(report: &RuntimeOpsStatus) -> String {
         "storage_snapshot_matches_runtime": report.storage_snapshot_matches_runtime,
         "sync_peer_count": report.sync_peer_count,
         "sync_peer_quorum": report.sync_peer_quorum,
+        "public_testnet_peer_manifest_present": report.public_testnet_peer_manifest_present,
+        "public_testnet_peer_manifest_root": report.public_testnet_peer_manifest_root,
+        "public_testnet_peer_manifest_launch_package_bundle_root": report.public_testnet_peer_manifest_launch_package_bundle_root,
+        "public_testnet_peer_manifest_snapshot_peer_count": report.public_testnet_peer_manifest_snapshot_peer_count,
+        "public_testnet_peer_manifest_sync_peer_quorum": report.public_testnet_peer_manifest_sync_peer_quorum,
         "sync_quorum_met": report.sync_quorum_met,
         "sync_quorum_peer_count": report.sync_quorum_peer_count,
         "sync_quorum_height": report.sync_quorum_height,
@@ -6699,6 +7056,11 @@ fn backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
         "bridge_policy_root": manifest.bridge_policy_root,
         "sync_peer_count": manifest.sync_peer_count,
         "sync_peer_quorum": manifest.sync_peer_quorum,
+        "public_testnet_peer_manifest_present": manifest.public_testnet_peer_manifest_present,
+        "public_testnet_peer_manifest_root": manifest.public_testnet_peer_manifest_root,
+        "public_testnet_peer_manifest_launch_package_bundle_root": manifest.public_testnet_peer_manifest_launch_package_bundle_root,
+        "public_testnet_peer_manifest_snapshot_peer_count": manifest.public_testnet_peer_manifest_snapshot_peer_count,
+        "public_testnet_peer_manifest_sync_peer_quorum": manifest.public_testnet_peer_manifest_sync_peer_quorum,
         "sync_quorum_met": manifest.sync_quorum_met,
         "sync_quorum_peer_count": manifest.sync_quorum_peer_count,
         "sync_quorum_height": manifest.sync_quorum_height,
@@ -7126,6 +7488,18 @@ mod tests {
                     public_key: test_public_key_hex(0xb2),
                 },
             ],
+        }
+    }
+
+    fn test_manifest_bound_sync_peers(urls: Vec<String>, quorum: usize) -> RuntimeSyncPeerSet {
+        RuntimeSyncPeerSet {
+            bootstrap_peer_urls: Vec::new(),
+            sync_peer_urls: urls.clone(),
+            sync_peer_quorum: quorum,
+            public_testnet_peer_manifest_root: Some("a".repeat(64)),
+            public_testnet_peer_manifest_launch_package_bundle_root: Some("9".repeat(64)),
+            public_testnet_peer_manifest_snapshot_peer_urls: urls,
+            public_testnet_peer_manifest_sync_peer_quorum: Some(quorum),
         }
     }
 
@@ -7903,9 +8277,19 @@ mod tests {
             sync_rpc_url: Some("https://127.0.0.1:9945/snapshot".to_string()),
             ..RuntimeNodeOptions::default()
         };
+        let peers = RuntimeSyncPeerSet::from_options(&options).unwrap();
+        assert_eq!(
+            peers.sync_peer_urls,
+            vec!["https://127.0.0.1:9945/snapshot"]
+        );
+
+        let options = RuntimeNodeOptions {
+            sync_rpc_url: Some("ftp://127.0.0.1:9945/snapshot".to_string()),
+            ..RuntimeNodeOptions::default()
+        };
         assert!(RuntimeSyncPeerSet::from_options(&options)
             .unwrap_err()
-            .contains("--sync-rpc"));
+            .contains("http:// or https://"));
 
         let options = RuntimeNodeOptions {
             sync_rpc_urls: vec!["http://127.0.0.1:9945/snapshot".to_string()],
@@ -7927,6 +8311,58 @@ mod tests {
     }
 
     #[test]
+    fn runtime_node_options_enforce_public_peer_manifest_sync_urls() {
+        let manifest = RuntimePublicTestnetPeerManifestBinding {
+            public_testnet_peer_manifest_root: "a".repeat(64),
+            launch_package_bundle_root: "b".repeat(64),
+            snapshot_peer_urls: vec![
+                "https://node-a.testnet.example/snapshot".to_string(),
+                "https://node-b.testnet.example/snapshot".to_string(),
+            ],
+            sync_peer_quorum: 2,
+        };
+        let options = RuntimeNodeOptions {
+            sync_rpc_urls: manifest.snapshot_peer_urls.clone(),
+            sync_peer_quorum: 2,
+            public_testnet_peer_manifest: Some(manifest.clone()),
+            ..RuntimeNodeOptions::default()
+        };
+        let peers = RuntimeSyncPeerSet::from_options(&options).unwrap();
+        assert_eq!(
+            peers.public_testnet_peer_manifest_root,
+            Some("a".repeat(64))
+        );
+        assert_eq!(peers.sync_peer_quorum, 2);
+        assert_eq!(
+            peers.public_testnet_peer_manifest_snapshot_peer_urls,
+            manifest.snapshot_peer_urls
+        );
+
+        let options = RuntimeNodeOptions {
+            sync_rpc_urls: vec![
+                "https://node-a.testnet.example/snapshot".to_string(),
+                "https://node-c.testnet.example/snapshot".to_string(),
+            ],
+            sync_peer_quorum: 2,
+            public_testnet_peer_manifest: Some(manifest.clone()),
+            ..RuntimeNodeOptions::default()
+        };
+        assert!(RuntimeSyncPeerSet::from_options(&options)
+            .unwrap_err()
+            .contains("not in the verified public testnet peer manifest"));
+
+        let options = RuntimeNodeOptions {
+            sync_rpc_urls: vec!["https://node-a.testnet.example/snapshot".to_string()],
+            sync_peer_quorum: 1,
+            public_testnet_peer_manifest: Some(manifest),
+            ..RuntimeNodeOptions::default()
+        };
+        assert!(RuntimeSyncPeerSet::from_options(&options)
+            .unwrap_err()
+            .contains("must match public testnet peer manifest quorum"));
+    }
+
+    #[test]
     fn runtime_rpc_status_reports_public_rpc_limits() {
         let runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
         let mut state = test_rpc_state_with_limits(runtime, 2048, 7);
@@ -7937,6 +8373,7 @@ mod tests {
                 "http://127.0.0.1:9946/snapshot".to_string(),
             ],
             sync_peer_quorum: DEFAULT_SYNC_PEER_QUORUM,
+            ..RuntimeSyncPeerSet::default()
         };
         let status = state.status_json().unwrap();
 
@@ -8166,6 +8603,48 @@ mod tests {
     }
 
     #[test]
+    fn runtime_ops_status_launch_bound_follower_requires_peer_manifest_binding() {
+        let sequencer_config = runtime_config_with_launch_binding_and_disabled_nbla_faucet();
+        let mut sequencer = NebulaRuntime::new(sequencer_config.clone()).unwrap();
+        rotate_runtime_off_default_dev_key(&mut sequencer);
+        sequencer.produce_block();
+        let snapshot = sequencer.export_snapshot();
+        let mut follower_config = sequencer_config;
+        follower_config.produce_blocks = false;
+        let follower = NebulaRuntime::from_snapshot(follower_config, snapshot.clone()).unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("nebula-runtime-follower-manifest-{}", unix_ms()));
+        let storage = RuntimeStorage::from_data_dir(&dir);
+        storage.save_snapshot(&snapshot).unwrap();
+        let mut state = test_rpc_state_with_limits(
+            follower,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+        state.storage = Some(storage);
+        state.sync_peers = RuntimeSyncPeerSet {
+            bootstrap_peer_urls: Vec::new(),
+            sync_peer_urls: vec!["http://127.0.0.1:9945/snapshot".to_string()],
+            sync_peer_quorum: DEFAULT_SYNC_PEER_QUORUM,
+            ..RuntimeSyncPeerSet::default()
+        };
+        enable_private_admin_control(&mut state);
+        state
+            .client_identity
+            .trusted_proxy_ips
+            .push(IpAddr::V4(Ipv4Addr::LOCALHOST));
+
+        let ops = state.ops_status().unwrap();
+        assert!(!ops.public_ops_ready);
+        assert!(ops
+            .blocking_gaps
+            .contains(&"missing-public-testnet-peer-manifest-binding".to_string()));
+        assert!(!ops.public_testnet_peer_manifest_present);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn runtime_ops_status_follower_requires_successful_peer_sync_evidence() {
         let sequencer_config = runtime_config_with_launch_binding_and_disabled_nbla_faucet();
         let mut sequencer = NebulaRuntime::new(sequencer_config.clone()).unwrap();
@@ -8185,11 +8664,10 @@ mod tests {
             DEFAULT_MAX_REQUESTS_PER_MINUTE,
         );
         state.storage = Some(storage);
-        state.sync_peers = RuntimeSyncPeerSet {
-            bootstrap_peer_urls: Vec::new(),
-            sync_peer_urls: vec!["http://127.0.0.1:9945/snapshot".to_string()],
-            sync_peer_quorum: DEFAULT_SYNC_PEER_QUORUM,
-        };
+        state.sync_peers = test_manifest_bound_sync_peers(
+            vec!["http://127.0.0.1:9945/snapshot".to_string()],
+            DEFAULT_SYNC_PEER_QUORUM,
+        );
         state
             .client_identity
             .trusted_proxy_ips
@@ -8200,6 +8678,9 @@ mod tests {
         assert!(!ops
             .blocking_gaps
             .contains(&"follower-missing-sync-peers".to_string()));
+        assert!(!ops
+            .blocking_gaps
+            .contains(&"missing-public-testnet-peer-manifest-binding".to_string()));
         assert!(ops
             .blocking_gaps
             .contains(&"follower-no-successful-sync-peer".to_string()));
@@ -8287,14 +8768,13 @@ mod tests {
             DEFAULT_MAX_REQUESTS_PER_MINUTE,
         );
         state.storage = Some(storage);
-        state.sync_peers = RuntimeSyncPeerSet {
-            bootstrap_peer_urls: Vec::new(),
-            sync_peer_urls: vec![
+        state.sync_peers = test_manifest_bound_sync_peers(
+            vec![
                 "http://127.0.0.1:9945/snapshot".to_string(),
                 "http://127.0.0.1:9946/snapshot".to_string(),
             ],
-            sync_peer_quorum: 2,
-        };
+            2,
+        );
 
         state
             .record_sync_peer_success("http://127.0.0.1:9945/snapshot", &snapshot, 1)
@@ -10281,6 +10761,7 @@ mod tests {
             bootstrap_peer_urls: Vec::new(),
             sync_peer_urls: vec![first_url.clone(), second_url.clone()],
             sync_peer_quorum: 2,
+            ..RuntimeSyncPeerSet::default()
         };
 
         let imported =
@@ -10328,6 +10809,7 @@ mod tests {
             bootstrap_peer_urls: Vec::new(),
             sync_peer_urls: vec![first_url.clone(), second_url.clone()],
             sync_peer_quorum: 2,
+            ..RuntimeSyncPeerSet::default()
         };
 
         let imported =
@@ -10390,6 +10872,7 @@ mod tests {
             bootstrap_peer_urls: Vec::new(),
             sync_peer_urls: vec![first_url.clone(), second_url.clone()],
             sync_peer_quorum: 2,
+            ..RuntimeSyncPeerSet::default()
         };
 
         let imported =
@@ -10436,6 +10919,7 @@ mod tests {
             bootstrap_peer_urls: Vec::new(),
             sync_peer_urls: vec![good_url.clone(), bad_url.clone()],
             sync_peer_quorum: DEFAULT_SYNC_PEER_QUORUM,
+            ..RuntimeSyncPeerSet::default()
         };
 
         let imported =
