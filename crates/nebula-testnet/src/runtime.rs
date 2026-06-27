@@ -29,7 +29,7 @@ pub const MIN_WITHDRAWAL_OPERATOR_QUORUM: usize = 2;
 pub const BRIDGE_CUSTODY_POLICY_ID: &str = "nebula-monero-bridge-custody-testnet-v1";
 pub const VALIDATOR_REWARD_ACCOUNT_PREFIX: &str = "validator:";
 pub const RUNTIME_SNAPSHOT_FILE: &str = "nebula-runtime-snapshot.json";
-pub const RUNTIME_SNAPSHOT_VERSION: u32 = 10;
+pub const RUNTIME_SNAPSHOT_VERSION: u32 = 11;
 pub const DEFAULT_PEER_SYNC_MS: u64 = 100;
 pub const DEFAULT_SYNC_PEER_QUORUM: usize = 1;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
@@ -155,6 +155,22 @@ impl RuntimeConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct RuntimeBridgeOperatorKey {
+    pub operator_id: String,
+    pub region: String,
+    pub public_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeBridgeObserverKey {
+    pub observer_id: String,
+    pub region: String,
+    pub public_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeLaunchBinding {
     pub chain_id: String,
     pub runtime_version: String,
@@ -172,6 +188,8 @@ pub struct RuntimeLaunchBinding {
     pub validator_count: usize,
     pub operator_count: usize,
     pub region_count: usize,
+    pub bridge_operator_keys: Vec<RuntimeBridgeOperatorKey>,
+    pub bridge_observer_keys: Vec<RuntimeBridgeObserverKey>,
 }
 
 impl RuntimeLaunchBinding {
@@ -226,6 +244,15 @@ impl RuntimeLaunchBinding {
         }
         if self.region_count == 0 {
             return Err("launch binding region_count must be greater than zero".to_string());
+        }
+        validate_launch_bridge_operator_keys(self)?;
+        validate_launch_bridge_observer_keys(self)?;
+        if self.bridge_operator_keys.len() != self.operator_count {
+            return Err(format!(
+                "launch binding operator_count {} does not match bridge_operator_keys length {}",
+                self.operator_count,
+                self.bridge_operator_keys.len()
+            ));
         }
         Ok(())
     }
@@ -333,6 +360,17 @@ pub struct RuntimeReceipt {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct RuntimeBridgeObserverEvidence {
+    pub observer_id: String,
+    pub observer_public_key_hex: String,
+    pub payload_root: String,
+    pub signature: String,
+    pub signed_at_unix_ms: u128,
+    pub evidence_root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeBridgeDeposit {
     pub monero_tx_id: String,
     pub account: String,
@@ -344,7 +382,20 @@ pub struct RuntimeBridgeDeposit {
     pub custody_proof_root: String,
     pub relayer_set_root: String,
     pub observer_signature_roots: Vec<String>,
+    #[serde(default)]
+    pub observer_evidence: Vec<RuntimeBridgeObserverEvidence>,
     pub observed_at_unix_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeWithdrawalOperatorApproval {
+    pub operator_id: String,
+    pub operator_public_key_hex: String,
+    pub payload_root: String,
+    pub signature: String,
+    pub signed_at_unix_ms: u128,
+    pub approval_root: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -361,6 +412,8 @@ pub struct RuntimeWithdrawalRequest {
     pub bridge_policy_root: String,
     pub operator_approval_ids: Vec<String>,
     pub operator_approval_roots: Vec<String>,
+    #[serde(default)]
+    pub operator_approvals: Vec<RuntimeWithdrawalOperatorApproval>,
     pub finalized_monero_tx_id: Option<String>,
     pub finalization_proof_root: Option<String>,
     pub finalized_at_unix_ms: Option<u128>,
@@ -2574,7 +2627,7 @@ impl NebulaRuntime {
         deposit: RuntimeBridgeDeposit,
     ) -> Result<BridgeDepositReport, String> {
         self.ensure_accountability_clean()?;
-        validate_bridge_deposit(&deposit)?;
+        validate_bridge_deposit_for_launch_binding(&deposit, self.config.launch_binding.as_ref())?;
         if self.bridge_deposits.contains_key(&deposit.monero_tx_id) {
             return Err(format!(
                 "bridge deposit {} already observed",
@@ -2676,6 +2729,7 @@ impl NebulaRuntime {
             bridge_policy_root: bridge_policy_root(),
             operator_approval_ids: Vec::new(),
             operator_approval_roots: Vec::new(),
+            operator_approvals: Vec::new(),
             finalized_monero_tx_id: None,
             finalization_proof_root: None,
             finalized_at_unix_ms: None,
@@ -2698,6 +2752,7 @@ impl NebulaRuntime {
         finalization_proof_root: &str,
         operator_approval_ids: Vec<String>,
         operator_approval_roots: Vec<String>,
+        operator_approvals: Vec<RuntimeWithdrawalOperatorApproval>,
     ) -> Result<WithdrawalFinalizationReport, String> {
         self.ensure_accountability_clean()?;
         validate_fixed_hex(finalized_monero_tx_id, "finalized_monero_tx_id", 64)?;
@@ -2740,6 +2795,7 @@ impl NebulaRuntime {
                 "withdrawal finalization proof {finalization_proof_root} already used"
             ));
         }
+        let launch_binding = self.config.launch_binding.clone();
         let withdrawal = self
             .withdrawals
             .get_mut(withdrawal_id)
@@ -2750,14 +2806,24 @@ impl NebulaRuntime {
                 withdrawal.status
             ));
         }
+        validate_withdrawal_operator_approvals(
+            withdrawal,
+            finalized_monero_tx_id,
+            finalization_proof_root,
+            &operator_approval_ids,
+            &operator_approval_roots,
+            &operator_approvals,
+            launch_binding.as_ref(),
+        )?;
         withdrawal.status = "finalized".to_string();
         withdrawal.operator_approval_ids = operator_approval_ids;
         withdrawal.operator_approval_roots = operator_approval_roots;
+        withdrawal.operator_approvals = operator_approvals;
         withdrawal.finalized_monero_tx_id = Some(finalized_monero_tx_id.to_ascii_lowercase());
         withdrawal.finalization_proof_root = Some(finalization_proof_root.to_ascii_lowercase());
         withdrawal.finalized_at_unix_ms = Some(unix_ms());
         withdrawal.root = withdrawal_root(withdrawal);
-        validate_withdrawal(withdrawal)?;
+        validate_withdrawal_for_launch_binding(withdrawal, launch_binding.as_ref())?;
         Ok(WithdrawalFinalizationReport {
             finalized: true,
             withdrawal: withdrawal.clone(),
@@ -3948,6 +4014,10 @@ fn dispatch_json_rpc_method(
                 required_string_array_param(&params, "operator_approval_ids")?;
             let operator_approval_roots =
                 required_string_array_param(&params, "operator_approval_roots")?;
+            let operator_approvals = optional_json_array_param::<RuntimeWithdrawalOperatorApproval>(
+                &params,
+                "operator_approvals",
+            )?;
             let report = {
                 let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
                 runtime.finalize_withdrawal(
@@ -3956,6 +4026,7 @@ fn dispatch_json_rpc_method(
                     &finalization_proof_root,
                     operator_approval_ids,
                     operator_approval_roots,
+                    operator_approvals,
                 )?
             };
             state.commit_direct_state_mutation()?;
@@ -4185,11 +4256,26 @@ fn verify_account_signature(
     signature_hex: &str,
     signature_name: &str,
 ) -> Result<(), String> {
-    validate_fixed_hex(account_public_key_hex, "account_public_key_hex", 64)?;
+    verify_ed25519_signature(
+        account_public_key_hex,
+        "account_public_key_hex",
+        signing_root,
+        signature_hex,
+        signature_name,
+    )
+}
+
+fn verify_ed25519_signature(
+    public_key_hex: &str,
+    public_key_name: &str,
+    signing_root: &str,
+    signature_hex: &str,
+    signature_name: &str,
+) -> Result<(), String> {
+    validate_fixed_hex(public_key_hex, public_key_name, 64)?;
     validate_fixed_hex(signing_root, "signing_root", 64)?;
     validate_fixed_hex(signature_hex, signature_name, 128)?;
-    let verifying_key =
-        verifying_key_from_hex_named(account_public_key_hex, "account_public_key_hex")?;
+    let verifying_key = verifying_key_from_hex_named(public_key_hex, public_key_name)?;
     let signature_bytes = decode_fixed_hex(signature_hex, signature_name, 64)?;
     let signature_bytes: [u8; 64] = signature_bytes
         .as_slice()
@@ -4330,7 +4416,10 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
                 "bridge deposit map key {monero_tx_id} does not match inner monero_tx_id"
             ));
         }
-        validate_bridge_deposit(deposit)?;
+        validate_bridge_deposit_for_launch_binding(
+            deposit,
+            snapshot.config.launch_binding.as_ref(),
+        )?;
         if bridge_deposit_root(deposit).len() != 64 {
             return Err(format!("bridge deposit {monero_tx_id} root failed"));
         }
@@ -4343,7 +4432,10 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
                 "withdrawal map key {withdrawal_id} does not match inner withdrawal_id"
             ));
         }
-        validate_withdrawal(withdrawal)?;
+        validate_withdrawal_for_launch_binding(
+            withdrawal,
+            snapshot.config.launch_binding.as_ref(),
+        )?;
         if let Some(monero_tx_id) = &withdrawal.finalized_monero_tx_id {
             let normalized = monero_tx_id.to_ascii_lowercase();
             if snapshot
@@ -4599,7 +4691,15 @@ fn validate_account_id(account: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_bridge_deposit(deposit: &RuntimeBridgeDeposit) -> Result<(), String> {
+    validate_bridge_deposit_for_launch_binding(deposit, None)
+}
+
+fn validate_bridge_deposit_for_launch_binding(
+    deposit: &RuntimeBridgeDeposit,
+    launch_binding: Option<&RuntimeLaunchBinding>,
+) -> Result<(), String> {
     validate_account_id(&deposit.account)?;
     validate_account_id(&deposit.observer_id)?;
     validate_fixed_hex(&deposit.monero_tx_id, "monero_tx_id", 64)?;
@@ -4623,10 +4723,14 @@ fn validate_bridge_deposit(deposit: &RuntimeBridgeDeposit) -> Result<(), String>
     if deposit.amount_nxmr_units == 0 {
         return Err("amount_nxmr_units must be greater than zero".to_string());
     }
+    validate_bridge_observer_evidence(deposit, launch_binding)?;
     Ok(())
 }
 
-fn validate_withdrawal(withdrawal: &RuntimeWithdrawalRequest) -> Result<(), String> {
+fn validate_withdrawal_for_launch_binding(
+    withdrawal: &RuntimeWithdrawalRequest,
+    launch_binding: Option<&RuntimeLaunchBinding>,
+) -> Result<(), String> {
     validate_account_id(&withdrawal.account)?;
     validate_fixed_hex(&withdrawal.account, "withdrawal account", 64)?;
     validate_monero_address(&withdrawal.monero_address)?;
@@ -4664,6 +4768,12 @@ fn validate_withdrawal(withdrawal: &RuntimeWithdrawalRequest) -> Result<(), Stri
             if !withdrawal.operator_approval_roots.is_empty() {
                 return Err(format!(
                     "withdrawal {} pending request must not have operator approvals",
+                    withdrawal.withdrawal_id
+                ));
+            }
+            if !withdrawal.operator_approvals.is_empty() {
+                return Err(format!(
+                    "withdrawal {} pending request must not have signed operator approvals",
                     withdrawal.withdrawal_id
                 ));
             }
@@ -4711,6 +4821,15 @@ fn validate_withdrawal(withdrawal: &RuntimeWithdrawalRequest) -> Result<(), Stri
                     withdrawal.withdrawal_id
                 ));
             }
+            validate_withdrawal_operator_approvals(
+                withdrawal,
+                monero_tx_id,
+                proof_root,
+                &withdrawal.operator_approval_ids,
+                &withdrawal.operator_approval_roots,
+                &withdrawal.operator_approvals,
+                launch_binding,
+            )?;
         }
         other => {
             return Err(format!(
@@ -4724,6 +4843,247 @@ fn validate_withdrawal(withdrawal: &RuntimeWithdrawalRequest) -> Result<(), Stri
             "withdrawal {} root does not match",
             withdrawal.withdrawal_id
         ));
+    }
+    Ok(())
+}
+
+fn validate_bridge_observer_evidence(
+    deposit: &RuntimeBridgeDeposit,
+    launch_binding: Option<&RuntimeLaunchBinding>,
+) -> Result<(), String> {
+    if deposit.observer_evidence.is_empty() {
+        if launch_binding.is_some() {
+            return Err(
+                "launch-bound bridge deposit requires observer_evidence signed by attested observers"
+                    .to_string(),
+            );
+        }
+        return Ok(());
+    }
+    if deposit.observer_evidence.len() != deposit.observer_ids.len() {
+        return Err(format!(
+            "observer_evidence length {} must match observer_ids length {}",
+            deposit.observer_evidence.len(),
+            deposit.observer_ids.len()
+        ));
+    }
+    if deposit.observer_evidence.len() != deposit.observer_signature_roots.len() {
+        return Err(format!(
+            "observer_evidence length {} must match observer_signature_roots length {}",
+            deposit.observer_evidence.len(),
+            deposit.observer_signature_roots.len()
+        ));
+    }
+
+    let observer_roster = launch_binding.map(launch_bridge_observer_key_map);
+    let payload_root = bridge_observer_deposit_payload_root(deposit);
+    let mut seen_ids = BTreeMap::<String, usize>::new();
+    let mut seen_keys = BTreeMap::<String, usize>::new();
+    let mut seen_roots = BTreeMap::<String, usize>::new();
+    for (index, evidence) in deposit.observer_evidence.iter().enumerate() {
+        validate_account_id(&evidence.observer_id)?;
+        if !evidence
+            .observer_id
+            .eq_ignore_ascii_case(&deposit.observer_ids[index])
+        {
+            return Err(format!(
+                "observer_evidence[{index}].observer_id must match observer_ids[{index}]"
+            ));
+        }
+        let observer_key_name = format!("observer_evidence[{index}].observer_public_key_hex");
+        validate_fixed_hex(&evidence.observer_public_key_hex, &observer_key_name, 64)?;
+        let observer_id = evidence.observer_id.to_ascii_lowercase();
+        if let Some(previous_index) = seen_ids.insert(observer_id.clone(), index) {
+            return Err(format!(
+                "observer_evidence[{index}].observer_id duplicates observer_evidence[{previous_index}]"
+            ));
+        }
+        let public_key = evidence.observer_public_key_hex.to_ascii_lowercase();
+        if let Some(previous_index) = seen_keys.insert(public_key.clone(), index) {
+            return Err(format!(
+                "observer_evidence[{index}].observer_public_key_hex duplicates observer_evidence[{previous_index}]"
+            ));
+        }
+        if let Some(roster) = &observer_roster {
+            let expected = roster.get(&observer_id).ok_or_else(|| {
+                format!(
+                    "observer_evidence[{index}].observer_id {} is not launch-attested",
+                    evidence.observer_id
+                )
+            })?;
+            if !evidence
+                .observer_public_key_hex
+                .eq_ignore_ascii_case(&expected.public_key)
+            {
+                return Err(format!(
+                    "observer_evidence[{index}].observer_public_key_hex does not match launch-attested observer key"
+                ));
+            }
+        }
+        validate_fixed_hex(
+            &evidence.payload_root,
+            &format!("observer_evidence[{index}].payload_root"),
+            64,
+        )?;
+        if !evidence.payload_root.eq_ignore_ascii_case(&payload_root) {
+            return Err(format!(
+                "observer_evidence[{index}].payload_root does not match bridge deposit payload"
+            ));
+        }
+        verify_ed25519_signature(
+            &evidence.observer_public_key_hex,
+            &observer_key_name,
+            &evidence.payload_root,
+            &evidence.signature,
+            &format!("observer_evidence[{index}].signature"),
+        )?;
+        validate_fixed_hex(
+            &evidence.evidence_root,
+            &format!("observer_evidence[{index}].evidence_root"),
+            64,
+        )?;
+        let expected_root = bridge_observer_evidence_root(evidence);
+        if !evidence.evidence_root.eq_ignore_ascii_case(&expected_root) {
+            return Err(format!(
+                "observer_evidence[{index}].evidence_root does not match observer evidence contents"
+            ));
+        }
+        if !deposit.observer_signature_roots[index].eq_ignore_ascii_case(&expected_root) {
+            return Err(format!(
+                "observer_signature_roots[{index}] does not match observer_evidence[{index}].evidence_root"
+            ));
+        }
+        let root = evidence.evidence_root.to_ascii_lowercase();
+        if let Some(previous_index) = seen_roots.insert(root, index) {
+            return Err(format!(
+                "observer_evidence[{index}].evidence_root duplicates observer_evidence[{previous_index}]"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_withdrawal_operator_approvals(
+    withdrawal: &RuntimeWithdrawalRequest,
+    finalized_monero_tx_id: &str,
+    finalization_proof_root: &str,
+    operator_approval_ids: &[String],
+    operator_approval_roots: &[String],
+    operator_approvals: &[RuntimeWithdrawalOperatorApproval],
+    launch_binding: Option<&RuntimeLaunchBinding>,
+) -> Result<(), String> {
+    if operator_approvals.is_empty() {
+        if launch_binding.is_some() {
+            return Err(
+                "launch-bound withdrawal finalization requires operator_approvals signed by attested operators"
+                    .to_string(),
+            );
+        }
+        return Ok(());
+    }
+    if operator_approvals.len() != operator_approval_ids.len() {
+        return Err(format!(
+            "operator_approvals length {} must match operator_approval_ids length {}",
+            operator_approvals.len(),
+            operator_approval_ids.len()
+        ));
+    }
+    if operator_approvals.len() != operator_approval_roots.len() {
+        return Err(format!(
+            "operator_approvals length {} must match operator_approval_roots length {}",
+            operator_approvals.len(),
+            operator_approval_roots.len()
+        ));
+    }
+
+    let operator_roster = launch_binding.map(launch_bridge_operator_key_map);
+    let payload_root = withdrawal_operator_finalization_payload_root(
+        withdrawal,
+        finalized_monero_tx_id,
+        finalization_proof_root,
+    );
+    let mut seen_ids = BTreeMap::<String, usize>::new();
+    let mut seen_keys = BTreeMap::<String, usize>::new();
+    let mut seen_roots = BTreeMap::<String, usize>::new();
+    for (index, approval) in operator_approvals.iter().enumerate() {
+        validate_account_id(&approval.operator_id)?;
+        if !approval
+            .operator_id
+            .eq_ignore_ascii_case(&operator_approval_ids[index])
+        {
+            return Err(format!(
+                "operator_approvals[{index}].operator_id must match operator_approval_ids[{index}]"
+            ));
+        }
+        let operator_key_name = format!("operator_approvals[{index}].operator_public_key_hex");
+        validate_fixed_hex(&approval.operator_public_key_hex, &operator_key_name, 64)?;
+        let operator_id = approval.operator_id.to_ascii_lowercase();
+        if let Some(previous_index) = seen_ids.insert(operator_id.clone(), index) {
+            return Err(format!(
+                "operator_approvals[{index}].operator_id duplicates operator_approvals[{previous_index}]"
+            ));
+        }
+        let public_key = approval.operator_public_key_hex.to_ascii_lowercase();
+        if let Some(previous_index) = seen_keys.insert(public_key.clone(), index) {
+            return Err(format!(
+                "operator_approvals[{index}].operator_public_key_hex duplicates operator_approvals[{previous_index}]"
+            ));
+        }
+        if let Some(roster) = &operator_roster {
+            let expected = roster.get(&operator_id).ok_or_else(|| {
+                format!(
+                    "operator_approvals[{index}].operator_id {} is not launch-attested",
+                    approval.operator_id
+                )
+            })?;
+            if !approval
+                .operator_public_key_hex
+                .eq_ignore_ascii_case(&expected.public_key)
+            {
+                return Err(format!(
+                    "operator_approvals[{index}].operator_public_key_hex does not match launch-attested operator key"
+                ));
+            }
+        }
+        validate_fixed_hex(
+            &approval.payload_root,
+            &format!("operator_approvals[{index}].payload_root"),
+            64,
+        )?;
+        if !approval.payload_root.eq_ignore_ascii_case(&payload_root) {
+            return Err(format!(
+                "operator_approvals[{index}].payload_root does not match withdrawal finalization payload"
+            ));
+        }
+        verify_ed25519_signature(
+            &approval.operator_public_key_hex,
+            &operator_key_name,
+            &approval.payload_root,
+            &approval.signature,
+            &format!("operator_approvals[{index}].signature"),
+        )?;
+        validate_fixed_hex(
+            &approval.approval_root,
+            &format!("operator_approvals[{index}].approval_root"),
+            64,
+        )?;
+        let expected_root = withdrawal_operator_approval_root(approval);
+        if !approval.approval_root.eq_ignore_ascii_case(&expected_root) {
+            return Err(format!(
+                "operator_approvals[{index}].approval_root does not match operator approval contents"
+            ));
+        }
+        if !operator_approval_roots[index].eq_ignore_ascii_case(&expected_root) {
+            return Err(format!(
+                "operator_approval_roots[{index}] does not match operator_approvals[{index}].approval_root"
+            ));
+        }
+        let root = approval.approval_root.to_ascii_lowercase();
+        if let Some(previous_index) = seen_roots.insert(root, index) {
+            return Err(format!(
+                "operator_approvals[{index}].approval_root duplicates operator_approvals[{previous_index}]"
+            ));
+        }
     }
     Ok(())
 }
@@ -4779,6 +5139,117 @@ fn validate_quorum_roots(roots: &[String], name: &str, minimum_count: usize) -> 
     Ok(())
 }
 
+fn validate_launch_bridge_operator_keys(binding: &RuntimeLaunchBinding) -> Result<(), String> {
+    if binding.bridge_operator_keys.len() < MIN_WITHDRAWAL_OPERATOR_QUORUM {
+        return Err(format!(
+            "launch binding bridge_operator_keys must include at least {MIN_WITHDRAWAL_OPERATOR_QUORUM} operators"
+        ));
+    }
+    let mut seen_ids = BTreeMap::<String, usize>::new();
+    let mut seen_keys = BTreeMap::<String, usize>::new();
+    for (index, operator) in binding.bridge_operator_keys.iter().enumerate() {
+        validate_account_id(&operator.operator_id)?;
+        validate_label_no_whitespace(
+            &operator.region,
+            &format!("bridge_operator_keys[{index}].region"),
+        )?;
+        validate_fixed_hex(
+            &operator.public_key,
+            &format!("bridge_operator_keys[{index}].public_key"),
+            64,
+        )?;
+        verifying_key_from_hex_named(
+            &operator.public_key,
+            &format!("bridge_operator_keys[{index}].public_key"),
+        )?;
+        let operator_id = operator.operator_id.to_ascii_lowercase();
+        if let Some(previous_index) = seen_ids.insert(operator_id, index) {
+            return Err(format!(
+                "bridge_operator_keys[{index}].operator_id duplicates bridge_operator_keys[{previous_index}]"
+            ));
+        }
+        let public_key = operator.public_key.to_ascii_lowercase();
+        if let Some(previous_index) = seen_keys.insert(public_key, index) {
+            return Err(format!(
+                "bridge_operator_keys[{index}].public_key duplicates bridge_operator_keys[{previous_index}]"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_launch_bridge_observer_keys(binding: &RuntimeLaunchBinding) -> Result<(), String> {
+    if binding.bridge_observer_keys.len() < MIN_BRIDGE_DEPOSIT_OBSERVER_QUORUM {
+        return Err(format!(
+            "launch binding bridge_observer_keys must include at least {MIN_BRIDGE_DEPOSIT_OBSERVER_QUORUM} observers"
+        ));
+    }
+    let operator_keys = binding
+        .bridge_operator_keys
+        .iter()
+        .map(|operator| operator.public_key.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let mut seen_ids = BTreeMap::<String, usize>::new();
+    let mut seen_keys = BTreeMap::<String, usize>::new();
+    for (index, observer) in binding.bridge_observer_keys.iter().enumerate() {
+        validate_account_id(&observer.observer_id)?;
+        validate_label_no_whitespace(
+            &observer.region,
+            &format!("bridge_observer_keys[{index}].region"),
+        )?;
+        validate_fixed_hex(
+            &observer.public_key,
+            &format!("bridge_observer_keys[{index}].public_key"),
+            64,
+        )?;
+        verifying_key_from_hex_named(
+            &observer.public_key,
+            &format!("bridge_observer_keys[{index}].public_key"),
+        )?;
+        let observer_id = observer.observer_id.to_ascii_lowercase();
+        if let Some(previous_index) = seen_ids.insert(observer_id, index) {
+            return Err(format!(
+                "bridge_observer_keys[{index}].observer_id duplicates bridge_observer_keys[{previous_index}]"
+            ));
+        }
+        let public_key = observer.public_key.to_ascii_lowercase();
+        if operator_keys
+            .iter()
+            .any(|operator_key| operator_key == &public_key)
+        {
+            return Err(format!(
+                "bridge_observer_keys[{index}].public_key must not reuse a bridge operator key"
+            ));
+        }
+        if let Some(previous_index) = seen_keys.insert(public_key, index) {
+            return Err(format!(
+                "bridge_observer_keys[{index}].public_key duplicates bridge_observer_keys[{previous_index}]"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn launch_bridge_operator_key_map(
+    binding: &RuntimeLaunchBinding,
+) -> BTreeMap<String, &RuntimeBridgeOperatorKey> {
+    binding
+        .bridge_operator_keys
+        .iter()
+        .map(|operator| (operator.operator_id.to_ascii_lowercase(), operator))
+        .collect()
+}
+
+fn launch_bridge_observer_key_map(
+    binding: &RuntimeLaunchBinding,
+) -> BTreeMap<String, &RuntimeBridgeObserverKey> {
+    binding
+        .bridge_observer_keys
+        .iter()
+        .map(|observer| (observer.observer_id.to_ascii_lowercase(), observer))
+        .collect()
+}
+
 fn validate_monero_address(monero_address: &str) -> Result<(), String> {
     if monero_address.trim().is_empty() {
         return Err("monero_address must not be empty".to_string());
@@ -4788,6 +5259,16 @@ fn validate_monero_address(monero_address: &str) -> Result<(), String> {
     }
     if monero_address.len() < 20 {
         return Err("monero_address is too short for a public testnet withdrawal".to_string());
+    }
+    Ok(())
+}
+
+fn validate_label_no_whitespace(value: &str, name: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err(format!("{name} must not be empty"));
+    }
+    if value.chars().any(char::is_whitespace) {
+        return Err(format!("{name} must not contain whitespace"));
     }
     Ok(())
 }
@@ -4971,6 +5452,17 @@ fn required_string_array_param(params: &Value, name: &str) -> Result<Vec<String>
                 .ok_or_else(|| format!("{name}[{index}] must be a string"))
         })
         .collect()
+}
+
+fn optional_json_array_param<T>(params: &Value, name: &str) -> Result<Vec<T>, String>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    match params.get(name) {
+        Some(value) if !value.is_null() => serde_json::from_value::<Vec<T>>(value.clone())
+            .map_err(|error| format!("invalid {name}: {error}")),
+        _ => Ok(Vec::new()),
+    }
 }
 
 fn optional_u128_param(params: &Value, name: &str) -> Result<Option<u128>, String> {
@@ -5237,6 +5729,34 @@ pub fn bridge_policy_root() -> String {
     }))
 }
 
+pub fn bridge_observer_deposit_payload_root(deposit: &RuntimeBridgeDeposit) -> String {
+    stable_runtime_root(&json!({
+        "bridge_observer_deposit_payload_domain": "nebula-runtime-monero-bridge-observer-payload-v1",
+        "monero_tx_id": deposit.monero_tx_id,
+        "account": deposit.account,
+        "amount_nxmr_units": deposit.amount_nxmr_units,
+        "confirmations": deposit.confirmations,
+        "observer_id": deposit.observer_id,
+        "observer_ids": deposit.observer_ids,
+        "proof_root": deposit.proof_root,
+        "custody_proof_root": deposit.custody_proof_root,
+        "relayer_set_root": deposit.relayer_set_root,
+        "observed_at_unix_ms": deposit.observed_at_unix_ms,
+        "bridge_policy_root": bridge_policy_root(),
+    }))
+}
+
+pub fn bridge_observer_evidence_root(evidence: &RuntimeBridgeObserverEvidence) -> String {
+    stable_runtime_root(&json!({
+        "bridge_observer_evidence_domain": "nebula-runtime-monero-bridge-observer-evidence-v1",
+        "observer_id": evidence.observer_id,
+        "observer_public_key_hex": evidence.observer_public_key_hex,
+        "payload_root": evidence.payload_root,
+        "signature": evidence.signature,
+        "signed_at_unix_ms": evidence.signed_at_unix_ms,
+    }))
+}
+
 fn bridge_deposit_root(deposit: &RuntimeBridgeDeposit) -> String {
     stable_runtime_root(&json!({
         "bridge_deposit_domain": "nebula-runtime-monero-bridge-deposit-v1",
@@ -5250,8 +5770,58 @@ fn bridge_deposit_root(deposit: &RuntimeBridgeDeposit) -> String {
         "custody_proof_root": deposit.custody_proof_root,
         "relayer_set_root": deposit.relayer_set_root,
         "observer_signature_roots": deposit.observer_signature_roots,
+        "observer_evidence": deposit.observer_evidence,
         "observed_at_unix_ms": deposit.observed_at_unix_ms,
         "bridge_policy_root": bridge_policy_root(),
+    }))
+}
+
+pub fn withdrawal_pending_root(withdrawal: &RuntimeWithdrawalRequest) -> String {
+    let mut pending = withdrawal.clone();
+    pending.status = "operator_pending".to_string();
+    pending.operator_approval_ids.clear();
+    pending.operator_approval_roots.clear();
+    pending.operator_approvals.clear();
+    pending.finalized_monero_tx_id = None;
+    pending.finalization_proof_root = None;
+    pending.finalized_at_unix_ms = None;
+    pending.root = String::new();
+    withdrawal_root(&pending)
+}
+
+pub fn withdrawal_operator_finalization_payload_root(
+    withdrawal: &RuntimeWithdrawalRequest,
+    finalized_monero_tx_id: &str,
+    finalization_proof_root: &str,
+) -> String {
+    stable_runtime_root(&json!({
+        "bridge_operator_finalization_payload_domain": "nebula-runtime-monero-bridge-operator-finalization-v1",
+        "withdrawal_id": withdrawal.withdrawal_id,
+        "pending_withdrawal_root": withdrawal_pending_root(withdrawal),
+        "account": withdrawal.account,
+        "monero_address": withdrawal.monero_address,
+        "amount_nxmr_units": withdrawal.amount_nxmr_units,
+        "nonce": withdrawal.nonce,
+        "withdrawal_authorization_root": withdrawal_authorization_root(
+            &withdrawal.account,
+            &withdrawal.monero_address,
+            withdrawal.amount_nxmr_units,
+            withdrawal.nonce,
+        ),
+        "bridge_policy_root": withdrawal.bridge_policy_root,
+        "finalized_monero_tx_id": finalized_monero_tx_id,
+        "finalization_proof_root": finalization_proof_root,
+    }))
+}
+
+pub fn withdrawal_operator_approval_root(approval: &RuntimeWithdrawalOperatorApproval) -> String {
+    stable_runtime_root(&json!({
+        "bridge_operator_approval_domain": "nebula-runtime-monero-bridge-operator-approval-v1",
+        "operator_id": approval.operator_id,
+        "operator_public_key_hex": approval.operator_public_key_hex,
+        "payload_root": approval.payload_root,
+        "signature": approval.signature,
+        "signed_at_unix_ms": approval.signed_at_unix_ms,
     }))
 }
 
@@ -5269,6 +5839,7 @@ fn withdrawal_root(withdrawal: &RuntimeWithdrawalRequest) -> String {
         "bridge_policy_root": withdrawal.bridge_policy_root,
         "operator_approval_ids": withdrawal.operator_approval_ids,
         "operator_approval_roots": withdrawal.operator_approval_roots,
+        "operator_approvals": withdrawal.operator_approvals,
         "finalized_monero_tx_id": withdrawal.finalized_monero_tx_id,
         "finalization_proof_root": withdrawal.finalization_proof_root,
         "finalized_at_unix_ms": withdrawal.finalized_at_unix_ms,
@@ -5427,6 +5998,30 @@ mod tests {
             validator_count: 3,
             operator_count: 2,
             region_count: 2,
+            bridge_operator_keys: vec![
+                RuntimeBridgeOperatorKey {
+                    operator_id: "operator-a".to_string(),
+                    region: "us-east".to_string(),
+                    public_key: test_public_key_hex(0xa1),
+                },
+                RuntimeBridgeOperatorKey {
+                    operator_id: "operator-b".to_string(),
+                    region: "eu-west".to_string(),
+                    public_key: test_public_key_hex(0xa2),
+                },
+            ],
+            bridge_observer_keys: vec![
+                RuntimeBridgeObserverKey {
+                    observer_id: "observer-a".to_string(),
+                    region: "us-east".to_string(),
+                    public_key: test_public_key_hex(0xb1),
+                },
+                RuntimeBridgeObserverKey {
+                    observer_id: "observer-b".to_string(),
+                    region: "eu-west".to_string(),
+                    public_key: test_public_key_hex(0xb2),
+                },
+            ],
         }
     }
 
@@ -5461,6 +6056,19 @@ mod tests {
 
     fn test_account_id() -> String {
         public_key_hex_for_secret(&test_account_secret_key_hex()).unwrap()
+    }
+
+    fn test_secret_key_hex(seed: u8) -> String {
+        format!("{seed:02x}").repeat(32)
+    }
+
+    fn test_public_key_hex(seed: u8) -> String {
+        public_key_hex_for_secret(&test_secret_key_hex(seed)).unwrap()
+    }
+
+    fn sign_root_with_seed(seed: u8, root: &str) -> String {
+        let signing_key = signing_key_from_hex(&test_secret_key_hex(seed)).unwrap();
+        hex::encode(signing_key.sign(root.as_bytes()).to_bytes())
     }
 
     fn sign_test_root(root: &str) -> String {
@@ -5498,8 +6106,106 @@ mod tests {
             custody_proof_root: "7".repeat(64),
             relayer_set_root: "8".repeat(64),
             observer_signature_roots: vec!["9".repeat(64), "a".repeat(64)],
+            observer_evidence: Vec::new(),
             observed_at_unix_ms: 1,
         }
+    }
+
+    fn signed_test_bridge_deposit(
+        monero_tx_digit: char,
+        proof_digit: char,
+    ) -> RuntimeBridgeDeposit {
+        let mut deposit = test_bridge_deposit(monero_tx_digit, proof_digit);
+        let observer_a = test_bridge_observer_evidence(&deposit, "observer-a", 0xb1, 1);
+        let observer_b = test_bridge_observer_evidence(&deposit, "observer-b", 0xb2, 1);
+        deposit.observer_signature_roots = vec![
+            observer_a.evidence_root.clone(),
+            observer_b.evidence_root.clone(),
+        ];
+        deposit.observer_evidence = vec![observer_a, observer_b];
+        deposit
+    }
+
+    fn test_bridge_observer_evidence(
+        deposit: &RuntimeBridgeDeposit,
+        observer_id: &str,
+        seed: u8,
+        signed_at_unix_ms: u128,
+    ) -> RuntimeBridgeObserverEvidence {
+        let payload_root = bridge_observer_deposit_payload_root(deposit);
+        let mut evidence = RuntimeBridgeObserverEvidence {
+            observer_id: observer_id.to_string(),
+            observer_public_key_hex: test_public_key_hex(seed),
+            payload_root: payload_root.clone(),
+            signature: sign_root_with_seed(seed, &payload_root),
+            signed_at_unix_ms,
+            evidence_root: String::new(),
+        };
+        evidence.evidence_root = bridge_observer_evidence_root(&evidence);
+        evidence
+    }
+
+    fn test_operator_approval(
+        withdrawal: &RuntimeWithdrawalRequest,
+        finalized_monero_tx_id: &str,
+        finalization_proof_root: &str,
+        operator_id: &str,
+        seed: u8,
+        signed_at_unix_ms: u128,
+    ) -> RuntimeWithdrawalOperatorApproval {
+        let payload_root = withdrawal_operator_finalization_payload_root(
+            withdrawal,
+            finalized_monero_tx_id,
+            finalization_proof_root,
+        );
+        let mut approval = RuntimeWithdrawalOperatorApproval {
+            operator_id: operator_id.to_string(),
+            operator_public_key_hex: test_public_key_hex(seed),
+            payload_root: payload_root.clone(),
+            signature: sign_root_with_seed(seed, &payload_root),
+            signed_at_unix_ms,
+            approval_root: String::new(),
+        };
+        approval.approval_root = withdrawal_operator_approval_root(&approval);
+        approval
+    }
+
+    fn test_operator_approval_quorum(
+        withdrawal: &RuntimeWithdrawalRequest,
+        finalized_monero_tx_id: &str,
+        finalization_proof_root: &str,
+    ) -> (
+        Vec<String>,
+        Vec<String>,
+        Vec<RuntimeWithdrawalOperatorApproval>,
+    ) {
+        let approval_a = test_operator_approval(
+            withdrawal,
+            finalized_monero_tx_id,
+            finalization_proof_root,
+            "operator-a",
+            0xa1,
+            1,
+        );
+        let approval_b = test_operator_approval(
+            withdrawal,
+            finalized_monero_tx_id,
+            finalization_proof_root,
+            "operator-b",
+            0xa2,
+            1,
+        );
+        (
+            vec![
+                approval_a.operator_id.clone(),
+                approval_b.operator_id.clone(),
+            ],
+            vec![
+                approval_a.approval_root.clone(),
+                approval_b.approval_root.clone(),
+            ],
+            vec![approval_a, approval_b],
+        )
     }
 
     fn one_shot_http_response(body: String, status_line: &str) -> (String, thread::JoinHandle<()>) {
@@ -6840,6 +7546,7 @@ mod tests {
         assert_eq!(report.withdrawal.bridge_policy_root, bridge_policy_root());
         assert!(report.withdrawal.operator_approval_ids.is_empty());
         assert!(report.withdrawal.operator_approval_roots.is_empty());
+        assert!(report.withdrawal.operator_approvals.is_empty());
         assert_eq!(report.withdrawal.root.len(), 64);
         assert_eq!(report.account_state.nxmr_units, 3_000);
         assert_eq!(runtime.status().withdrawal_request_count, 1);
@@ -6911,6 +7618,47 @@ mod tests {
     }
 
     #[test]
+    fn launch_bound_bridge_deposit_requires_signed_attested_observers() {
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+
+        assert!(runtime
+            .observe_bridge_deposit(test_bridge_deposit('1', '2'))
+            .unwrap_err()
+            .contains("observer_evidence"));
+
+        let report = runtime
+            .observe_bridge_deposit(signed_test_bridge_deposit('1', '2'))
+            .unwrap();
+        assert!(report.credited);
+        assert_eq!(
+            runtime.account(&test_account_id()).unwrap().nxmr_units,
+            5_000
+        );
+
+        let mut tampered = signed_test_bridge_deposit('3', '4');
+        tampered.amount_nxmr_units = 5_001;
+        assert!(runtime
+            .observe_bridge_deposit(tampered)
+            .unwrap_err()
+            .contains("payload_root"));
+    }
+
+    #[test]
+    fn launch_bound_bridge_deposit_rejects_bad_observer_signature() {
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        let mut deposit = signed_test_bridge_deposit('5', '6');
+        deposit.observer_evidence[0].signature = "0".repeat(128);
+        deposit.observer_evidence[0].evidence_root =
+            bridge_observer_evidence_root(&deposit.observer_evidence[0]);
+        deposit.observer_signature_roots[0] = deposit.observer_evidence[0].evidence_root.clone();
+
+        assert!(runtime
+            .observe_bridge_deposit(deposit)
+            .unwrap_err()
+            .contains("Ed25519"));
+    }
+
+    #[test]
     fn runtime_withdrawal_finalization_requires_operator_quorum_and_prevents_replay() {
         let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
         runtime
@@ -6935,7 +7683,8 @@ mod tests {
                 &finalized_tx_id,
                 &"1".repeat(64),
                 vec!["operator-a".to_string()],
-                vec!["2".repeat(64)]
+                vec!["2".repeat(64)],
+                Vec::new(),
             )
             .unwrap_err()
             .contains("operator_approval_ids"));
@@ -6946,7 +7695,8 @@ mod tests {
                 &finalized_tx_id,
                 &"1".repeat(64),
                 vec!["operator-a".to_string(), "operator-a".to_string()],
-                vec!["2".repeat(64), "3".repeat(64)]
+                vec!["2".repeat(64), "3".repeat(64)],
+                Vec::new(),
             )
             .unwrap_err()
             .contains("operator_approval_ids[1] duplicates"));
@@ -6957,7 +7707,8 @@ mod tests {
                 &finalized_tx_id,
                 &"1".repeat(64),
                 vec!["operator-a".to_string(), "operator-b".to_string()],
-                vec!["2".repeat(64)]
+                vec!["2".repeat(64)],
+                Vec::new(),
             )
             .unwrap_err()
             .contains("operator_approval_ids length"));
@@ -6969,6 +7720,7 @@ mod tests {
                 &"1".repeat(64),
                 vec!["operator-a".to_string(), "operator-b".to_string()],
                 vec!["2".repeat(64), "3".repeat(64)],
+                Vec::new(),
             )
             .unwrap();
         assert!(report.finalized);
@@ -7003,7 +7755,8 @@ mod tests {
                 &finalized_tx_id,
                 &"6".repeat(64),
                 vec!["operator-c".to_string(), "operator-d".to_string()],
-                vec!["7".repeat(64), "8".repeat(64)]
+                vec!["7".repeat(64), "8".repeat(64)],
+                Vec::new(),
             )
             .unwrap_err()
             .contains("already finalized"));
@@ -7013,7 +7766,8 @@ mod tests {
                 &"a".repeat(64),
                 &"1".repeat(64),
                 vec!["operator-c".to_string(), "operator-d".to_string()],
-                vec!["7".repeat(64), "8".repeat(64)]
+                vec!["7".repeat(64), "8".repeat(64)],
+                Vec::new(),
             )
             .unwrap_err()
             .contains("already used"));
@@ -7021,6 +7775,90 @@ mod tests {
         let status = runtime.status();
         assert_eq!(status.finalized_withdrawal_count, 1);
         assert_eq!(status.bridge_replay_cache_count, 3);
+    }
+
+    #[test]
+    fn launch_bound_withdrawal_finalization_requires_signed_attested_operators() {
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        runtime
+            .observe_bridge_deposit(signed_test_bridge_deposit('7', '8'))
+            .unwrap();
+        let withdrawal = runtime
+            .request_withdrawal(
+                &test_account_id(),
+                "9xTestnetMoneroAddressForNebulaWithdrawals",
+                2_000,
+                0,
+                &test_withdrawal_signature("9xTestnetMoneroAddressForNebulaWithdrawals", 2_000, 0),
+            )
+            .unwrap()
+            .withdrawal;
+        let finalized_tx_id = "f".repeat(64);
+        let proof_root = "1".repeat(64);
+
+        assert!(runtime
+            .finalize_withdrawal(
+                &withdrawal.withdrawal_id,
+                &finalized_tx_id,
+                &proof_root,
+                vec!["operator-a".to_string(), "operator-b".to_string()],
+                vec!["2".repeat(64), "3".repeat(64)],
+                Vec::new(),
+            )
+            .unwrap_err()
+            .contains("operator_approvals"));
+
+        let (operator_ids, approval_roots, approvals) =
+            test_operator_approval_quorum(&withdrawal, &finalized_tx_id, &proof_root);
+        let report = runtime
+            .finalize_withdrawal(
+                &withdrawal.withdrawal_id,
+                &finalized_tx_id,
+                &proof_root,
+                operator_ids,
+                approval_roots,
+                approvals,
+            )
+            .unwrap();
+        assert!(report.finalized);
+        assert_eq!(report.withdrawal.operator_approvals.len(), 2);
+    }
+
+    #[test]
+    fn launch_bound_withdrawal_finalization_rejects_bad_operator_signature() {
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        runtime
+            .observe_bridge_deposit(signed_test_bridge_deposit('9', 'a'))
+            .unwrap();
+        let withdrawal = runtime
+            .request_withdrawal(
+                &test_account_id(),
+                "9xTestnetMoneroAddressForNebulaWithdrawals",
+                2_000,
+                0,
+                &test_withdrawal_signature("9xTestnetMoneroAddressForNebulaWithdrawals", 2_000, 0),
+            )
+            .unwrap()
+            .withdrawal;
+        let finalized_tx_id = "e".repeat(64);
+        let proof_root = "b".repeat(64);
+        let (operator_ids, mut approval_roots, mut approvals) =
+            test_operator_approval_quorum(&withdrawal, &finalized_tx_id, &proof_root);
+        approvals[0].signature = "0".repeat(128);
+        approvals[0].approval_root = withdrawal_operator_approval_root(&approvals[0]);
+        approval_roots[0] = approvals[0].approval_root.clone();
+
+        assert!(runtime
+            .finalize_withdrawal(
+                &withdrawal.withdrawal_id,
+                &finalized_tx_id,
+                &proof_root,
+                operator_ids,
+                approval_roots,
+                approvals,
+            )
+            .unwrap_err()
+            .contains("Ed25519"));
     }
 
     #[test]

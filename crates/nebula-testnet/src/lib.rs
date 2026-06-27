@@ -1,5 +1,6 @@
 #![recursion_limit = "512"]
 
+use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha3::{Digest, Sha3_256};
@@ -1527,14 +1528,14 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
                 OperatorAttestation {
                     operator_id: "operator-a".to_string(),
                     region: "us-east".to_string(),
-                    public_key: hex_64("operator-key-a"),
+                    public_key: sample_ed25519_public_key_hex(0xa1),
                     signed_evidence_root: witness_evidence_root.clone(),
                     signature_sha3_256: String::new(),
                 },
                 OperatorAttestation {
                     operator_id: "operator-b".to_string(),
                     region: "eu-west".to_string(),
-                    public_key: hex_64("operator-key-b"),
+                    public_key: sample_ed25519_public_key_hex(0xa2),
                     signed_evidence_root: witness_evidence_root.clone(),
                     signature_sha3_256: String::new(),
                 },
@@ -1554,7 +1555,7 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
                     observed_evidence_root: witness_evidence_root.clone(),
                     signature: SignatureVerification {
                         algorithm: "ed25519-testnet-attestation".to_string(),
-                        public_key: hex_64("observer-key-a"),
+                        public_key: sample_ed25519_public_key_hex(0xb1),
                         signature_sha3_256: String::new(),
                         verified: true,
                     },
@@ -1566,7 +1567,7 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
                     observed_evidence_root: witness_evidence_root.clone(),
                     signature: SignatureVerification {
                         algorithm: "ed25519-testnet-attestation".to_string(),
-                        public_key: hex_64("observer-key-b"),
+                        public_key: sample_ed25519_public_key_hex(0xb2),
                         signature_sha3_256: String::new(),
                         verified: true,
                     },
@@ -3516,6 +3517,10 @@ pub fn build_runtime_launch_binding_from_jsons(
         operator_acceptance_json,
         genesis_manifest_json,
     )?;
+    let deployment_attestation = serde_json::from_str::<DeploymentAttestation>(
+        deployment_attestation_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
     let validator_set_manifest = serde_json::from_str::<ValidatorSetManifest>(
         validator_set_json.trim_start_matches('\u{feff}'),
     )
@@ -3529,8 +3534,28 @@ pub fn build_runtime_launch_binding_from_jsons(
             "validator_id {validator_id} is not admitted in validator set"
         )]));
     }
+    let mut bridge_operator_keys = deployment_attestation
+        .operators
+        .iter()
+        .map(|operator| runtime::RuntimeBridgeOperatorKey {
+            operator_id: operator.operator_id.clone(),
+            region: operator.region.clone(),
+            public_key: operator.public_key.clone(),
+        })
+        .collect::<Vec<_>>();
+    bridge_operator_keys.sort_by(|left, right| left.operator_id.cmp(&right.operator_id));
+    let mut bridge_observer_keys = deployment_attestation
+        .observers
+        .iter()
+        .map(|observer| runtime::RuntimeBridgeObserverKey {
+            observer_id: observer.observer_id.clone(),
+            region: observer.region.clone(),
+            public_key: observer.signature.public_key.clone(),
+        })
+        .collect::<Vec<_>>();
+    bridge_observer_keys.sort_by(|left, right| left.observer_id.cmp(&right.observer_id));
 
-    Ok(runtime::RuntimeLaunchBinding {
+    let binding = runtime::RuntimeLaunchBinding {
         chain_id: CHAIN_ID.to_string(),
         runtime_version: VERSION.to_string(),
         endpoint_url: launch_report.endpoint_url,
@@ -3547,7 +3572,13 @@ pub fn build_runtime_launch_binding_from_jsons(
         validator_count: launch_report.validator_count,
         operator_count: launch_report.matched_operator_count,
         region_count: launch_report.matched_region_count,
-    })
+        bridge_operator_keys,
+        bridge_observer_keys,
+    };
+    binding
+        .validate_against_config(&runtime::RuntimeConfig::public_testnet_default())
+        .map_err(|error| AttestationError::Invalid(vec![error]))?;
+    Ok(binding)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8793,6 +8824,14 @@ fn hex_64(label: &str) -> String {
     stable_root(&json!({ "sample": label }))
 }
 
+fn sample_ed25519_public_key_hex(seed: u8) -> String {
+    hex::encode(
+        SigningKey::from_bytes(&[seed; 32])
+            .verifying_key()
+            .to_bytes(),
+    )
+}
+
 fn stable_root(value: &Value) -> String {
     let bytes = serde_json::to_vec(value).expect("status root input serializes");
     let digest = Sha3_256::digest(bytes);
@@ -11220,6 +11259,18 @@ mod public_launch {
         assert_eq!(binding.operator_count, 2);
         assert_eq!(binding.region_count, 2);
         assert_eq!(binding.launch_package_bundle_root.len(), 64);
+        assert_eq!(binding.bridge_operator_keys.len(), 2);
+        assert_eq!(binding.bridge_operator_keys[0].operator_id, "operator-a");
+        assert_eq!(binding.bridge_operator_keys[1].operator_id, "operator-b");
+        assert_eq!(binding.bridge_observer_keys.len(), 2);
+        assert_eq!(
+            binding.bridge_observer_keys[0].observer_id,
+            "observer-eu-west-1"
+        );
+        assert_eq!(
+            binding.bridge_observer_keys[1].observer_id,
+            "observer-us-east-1"
+        );
 
         let error = build_runtime_launch_binding_from_jsons(
             &deployment,

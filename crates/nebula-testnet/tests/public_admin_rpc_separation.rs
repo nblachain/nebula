@@ -4,8 +4,12 @@ use nebula_testnet::{
     build_operator_acceptance_json_pretty, build_operator_handoff_json_pretty,
     build_runtime_launch_binding_from_jsons, build_runtime_surface_evidence_json_pretty,
     runtime::{
-        serve_runtime_rpc_with_options, withdrawal_authorization_root, RuntimeConfig,
-        RuntimeLaunchBinding, RuntimeNodeOptions, RuntimeTransaction, MIN_BRIDGE_CONFIRMATIONS,
+        bridge_observer_deposit_payload_root, bridge_observer_evidence_root,
+        serve_runtime_rpc_with_options, withdrawal_authorization_root,
+        withdrawal_operator_approval_root, withdrawal_operator_finalization_payload_root,
+        RuntimeBridgeDeposit, RuntimeBridgeObserverEvidence, RuntimeConfig, RuntimeLaunchBinding,
+        RuntimeNodeOptions, RuntimeTransaction, RuntimeWithdrawalOperatorApproval,
+        RuntimeWithdrawalRequest, MIN_BRIDGE_CONFIRMATIONS,
     },
     sample_deployment_attestation_json_pretty, sample_public_probe_json_pretty,
     sample_public_status_manifest_json_pretty, sample_validator_set_json_pretty,
@@ -366,6 +370,17 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
         .as_str()
         .expect("withdrawal_id is a string")
         .to_string();
+    let withdrawal_request =
+        serde_json::from_value::<RuntimeWithdrawalRequest>(withdrawal["withdrawal"].clone())
+            .expect("withdrawal response carries a runtime withdrawal");
+    let finalized_monero_tx_id = hex_64("live-finalized-withdrawal");
+    let finalization_proof_root = hex_64("live-finalization-proof");
+    let (operator_approval_ids, operator_approval_roots, operator_approvals) =
+        operator_approval_quorum(
+            &withdrawal_request,
+            &finalized_monero_tx_id,
+            &finalization_proof_root,
+        );
 
     let finalization = rpc_call(
         &sequencer_admin_addr,
@@ -373,13 +388,11 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
         json!({
             "admin_token": ADMIN_TOKEN,
             "withdrawal_id": withdrawal_id.clone(),
-            "finalized_monero_tx_id": hex_64("live-finalized-withdrawal"),
-            "finalization_proof_root": hex_64("live-finalization-proof"),
-            "operator_approval_ids": ["operator-a", "operator-b"],
-            "operator_approval_roots": [
-                hex_64("live-operator-approval-a"),
-                hex_64("live-operator-approval-b")
-            ],
+            "finalized_monero_tx_id": finalized_monero_tx_id,
+            "finalization_proof_root": finalization_proof_root,
+            "operator_approval_ids": operator_approval_ids,
+            "operator_approval_roots": operator_approval_roots,
+            "operator_approvals": operator_approvals,
         }),
     );
     let finalization = rpc_result(&finalization);
@@ -974,19 +987,109 @@ fn withdrawal_signature(
 }
 
 fn bridge_deposit(seed: u8, amount_nxmr_units: u128) -> Value {
-    json!({
-        "monero_tx_id": hex_64("m45"),
-        "account": account_id(seed),
-        "amount_nxmr_units": amount_nxmr_units,
-        "confirmations": MIN_BRIDGE_CONFIRMATIONS,
-        "observer_id": "observer-public-rpc",
-        "observer_ids": ["observer-public-rpc", "observer-backup-rpc"],
-        "proof_root": hex_64("p45"),
-        "custody_proof_root": hex_64("c45"),
-        "relayer_set_root": hex_64("r45"),
-        "observer_signature_roots": [hex_64("s45a"), hex_64("s45b")],
-        "observed_at_unix_ms": 1,
-    })
+    let mut deposit = RuntimeBridgeDeposit {
+        monero_tx_id: hex_64("m45"),
+        account: account_id(seed),
+        amount_nxmr_units,
+        confirmations: MIN_BRIDGE_CONFIRMATIONS,
+        observer_id: "observer-us-east-1".to_string(),
+        observer_ids: vec![
+            "observer-us-east-1".to_string(),
+            "observer-eu-west-1".to_string(),
+        ],
+        proof_root: hex_64("p45"),
+        custody_proof_root: hex_64("c45"),
+        relayer_set_root: hex_64("r45"),
+        observer_signature_roots: Vec::new(),
+        observer_evidence: Vec::new(),
+        observed_at_unix_ms: 1,
+    };
+    let observer_a = observer_evidence(&deposit, "observer-us-east-1", 0xb1);
+    let observer_b = observer_evidence(&deposit, "observer-eu-west-1", 0xb2);
+    deposit.observer_signature_roots = vec![
+        observer_a.evidence_root.clone(),
+        observer_b.evidence_root.clone(),
+    ];
+    deposit.observer_evidence = vec![observer_a, observer_b];
+    serde_json::to_value(deposit).expect("bridge deposit serializes")
+}
+
+fn observer_evidence(
+    deposit: &RuntimeBridgeDeposit,
+    observer_id: &str,
+    seed: u8,
+) -> RuntimeBridgeObserverEvidence {
+    let payload_root = bridge_observer_deposit_payload_root(deposit);
+    let mut evidence = RuntimeBridgeObserverEvidence {
+        observer_id: observer_id.to_string(),
+        observer_public_key_hex: account_id(seed),
+        payload_root: payload_root.clone(),
+        signature: sign_root(seed, &payload_root),
+        signed_at_unix_ms: 1,
+        evidence_root: String::new(),
+    };
+    evidence.evidence_root = bridge_observer_evidence_root(&evidence);
+    evidence
+}
+
+fn operator_approval_quorum(
+    withdrawal: &RuntimeWithdrawalRequest,
+    finalized_monero_tx_id: &str,
+    finalization_proof_root: &str,
+) -> (
+    Vec<String>,
+    Vec<String>,
+    Vec<RuntimeWithdrawalOperatorApproval>,
+) {
+    let approval_a = operator_approval(
+        withdrawal,
+        finalized_monero_tx_id,
+        finalization_proof_root,
+        "operator-a",
+        0xa1,
+    );
+    let approval_b = operator_approval(
+        withdrawal,
+        finalized_monero_tx_id,
+        finalization_proof_root,
+        "operator-b",
+        0xa2,
+    );
+    (
+        vec![
+            approval_a.operator_id.clone(),
+            approval_b.operator_id.clone(),
+        ],
+        vec![
+            approval_a.approval_root.clone(),
+            approval_b.approval_root.clone(),
+        ],
+        vec![approval_a, approval_b],
+    )
+}
+
+fn operator_approval(
+    withdrawal: &RuntimeWithdrawalRequest,
+    finalized_monero_tx_id: &str,
+    finalization_proof_root: &str,
+    operator_id: &str,
+    seed: u8,
+) -> RuntimeWithdrawalOperatorApproval {
+    let payload_root = withdrawal_operator_finalization_payload_root(
+        withdrawal,
+        finalized_monero_tx_id,
+        finalization_proof_root,
+    );
+    let mut approval = RuntimeWithdrawalOperatorApproval {
+        operator_id: operator_id.to_string(),
+        operator_public_key_hex: account_id(seed),
+        payload_root: payload_root.clone(),
+        signature: sign_root(seed, &payload_root),
+        signed_at_unix_ms: 1,
+        approval_root: String::new(),
+    };
+    approval.approval_root = withdrawal_operator_approval_root(&approval);
+    approval
 }
 
 fn verified_launch_bindings() -> (RuntimeLaunchBinding, RuntimeLaunchBinding) {
