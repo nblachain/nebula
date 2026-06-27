@@ -9,7 +9,7 @@ use sha3::{Digest, Sha3_256};
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -38,6 +38,7 @@ pub const DEFAULT_SYNC_PEER_QUORUM: usize = 1;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
 pub const DEFAULT_MAX_REQUESTS_PER_MINUTE: u32 = 600;
 pub const DEFAULT_MAX_ACTIVE_CONNECTIONS: usize = 512;
+pub const DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS: usize = 32;
 const RPC_RATE_LIMIT_WINDOW_MS: u128 = 60_000;
 pub const DEFAULT_DEV_SEQUENCER_SECRET_KEY_HEX: &str =
     "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -56,6 +57,7 @@ pub struct RuntimeNodeOptions {
     pub max_request_bytes: usize,
     pub max_requests_per_minute: u32,
     pub max_active_connections: usize,
+    pub admin_max_active_connections: usize,
 }
 
 impl Default for RuntimeNodeOptions {
@@ -73,6 +75,7 @@ impl Default for RuntimeNodeOptions {
             max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
             max_requests_per_minute: DEFAULT_MAX_REQUESTS_PER_MINUTE,
             max_active_connections: DEFAULT_MAX_ACTIVE_CONNECTIONS,
+            admin_max_active_connections: DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS,
         }
     }
 }
@@ -646,6 +649,7 @@ pub struct RuntimeOpsStatus {
     pub rpc_max_request_bytes: usize,
     pub rpc_max_requests_per_minute: u32,
     pub rpc_max_active_connections: usize,
+    pub admin_rpc_max_active_connections: usize,
     pub admin_rpc_enabled: bool,
     pub admin_rpc_private_listener: bool,
     pub public_rpc_admin_methods_enabled: bool,
@@ -741,6 +745,7 @@ pub struct RuntimeBackupManifest {
     pub rpc_max_request_bytes: usize,
     pub rpc_max_requests_per_minute: u32,
     pub rpc_max_active_connections: usize,
+    pub admin_rpc_max_active_connections: usize,
     pub admin_rpc_enabled: bool,
     pub admin_rpc_private_listener: bool,
     pub public_rpc_admin_methods_enabled: bool,
@@ -845,12 +850,12 @@ struct RuntimeRpcState {
     runtime: Arc<Mutex<NebulaRuntime>>,
     storage: Option<RuntimeStorage>,
     rpc_limits: RuntimeRpcLimits,
-    active_connections: Arc<AtomicUsize>,
+    connection_counters: RuntimeRpcConnectionCounters,
     sync_peers: RuntimeSyncPeerSet,
     sync_telemetry: Arc<Mutex<BTreeMap<String, RuntimeSyncPeerTelemetry>>>,
     admin_token: Option<String>,
     admin_rpc_private_listener: bool,
-    rate_limits: Arc<Mutex<BTreeMap<String, RuntimeRateLimitBucket>>>,
+    rate_limits: RuntimeRpcRateLimitBuckets,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -863,6 +868,13 @@ impl RuntimeRpcAccess {
     fn allows_admin_methods(self) -> bool {
         matches!(self, Self::Admin)
     }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::Admin => "admin",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -870,6 +882,67 @@ struct RuntimeRpcLimits {
     max_request_bytes: usize,
     max_requests_per_minute: u32,
     max_active_connections: usize,
+    admin_max_active_connections: usize,
+}
+
+impl RuntimeRpcLimits {
+    fn max_active_connections_for(self, access: RuntimeRpcAccess) -> usize {
+        match access {
+            RuntimeRpcAccess::Public => self.max_active_connections,
+            RuntimeRpcAccess::Admin => self.admin_max_active_connections,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeRpcConnectionCounters {
+    public: Arc<AtomicUsize>,
+    admin: Arc<AtomicUsize>,
+}
+
+impl Default for RuntimeRpcConnectionCounters {
+    fn default() -> Self {
+        Self {
+            public: Arc::new(AtomicUsize::new(0)),
+            admin: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+impl RuntimeRpcConnectionCounters {
+    fn for_access(&self, access: RuntimeRpcAccess) -> Arc<AtomicUsize> {
+        match access {
+            RuntimeRpcAccess::Public => self.public.clone(),
+            RuntimeRpcAccess::Admin => self.admin.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeRpcRateLimitBuckets {
+    public: Arc<Mutex<BTreeMap<String, RuntimeRateLimitBucket>>>,
+    admin: Arc<Mutex<BTreeMap<String, RuntimeRateLimitBucket>>>,
+}
+
+impl Default for RuntimeRpcRateLimitBuckets {
+    fn default() -> Self {
+        Self {
+            public: Arc::new(Mutex::new(BTreeMap::new())),
+            admin: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+}
+
+impl RuntimeRpcRateLimitBuckets {
+    fn for_access(
+        &self,
+        access: RuntimeRpcAccess,
+    ) -> Arc<Mutex<BTreeMap<String, RuntimeRateLimitBucket>>> {
+        match access {
+            RuntimeRpcAccess::Public => self.public.clone(),
+            RuntimeRpcAccess::Admin => self.admin.clone(),
+        }
+    }
 }
 
 struct RuntimeConnectionGuard {
@@ -1066,13 +1139,17 @@ impl RuntimeRpcState {
         storage.save_runtime(&runtime)
     }
 
-    fn check_request_allowed(&self, client_id: &str) -> Result<(), String> {
+    fn check_request_allowed(
+        &self,
+        access: RuntimeRpcAccess,
+        client_id: &str,
+    ) -> Result<(), String> {
         if self.rpc_limits.max_requests_per_minute == 0 {
             return Err("max_requests_per_minute must be greater than zero".to_string());
         }
         let now = unix_ms();
-        let mut buckets = self
-            .rate_limits
+        let buckets = self.rate_limits.for_access(access);
+        let mut buckets = buckets
             .lock()
             .map_err(|_| "rate limit mutex poisoned".to_string())?;
         let bucket =
@@ -1088,7 +1165,8 @@ impl RuntimeRpcState {
         }
         if bucket.request_count >= self.rpc_limits.max_requests_per_minute {
             return Err(format!(
-                "rate limit exceeded for {client_id}: max {} requests per minute",
+                "{} rate limit exceeded for {client_id}: max {} requests per minute",
+                access.label(),
                 self.rpc_limits.max_requests_per_minute
             ));
         }
@@ -1099,28 +1177,31 @@ impl RuntimeRpcState {
         Ok(())
     }
 
-    fn try_acquire_connection(&self) -> Result<RuntimeConnectionGuard, String> {
-        let max = self.rpc_limits.max_active_connections;
+    fn try_acquire_connection(
+        &self,
+        access: RuntimeRpcAccess,
+    ) -> Result<RuntimeConnectionGuard, String> {
+        let max = self.rpc_limits.max_active_connections_for(access);
         if max == 0 {
             return Err("max_active_connections must be greater than zero".to_string());
         }
-        let mut current = self.active_connections.load(Ordering::Acquire);
+        let active_connections = self.connection_counters.for_access(access);
+        let mut current = active_connections.load(Ordering::Acquire);
         loop {
             if current >= max {
                 return Err(format!(
-                    "active connection limit exceeded: max {max} concurrent RPC connections"
+                    "{} active connection limit exceeded: max {max} concurrent RPC connections",
+                    access.label()
                 ));
             }
-            match self.active_connections.compare_exchange_weak(
+            match active_connections.compare_exchange_weak(
                 current,
                 current + 1,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
                 Ok(_) => {
-                    return Ok(RuntimeConnectionGuard {
-                        active_connections: self.active_connections.clone(),
-                    });
+                    return Ok(RuntimeConnectionGuard { active_connections });
                 }
                 Err(observed) => current = observed,
             }
@@ -1362,6 +1443,10 @@ impl RuntimeRpcState {
         fields.insert(
             "rpc_max_active_connections".to_string(),
             json!(self.rpc_limits.max_active_connections),
+        );
+        fields.insert(
+            "admin_rpc_max_active_connections".to_string(),
+            json!(self.rpc_limits.admin_max_active_connections),
         );
         fields.insert(
             "bootstrap_peer_urls".to_string(),
@@ -1657,6 +1742,7 @@ impl RuntimeRpcState {
             rpc_max_request_bytes: self.rpc_limits.max_request_bytes,
             rpc_max_requests_per_minute: self.rpc_limits.max_requests_per_minute,
             rpc_max_active_connections: self.rpc_limits.max_active_connections,
+            admin_rpc_max_active_connections: self.rpc_limits.admin_max_active_connections,
             admin_rpc_enabled: self.admin_rpc_enabled(),
             admin_rpc_private_listener: self.admin_rpc_private_listener,
             public_rpc_admin_methods_enabled: self.public_rpc_admin_methods_enabled(),
@@ -1758,6 +1844,7 @@ impl RuntimeRpcState {
             rpc_max_request_bytes: ops_status.rpc_max_request_bytes,
             rpc_max_requests_per_minute: ops_status.rpc_max_requests_per_minute,
             rpc_max_active_connections: ops_status.rpc_max_active_connections,
+            admin_rpc_max_active_connections: ops_status.admin_rpc_max_active_connections,
             admin_rpc_enabled: ops_status.admin_rpc_enabled,
             admin_rpc_private_listener: ops_status.admin_rpc_private_listener,
             public_rpc_admin_methods_enabled: ops_status.public_rpc_admin_methods_enabled,
@@ -1832,6 +1919,7 @@ impl RuntimeRpcState {
             "rpc_max_request_bytes": status["rpc_max_request_bytes"],
             "rpc_max_requests_per_minute": status["rpc_max_requests_per_minute"],
             "rpc_max_active_connections": status["rpc_max_active_connections"],
+            "admin_rpc_max_active_connections": status["admin_rpc_max_active_connections"],
             "admin_rpc_enabled": self.admin_rpc_enabled(),
             "admin_rpc_private_listener": self.admin_rpc_private_listener,
             "public_rpc_admin_methods_enabled": self.public_rpc_admin_methods_enabled(),
@@ -1998,6 +2086,12 @@ impl RuntimeRpcState {
             "nebula_rpc_max_active_connections",
             "Maximum active RPC connections admitted before listener rejection.",
             self.rpc_limits.max_active_connections,
+        );
+        push_metric(
+            &mut output,
+            "nebula_admin_rpc_max_active_connections",
+            "Maximum active private admin RPC connections admitted before listener rejection.",
+            self.rpc_limits.admin_max_active_connections,
         );
         push_metric(
             &mut output,
@@ -2236,10 +2330,14 @@ impl RuntimeRpcLimits {
         if options.max_active_connections == 0 {
             return Err("max_active_connections must be greater than zero".to_string());
         }
+        if options.admin_max_active_connections == 0 {
+            return Err("admin_max_active_connections must be greater than zero".to_string());
+        }
         Ok(Self {
             max_request_bytes: options.max_request_bytes,
             max_requests_per_minute: options.max_requests_per_minute,
             max_active_connections: options.max_active_connections,
+            admin_max_active_connections: options.admin_max_active_connections,
         })
     }
 }
@@ -3333,6 +3431,9 @@ pub fn serve_runtime_rpc_with_options(
     let admin_token =
         normalize_admin_token(options.admin_token.clone()).map_err(std::io::Error::other)?;
     let admin_rpc_bind_addr = options.admin_rpc_bind_addr.clone();
+    if let Some(admin_bind_addr) = admin_rpc_bind_addr.as_deref() {
+        validate_admin_rpc_bind_addr(admin_bind_addr).map_err(std::io::Error::other)?;
+    }
     let sync_peers = RuntimeSyncPeerSet::from_options(&options).map_err(std::io::Error::other)?;
     let auto_produce_blocks = options.auto_produce_blocks;
     let storage = options.data_dir.as_ref().map(RuntimeStorage::from_data_dir);
@@ -3359,12 +3460,12 @@ pub fn serve_runtime_rpc_with_options(
         runtime: Arc::new(Mutex::new(runtime)),
         storage,
         rpc_limits,
-        active_connections: Arc::new(AtomicUsize::new(0)),
+        connection_counters: RuntimeRpcConnectionCounters::default(),
         sync_peers,
         sync_telemetry: Arc::new(Mutex::new(BTreeMap::new())),
         admin_token,
         admin_rpc_private_listener: admin_rpc_bind_addr.is_some(),
-        rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
+        rate_limits: RuntimeRpcRateLimitBuckets::default(),
     };
     let produce_blocks = state
         .runtime
@@ -3413,7 +3514,7 @@ fn serve_runtime_rpc_listener(
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                let connection_guard = match state.try_acquire_connection() {
+                let connection_guard = match state.try_acquire_connection(access) {
                     Ok(connection_guard) => connection_guard,
                     Err(error) => {
                         let _ = write_json_response(
@@ -3421,7 +3522,8 @@ fn serve_runtime_rpc_listener(
                             503,
                             &json!({
                                 "error": error,
-                                "max_active_connections": state.rpc_limits.max_active_connections,
+                                "listener": access.label(),
+                                "max_active_connections": state.rpc_limits.max_active_connections_for(access),
                             }),
                         );
                         continue;
@@ -3437,6 +3539,29 @@ fn serve_runtime_rpc_listener(
         }
     }
     Ok(())
+}
+
+fn validate_admin_rpc_bind_addr(bind_addr: &str) -> Result<(), String> {
+    let socket_addr = bind_addr.parse::<SocketAddr>().map_err(|error| {
+        format!("admin_rpc_bind_addr must be a numeric private socket address: {error}")
+    })?;
+    if !private_admin_bind_ip(socket_addr.ip()) {
+        return Err(format!(
+            "admin_rpc_bind_addr {bind_addr} must bind to a loopback or private address"
+        ));
+    }
+    Ok(())
+}
+
+fn private_admin_bind_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
+        IpAddr::V6(ip) => ip.is_loopback() || ipv6_is_unique_local(ip),
+    }
+}
+
+fn ipv6_is_unique_local(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xfe00) == 0xfc00
 }
 
 fn load_runtime_for_node(
@@ -3852,8 +3977,15 @@ fn handle_http_connection(
         .peer_addr()
         .map(|address| address.ip().to_string())
         .unwrap_or_else(|_| "unknown-peer".to_string());
-    if let Err(error) = state.check_request_allowed(&client_id) {
-        write_json_response(&mut stream, 429, &json!({"error": error}))?;
+    if let Err(error) = state.check_request_allowed(access, &client_id) {
+        write_json_response(
+            &mut stream,
+            429,
+            &json!({
+                "error": error,
+                "listener": access.label(),
+            }),
+        )?;
         return Ok(());
     }
 
@@ -3887,6 +4019,15 @@ fn handle_http_connection(
             }
             Err(error) => return Err(error),
         }
+    }
+
+    if !request_complete(&buffer) {
+        write_json_response(
+            &mut stream,
+            400,
+            &json!({"error": "incomplete HTTP request body"}),
+        )?;
+        return Ok(());
     }
 
     let request = String::from_utf8_lossy(&buffer);
@@ -5742,6 +5883,7 @@ fn ops_status_root(report: &RuntimeOpsStatus) -> String {
         "rpc_max_request_bytes": report.rpc_max_request_bytes,
         "rpc_max_requests_per_minute": report.rpc_max_requests_per_minute,
         "rpc_max_active_connections": report.rpc_max_active_connections,
+        "admin_rpc_max_active_connections": report.admin_rpc_max_active_connections,
         "admin_rpc_enabled": report.admin_rpc_enabled,
         "admin_rpc_private_listener": report.admin_rpc_private_listener,
         "public_rpc_admin_methods_enabled": report.public_rpc_admin_methods_enabled,
@@ -5838,6 +5980,7 @@ fn backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
         "rpc_max_request_bytes": manifest.rpc_max_request_bytes,
         "rpc_max_requests_per_minute": manifest.rpc_max_requests_per_minute,
         "rpc_max_active_connections": manifest.rpc_max_active_connections,
+        "admin_rpc_max_active_connections": manifest.admin_rpc_max_active_connections,
         "admin_rpc_enabled": manifest.admin_rpc_enabled,
         "admin_rpc_private_listener": manifest.admin_rpc_private_listener,
         "public_rpc_admin_methods_enabled": manifest.public_rpc_admin_methods_enabled,
@@ -6125,13 +6268,14 @@ mod tests {
                 max_request_bytes,
                 max_requests_per_minute,
                 max_active_connections: DEFAULT_MAX_ACTIVE_CONNECTIONS,
+                admin_max_active_connections: DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS,
             },
-            active_connections: Arc::new(AtomicUsize::new(0)),
+            connection_counters: RuntimeRpcConnectionCounters::default(),
             sync_peers: RuntimeSyncPeerSet::default(),
             sync_telemetry: Arc::new(Mutex::new(BTreeMap::new())),
             admin_token: None,
             admin_rpc_private_listener: false,
-            rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
+            rate_limits: RuntimeRpcRateLimitBuckets::default(),
         }
     }
 
@@ -6546,6 +6690,10 @@ mod tests {
             limits.max_active_connections,
             DEFAULT_MAX_ACTIVE_CONNECTIONS
         );
+        assert_eq!(
+            limits.admin_max_active_connections,
+            DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS
+        );
 
         let options = RuntimeNodeOptions {
             max_request_bytes: 0,
@@ -6571,9 +6719,39 @@ mod tests {
             .unwrap_err()
             .contains("max_active_connections"));
 
+        let options = RuntimeNodeOptions {
+            admin_max_active_connections: 0,
+            ..RuntimeNodeOptions::default()
+        };
+        assert!(RuntimeRpcLimits::from_options(&options)
+            .unwrap_err()
+            .contains("admin_max_active_connections"));
+
         assert!(normalize_admin_token(Some(String::new()))
             .unwrap_err()
             .contains("admin_token"));
+    }
+
+    #[test]
+    fn admin_rpc_bind_addr_must_be_private_or_loopback() {
+        assert!(validate_admin_rpc_bind_addr("127.0.0.1:9947").is_ok());
+        assert!(validate_admin_rpc_bind_addr("10.1.2.3:9947").is_ok());
+        assert!(validate_admin_rpc_bind_addr("192.168.1.50:9947").is_ok());
+        assert!(validate_admin_rpc_bind_addr("[::1]:9947").is_ok());
+        assert!(validate_admin_rpc_bind_addr("[fc00::1]:9947").is_ok());
+
+        assert!(validate_admin_rpc_bind_addr("0.0.0.0:9947")
+            .unwrap_err()
+            .contains("loopback or private"));
+        assert!(validate_admin_rpc_bind_addr("[::]:9947")
+            .unwrap_err()
+            .contains("loopback or private"));
+        assert!(validate_admin_rpc_bind_addr("8.8.8.8:9947")
+            .unwrap_err()
+            .contains("loopback or private"));
+        assert!(validate_admin_rpc_bind_addr("localhost:9947")
+            .unwrap_err()
+            .contains("numeric private socket address"));
     }
 
     #[test]
@@ -6649,6 +6827,10 @@ mod tests {
             status["rpc_max_active_connections"],
             DEFAULT_MAX_ACTIVE_CONNECTIONS
         );
+        assert_eq!(
+            status["admin_rpc_max_active_connections"],
+            DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS
+        );
         assert_eq!(status["admin_rpc_enabled"], false);
         assert_eq!(
             status["max_mempool_transactions"],
@@ -6708,6 +6890,11 @@ mod tests {
             dispatch_json_rpc_method(&state, "nebula_status", json!({})).unwrap()
                 ["rpc_max_active_connections"],
             DEFAULT_MAX_ACTIVE_CONNECTIONS
+        );
+        assert_eq!(
+            dispatch_json_rpc_method(&state, "nebula_status", json!({})).unwrap()
+                ["admin_rpc_max_active_connections"],
+            DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS
         );
         assert_eq!(
             dispatch_json_rpc_method(&state, "nebula_status", json!({})).unwrap()
@@ -6999,6 +7186,10 @@ mod tests {
             ops.rpc_max_active_connections,
             DEFAULT_MAX_ACTIVE_CONNECTIONS
         );
+        assert_eq!(
+            ops.admin_rpc_max_active_connections,
+            DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS
+        );
         assert!(ops.admin_rpc_enabled);
         assert!(ops.admin_rpc_private_listener);
         assert!(!ops.public_rpc_admin_methods_enabled);
@@ -7032,6 +7223,10 @@ mod tests {
             manifest.rpc_max_active_connections,
             DEFAULT_MAX_ACTIVE_CONNECTIONS
         );
+        assert_eq!(
+            manifest.admin_rpc_max_active_connections,
+            DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS
+        );
         assert!(manifest.admin_rpc_enabled);
         assert!(manifest.admin_rpc_private_listener);
         assert!(!manifest.public_rpc_admin_methods_enabled);
@@ -7064,6 +7259,10 @@ mod tests {
             rpc_ops["rpc_max_active_connections"],
             DEFAULT_MAX_ACTIVE_CONNECTIONS
         );
+        assert_eq!(
+            rpc_ops["admin_rpc_max_active_connections"],
+            DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS
+        );
         let rpc_backup =
             dispatch_json_rpc_method(&state, "nebula_backupManifest", json!({})).unwrap();
         assert_eq!(rpc_backup["backup_root"].as_str().unwrap().len(), 64);
@@ -7078,6 +7277,10 @@ mod tests {
         assert_eq!(
             rpc_backup["rpc_max_active_connections"],
             DEFAULT_MAX_ACTIVE_CONNECTIONS
+        );
+        assert_eq!(
+            rpc_backup["admin_rpc_max_active_connections"],
+            DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS
         );
 
         let _ = fs::remove_dir_all(dir);
@@ -7135,6 +7338,10 @@ mod tests {
         assert_eq!(
             health["rpc_max_active_connections"],
             DEFAULT_MAX_ACTIVE_CONNECTIONS
+        );
+        assert_eq!(
+            health["admin_rpc_max_active_connections"],
+            DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS
         );
         assert_eq!(health["snapshot_persisted"], true);
         assert_eq!(health["storage_snapshot_matches_runtime"], true);
@@ -7373,6 +7580,9 @@ mod tests {
         assert!(metrics.contains(&format!(
             "nebula_rpc_max_active_connections {DEFAULT_MAX_ACTIVE_CONNECTIONS}"
         )));
+        assert!(metrics.contains(&format!(
+            "nebula_admin_rpc_max_active_connections {DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS}"
+        )));
         assert!(metrics.contains("nebula_sync_peer_count 0"));
         assert!(metrics.contains("nebula_sync_peer_quorum 1"));
         assert!(metrics.contains("nebula_sync_quorum_met 0"));
@@ -7406,12 +7616,19 @@ mod tests {
         let runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
         let state = test_rpc_state_with_limits(runtime, DEFAULT_MAX_REQUEST_BYTES, 1);
 
-        state.check_request_allowed("127.0.0.1").unwrap();
+        state
+            .check_request_allowed(RuntimeRpcAccess::Public, "127.0.0.1")
+            .unwrap();
         assert!(state
-            .check_request_allowed("127.0.0.1")
+            .check_request_allowed(RuntimeRpcAccess::Public, "127.0.0.1")
             .unwrap_err()
-            .contains("rate limit exceeded"));
-        state.check_request_allowed("127.0.0.2").unwrap();
+            .contains("public rate limit exceeded"));
+        state
+            .check_request_allowed(RuntimeRpcAccess::Public, "127.0.0.2")
+            .unwrap();
+        state
+            .check_request_allowed(RuntimeRpcAccess::Admin, "127.0.0.1")
+            .unwrap();
     }
 
     #[test]

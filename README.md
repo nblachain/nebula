@@ -57,8 +57,8 @@ The target architecture is:
   sub-second blocks after launch package verification, while followers persist
   local state and continuously sync Ed25519-signed, verified snapshots from a
   sequencer/replica peer set with failover, with public RPC nodes enforcing
-  bounded mempool admission, request-size limits, per-client rate limits, and
-  active connection caps
+  bounded mempool admission, request-size limits, per-listener rate limits,
+  public active-connection caps, and separate private-admin connection caps
 - public status and public probe surfaces that are bound into deployment
   evidence before operators can label the testnet public
 - bootstrap nodes, operators, and observers tied to one deployment witness root
@@ -157,7 +157,11 @@ evidence is absent or stale.
     with `--bootstrap-rpc`, and continuously sync newer verified snapshots from
     a repeatable `--sync-rpc` peer set. Configure public RPC abuse-resistance with
     `--max-mempool-transactions`, `--max-request-bytes`,
-    `--max-requests-per-minute`, and `--max-active-connections`. Mempool admission is stateful: public nodes
+    `--max-requests-per-minute`, `--max-active-connections`, and
+    `--admin-max-active-connections`. Request-rate buckets and active-connection
+    caps are listener-scoped so public traffic cannot consume the private admin
+    control-plane budget. `--admin-rpc-bind` must be a numeric loopback or
+    private address. Mempool admission is stateful: public nodes
     reject missing senders, duplicate pending account nonces, nonce mismatches,
     and insufficient `NBLA`/`nXMR` balances before consuming bounded capacity.
     Launch-bound public endpoints must set `--disable-nbla-faucet`; otherwise
@@ -295,13 +299,15 @@ targets `250 ms` blocks by default, enforces a public-testnet block target below
 one second, exposes health/status JSON and scrapeable metrics, accepts transfer transactions, and
 accounts for `NBLA` gas, `nXMR` gas, nXMR-funded NBLA buybacks, and validator
 rewards. Public RPC nodes enforce stateful signed-spend admission, a
-bounded mempool, maximum request body size, per-client request rate limit, and
-active connection cap;
+bounded mempool, maximum request body size, per-listener request rate limit,
+public active connection cap, and separate private-admin connection cap;
 tune rehearsal limits with
 `--max-mempool-transactions`, `--max-request-bytes`,
-`--max-requests-per-minute`, and `--max-active-connections`. Admission rejects missing senders, duplicate
+`--max-requests-per-minute`, `--max-active-connections`, and
+`--admin-max-active-connections`. Admission rejects missing senders, duplicate
 pending account nonces, nonce mismatches, and insufficient `NBLA`/`nXMR`
-balances before consuming local mempool capacity.
+balances before consuming local mempool capacity. HTTP requests whose declared
+`Content-Length` body is incomplete are rejected before JSON-RPC dispatch.
 
 Operator-only JSON-RPC methods require a node started with
 `--admin-rpc-bind <private-addr>` plus `--admin-token <operator-token>` and
@@ -310,13 +316,15 @@ request params containing `"admin_token": "<operator-token>"`. This protects
 `nebula_observeBridgeDeposit`, `nebula_finalizeWithdrawal`,
 `nebula_rotateSequencerKey`, `nebula_reportEquivocation`, and
 `nebula_produceBlock` from the public RPC surface. The public listener rejects
-operator-only methods even when a valid token is supplied. Public read/query
-and user flow methods remain callable without that token.
+operator-only methods even when a valid token is supplied. The admin bind
+address must be numeric loopback or private; `0.0.0.0`, `::`, public IPs, and
+hostnames are rejected before the listener starts. Public read/query and user
+flow methods remain callable without that token.
 
 Run a local persistent sequencer:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --admin-rpc-bind 127.0.0.1:9947 --block-ms 250 --validator-id validator-a --sequencer-public-key <sequencer-public-key-hex> --sequencer-secret-key <sequencer-secret-key-hex> --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --admin-rpc-bind 127.0.0.1:9947 --block-ms 250 --validator-id validator-a --sequencer-public-key <sequencer-public-key-hex> --sequencer-secret-key <sequencer-secret-key-hex> --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600 --max-active-connections 512 --admin-max-active-connections 32
 ```
 
 The default dev sequencer key is only for throwaway local rehearsals. Public
@@ -430,7 +438,7 @@ snapshot as bootstrap evidence.
 A follower can import once from an ahead peer before it starts serving RPC:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9946/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9946/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600 --max-active-connections 512 --admin-max-active-connections 32
 ```
 
 `--bootstrap-rpc` performs that one-time startup import. To keep following a
@@ -443,7 +451,7 @@ and persists newer snapshots from the highest ahead chain-state group whose
 snapshots extend local state:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600 --max-active-connections 512 --admin-max-active-connections 32
 ```
 
 This gives public replicas a Base-style failover shape: each follower can sync

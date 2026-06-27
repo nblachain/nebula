@@ -168,10 +168,157 @@ fn public_rpc_rejects_connections_above_active_connection_cap_before_request() {
         .split_once("\r\n\r\n")
         .expect("rejection response has body");
     let body = serde_json::from_str::<Value>(body.trim()).expect("rejection body is JSON");
+    assert_eq!(body["listener"], "public");
     assert_eq!(body["max_active_connections"], 1);
 
     drop(held);
     wait_for_rpc(&rpc_addr);
+}
+
+#[test]
+fn public_rpc_connection_cap_does_not_starve_private_admin_listener() {
+    let mut config = RuntimeConfig::public_testnet_default();
+    config.block_target_ms = 999;
+    let (public_addr, admin_addr) = start_rpc_server_with_config_and_admin(
+        config,
+        RuntimeNodeOptions {
+            admin_token: Some(ADMIN_TOKEN.to_string()),
+            max_active_connections: 1,
+            max_requests_per_minute: 10_000,
+            ..RuntimeNodeOptions::default()
+        },
+    );
+
+    let held_public = TcpStream::connect(&public_addr).expect("held public connection opens");
+    held_public
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("set held public read timeout");
+    thread::sleep(Duration::from_millis(100));
+
+    let mut rejected_public =
+        TcpStream::connect(&public_addr).expect("second public connection opens");
+    rejected_public
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("set rejected public read timeout");
+    let mut response = String::new();
+    rejected_public
+        .read_to_string(&mut response)
+        .expect("read public rejection response");
+    assert!(
+        response.starts_with("HTTP/1.1 503"),
+        "expected public 503 active connection rejection, got {response:?}"
+    );
+    let (_, body) = response
+        .split_once("\r\n\r\n")
+        .expect("public rejection response has body");
+    let body = serde_json::from_str::<Value>(body.trim()).expect("public rejection body is JSON");
+    assert_eq!(body["listener"], "public");
+    assert_eq!(body["max_active_connections"], 1);
+
+    let admin_block = rpc_call(
+        &admin_addr,
+        "nebula_produceBlock",
+        json!({ "admin_token": ADMIN_TOKEN }),
+    );
+    assert!(
+        rpc_result(&admin_block)["height"]
+            .as_u64()
+            .expect("admin block height is numeric")
+            > 0
+    );
+
+    drop(held_public);
+    wait_for_rpc(&public_addr);
+}
+
+#[test]
+fn public_rpc_rate_limit_does_not_starve_private_admin_listener() {
+    let mut config = RuntimeConfig::public_testnet_default();
+    config.block_target_ms = 999;
+    let (public_addr, admin_addr) = start_rpc_server_with_config_and_admin(
+        config,
+        RuntimeNodeOptions {
+            admin_token: Some(ADMIN_TOKEN.to_string()),
+            max_requests_per_minute: 10,
+            ..RuntimeNodeOptions::default()
+        },
+    );
+
+    let mut public_rate_limited = false;
+    for _ in 0..12 {
+        let (headers, body) =
+            http_response(&public_addr, "GET", "/status", None).expect("public response");
+        let status_line = headers.lines().next().unwrap_or_default();
+        if status_line.contains(" 429 ") {
+            let body = serde_json::from_str::<Value>(body.trim()).expect("429 body is JSON");
+            if body["listener"] == "public" {
+                public_rate_limited = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        public_rate_limited,
+        "public listener should hit its rate limit"
+    );
+
+    let admin_block = rpc_call(
+        &admin_addr,
+        "nebula_produceBlock",
+        json!({ "admin_token": ADMIN_TOKEN }),
+    );
+    assert!(
+        rpc_result(&admin_block)["height"]
+            .as_u64()
+            .expect("admin block height is numeric")
+            > 0
+    );
+}
+
+#[test]
+fn public_rpc_rejects_incomplete_declared_body_without_dispatching() {
+    let mut config = RuntimeConfig::public_testnet_default();
+    config.block_target_ms = 999;
+    let rpc_addr = start_rpc_server_with_config(
+        config,
+        RuntimeNodeOptions {
+            max_requests_per_minute: 10_000,
+            ..RuntimeNodeOptions::default()
+        },
+    );
+    let account = account_id(0x66);
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": "short-body-faucet",
+        "method": "nebula_faucet",
+        "params": { "account": account },
+    })
+    .to_string();
+
+    let mut stream = TcpStream::connect(&rpc_addr).expect("incomplete request connects");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("set incomplete request read timeout");
+    write!(
+        stream,
+        "POST /rpc HTTP/1.1\r\nHost: {rpc_addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len() + 100,
+        body
+    )
+    .expect("write incomplete declared request");
+    let (headers, response_body) = read_http_response(stream).expect("read incomplete response");
+    assert!(
+        headers.lines().next().unwrap_or_default().contains(" 400 "),
+        "expected 400 for incomplete body, got {headers:?}: {response_body:?}"
+    );
+    assert!(response_body.contains("incomplete HTTP request body"));
+
+    let account_response = rpc_call(
+        &rpc_addr,
+        "nebula_getAccount",
+        json!({ "account": account }),
+    );
+    assert_eq!(rpc_result(&account_response)["state"]["nbla_nebulai"], 0);
 }
 
 #[test]
@@ -186,6 +333,7 @@ fn metrics_endpoint_exposes_public_rpc_operational_gauges() {
     assert!(body.contains("nebula_sub_second_blocks 1"));
     assert!(body.contains("nebula_rpc_max_request_bytes "));
     assert!(body.contains("nebula_rpc_max_requests_per_minute 10000"));
+    assert!(body.contains("nebula_admin_rpc_max_active_connections "));
     assert!(body.contains("nebula_sync_peer_quorum 1"));
     assert!(body.contains("nebula_sync_quorum_met 0"));
     assert!(body.contains("nebula_sync_quorum_peer_count 0"));
@@ -981,6 +1129,54 @@ fn rpc_call(rpc_addr: &str, method: &str, params: Value) -> Value {
         })),
     )
     .expect("JSON-RPC request succeeds")
+}
+
+fn http_response(
+    rpc_addr: &str,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> Result<(String, String), String> {
+    let mut stream =
+        TcpStream::connect(rpc_addr).map_err(|error| format!("connect {rpc_addr}: {error}"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| format!("set read timeout: {error}"))?;
+
+    let body = body.map(|value| value.to_string()).unwrap_or_default();
+    write!(
+        stream,
+        "{method} {path} HTTP/1.1\r\nHost: {rpc_addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+    .map_err(|error| format!("write request: {error}"))?;
+
+    read_http_response(stream)
+}
+
+fn read_http_response(mut stream: TcpStream) -> Result<(String, String), String> {
+    let mut response_bytes = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => response_bytes.extend_from_slice(&chunk[..read]),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ConnectionReset
+                    && !response_bytes.is_empty() =>
+            {
+                break;
+            }
+            Err(error) => return Err(format!("read response: {error}")),
+        }
+    }
+    let response =
+        String::from_utf8(response_bytes).map_err(|error| format!("response UTF-8: {error}"))?;
+    let Some((head, body)) = response.split_once("\r\n\r\n") else {
+        return Err(format!("malformed HTTP response: {response}"));
+    };
+    Ok((head.to_string(), body.to_string()))
 }
 
 fn http_json(

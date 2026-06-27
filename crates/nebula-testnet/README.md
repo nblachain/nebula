@@ -101,9 +101,14 @@ The public launch sequence for this crate is:
    configured sync peers, positive import evidence, and sync quorum evidence so
    operators can confirm replica failover coverage.
    Public RPC nodes enforce bounded mempool admission, request-size limits,
-   per-client rate limits, and active connection caps; tune them with
+   per-listener rate limits, public active connection caps, and separate
+   private-admin connection caps; tune them with
    `--max-mempool-transactions`, `--max-request-bytes`,
-   `--max-requests-per-minute`, and `--max-active-connections`. Admission rejects
+   `--max-requests-per-minute`, `--max-active-connections`, and
+   `--admin-max-active-connections`. Request-rate buckets and active-connection
+   caps are listener-scoped so public traffic cannot consume the private admin
+   control-plane budget. `--admin-rpc-bind` must be a numeric loopback or
+   private address. Admission rejects
    missing senders, duplicate pending account nonces, nonce mismatches, and
    insufficient `NBLA`/`nXMR` balances before consuming bounded capacity.
    Launch-bound public endpoints must set `--disable-nbla-faucet`; otherwise
@@ -176,9 +181,9 @@ Run a local Base-style public-testnet rehearsal with one sequencer and
 persisted followers:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --admin-rpc-bind 127.0.0.1:9947 --block-ms 250 --validator-id validator-a --sequencer-public-key <sequencer-public-key-hex> --sequencer-secret-key <sequencer-secret-key-hex> --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9946/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --admin-rpc-bind 127.0.0.1:9947 --block-ms 250 --validator-id validator-a --sequencer-public-key <sequencer-public-key-hex> --sequencer-secret-key <sequencer-secret-key-hex> --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600 --max-active-connections 512 --admin-max-active-connections 32
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9946/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600 --max-active-connections 512 --admin-max-active-connections 32
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600 --max-active-connections 512 --admin-max-active-connections 32
 ```
 
 The sequencer produces sub-second blocks. Followers do not produce blocks; they
@@ -216,19 +221,24 @@ Launch-bound public candidates must also disable the public NBLA faucet with
 `--disable-nbla-faucet`; `/ops` reports `public-nbla-faucet-enabled` until
 `faucet_nbla_nebulai` is zero.
 
-Public RPC nodes enforce a bounded local mempool, maximum request body size, and
-per-client request rate limit before dispatching JSON-RPC work. Use
-`--max-mempool-transactions <count>`, `--max-request-bytes <bytes>`, and
-`--max-requests-per-minute <count>` to tune rehearsals or public endpoint
+Public RPC nodes enforce a bounded local mempool, maximum request body size,
+per-listener request rate limit, public active connection cap, and separate
+private-admin connection cap before dispatching JSON-RPC work. Use
+`--max-mempool-transactions <count>`, `--max-request-bytes <bytes>`,
+`--max-requests-per-minute <count>`, `--max-active-connections <count>`, and
+`--admin-max-active-connections <count>` to tune rehearsals or public endpoint
 hardening. `/health`, `/status`, `/ops`, `/backup`, and `nebula_status` expose
-the mempool cap, remaining capacity, full/admission rejection counts, and admin
-RPC state. Signed spend admission rejects missing senders, duplicate pending
+the mempool cap, remaining capacity, full/admission rejection counts, RPC limit
+policy, and admin RPC state. Signed spend admission rejects missing senders, duplicate pending
 account nonces, nonce mismatches, and insufficient `NBLA`/`nXMR` balances before
-consuming local mempool capacity.
+consuming local mempool capacity. HTTP requests whose declared `Content-Length`
+body is incomplete are rejected before JSON-RPC dispatch.
 
 Operator-only JSON-RPC methods require a node started with
 `--admin-rpc-bind <private-addr>` plus `--admin-token <operator-token>` and
-request params containing `"admin_token": "<operator-token>"`. This protects
+request params containing `"admin_token": "<operator-token>"`. The admin bind
+address must be numeric loopback or private; `0.0.0.0`, `::`, public IPs, and
+hostnames are rejected before the listener starts. This protects
 `nebula_importSnapshot`,
 `nebula_observeBridgeDeposit`, `nebula_finalizeWithdrawal`,
 `nebula_rotateSequencerKey`, `nebula_reportEquivocation`, and
@@ -356,8 +366,8 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo fmt --manifest-path crates/nebula-testnet/Cargo.toml -- --check
 cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
 cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --admin-rpc-bind 127.0.0.1:9947 --block-ms 250 --validator-id validator-a --sequencer-public-key <sequencer-public-key-hex> --sequencer-secret-key <sequencer-secret-key-hex> --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --admin-rpc-bind 127.0.0.1:9947 --block-ms 250 --validator-id validator-a --sequencer-public-key <sequencer-public-key-hex> --sequencer-secret-key <sequencer-secret-key-hex> --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600 --max-active-connections 512 --admin-max-active-connections 32
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600 --max-active-connections 512 --admin-max-active-connections 32
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > /tmp/nebula-public-status.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-status /tmp/nebula-public-status.json --json
