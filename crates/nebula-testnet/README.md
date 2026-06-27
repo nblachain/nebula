@@ -32,8 +32,9 @@ The readiness report keeps local testnet acceptance separate from public launch
 approval. The local testnet can be ready while public launch remains blocked by
 the required deployment attestation.
 
-Public status and probe verifiers let operators prove the exact public surface
-before wrapping it in deployment evidence.
+Public status and probe verifiers let operators prove the exact public surface,
+including the expected public status endpoint URL, before wrapping it in
+deployment evidence.
 
 Deployment evidence binds bootstrap nodes, operators, and observers to one
 shared witness root for the launch bundle, public status, HTTPS endpoint/TLS

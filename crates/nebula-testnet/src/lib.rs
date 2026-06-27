@@ -707,6 +707,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "public_launch_ready": false,
                 "launch_bundle_root_required": true,
                 "endpoint_url_required": true,
+                "endpoint_url_matches_public_surface": true,
                 "endpoint_authority_required": true,
                 "redacted_public_status": true,
             })),
@@ -935,7 +936,12 @@ pub fn verify_public_status_manifest_json(
     let mut errors = Vec::new();
     let expected = sample_public_surface();
 
-    verify_public_status_manifest(&mut errors, &manifest, &expected.launch_bundle_root);
+    verify_public_status_manifest(
+        &mut errors,
+        &manifest,
+        &expected.endpoint_url,
+        &expected.launch_bundle_root,
+    );
 
     if !errors.is_empty() {
         return Err(AttestationError::Invalid(errors));
@@ -1359,6 +1365,7 @@ pub fn verify_launch_package_jsons(
     verify_public_status_manifest(
         &mut errors,
         &public_status_manifest,
+        &deployment_attestation.public_endpoint.url,
         &deployment_attestation.launch_bundle.root,
     );
     verify_public_probe(
@@ -1507,6 +1514,7 @@ pub fn verify_deployment_attestation_json(
     verify_public_status_manifest(
         &mut errors,
         &attestation.public_status_manifest,
+        &attestation.public_endpoint.url,
         &attestation.launch_bundle.root,
     );
     verify_public_endpoint(
@@ -1802,6 +1810,7 @@ fn verify_launch_bundle(
 fn verify_public_status_manifest(
     errors: &mut Vec<String>,
     public_status_manifest: &PublicStatusManifest,
+    endpoint_url: &str,
     launch_bundle_root: &str,
 ) {
     require_eq(
@@ -1827,6 +1836,12 @@ fn verify_public_status_manifest(
         "public_status_manifest.launch_bundle_root",
         &public_status_manifest.launch_bundle_root,
         launch_bundle_root,
+    );
+    require_eq(
+        errors,
+        "public_status_manifest.endpoint_url",
+        &public_status_manifest.endpoint_url,
+        endpoint_url,
     );
     require_https_endpoint(
         errors,
@@ -3451,6 +3466,28 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error
                         == "public_status_manifest.endpoint_url must include a numeric port when a port is present"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn public_status_rejects_mismatched_endpoint_url() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_public_status_manifest_json_pretty()).unwrap();
+        value["endpoint_url"] = json!("https://other.testnet.nebula.example/status");
+        value["root"] = json!(public_status_manifest_root(
+            &serde_json::from_value::<PublicStatusManifest>(value.clone()).unwrap()
+        ));
+
+        let error = verify_public_status_manifest_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "public_status_manifest.endpoint_url expected https://testnet.nebula.example/status but got https://other.testnet.nebula.example/status"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

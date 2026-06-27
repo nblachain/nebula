@@ -73,6 +73,7 @@ The public launch suite covers:
 - public endpoint and TLS pin evidence
 - HTTPS-only public status/probe endpoints with non-empty hosts, no userinfo,
   and no query or fragment
+- public status endpoint binding to the expected public surface
 - standalone public status/probe surface exact-shape validation
 - final package binding for the public status/probe surface
 - shared deployment witness root binding for bootstrap nodes, operators, and
@@ -175,6 +176,7 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - public status/probe endpoints that do not use `https://`
 - public status/probe endpoints that do not include a host, include userinfo,
   include query/fragment components, or include a nonnumeric/zero port
+- public status endpoint URLs that do not match the expected public surface
 - bootstrap endpoints that include a path, omit a host, include userinfo, or
   include query/fragment components or a nonnumeric/zero port
 - bootstrap endpoint hosts that reuse the public endpoint host
