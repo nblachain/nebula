@@ -650,6 +650,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "deployment_attestation_verified": true,
                 "deployment_attestation_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
                 "deployment_attestation_max_ttl_ms": PUBLIC_ATTESTATION_MAX_TTL_MS,
+                "deployment_attestation_max_validity_window_ms": PUBLIC_ATTESTATION_MAX_TTL_MS,
                 "deployment_attestation_expires_after_generated": true,
                 "launch_bundle_id": PUBLIC_TESTNET_BUNDLE_ID,
                 "package_artifact_lock_roots_disjoint": true,
@@ -1534,6 +1535,15 @@ pub fn verify_deployment_attestation_json(
     }
     if attestation.expires_at_unix_ms <= attestation.generated_at_unix_ms {
         errors.push("expires_at_unix_ms must be after generated_at_unix_ms".to_string());
+    }
+    if attestation.expires_at_unix_ms
+        > attestation
+            .generated_at_unix_ms
+            .saturating_add(PUBLIC_ATTESTATION_MAX_TTL_MS)
+    {
+        errors.push(
+            "expires_at_unix_ms must be within seven days of generated_at_unix_ms".to_string(),
+        );
     }
 
     verify_package_identity(&mut errors, &attestation.package_identity);
@@ -3957,6 +3967,26 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "expires_at_unix_ms is more than seven days in the future"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_excessive_validity_window() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        let generated_at = unix_ms().saturating_sub(3_600_000);
+        value["generated_at_unix_ms"] = json!(generated_at);
+        value["expires_at_unix_ms"] = json!(generated_at + PUBLIC_ATTESTATION_MAX_TTL_MS + 1);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "expires_at_unix_ms must be within seven days of generated_at_unix_ms"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

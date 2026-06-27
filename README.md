@@ -206,7 +206,7 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - observer quorums that do not cover at least two regions
 - duplicate or cross-reused TLS certificate and public-key pins
 - deployment attestations older than `24` hours, expiry windows that do not end
-  after generation, expiry windows longer than `7` days, preflight/runbook
+  after generation, expiry windows longer than `7` days from generation, preflight/runbook
   receipts older than `24` hours, TLS pins with less than `7` days remaining,
   and rollback drills older than `7` days
 - runbook receipt evidence roots that reuse preflight receipt evidence
