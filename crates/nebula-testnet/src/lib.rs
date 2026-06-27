@@ -660,6 +660,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "operator_observer_id_domains_disjoint": true,
                 "hex_observer_keys_required": true,
                 "operator_observer_key_domains_disjoint": true,
+                "witness_identity_whitespace_free": true,
                 "operator_region_spread_required": true,
                 "observer_region_spread_required": true,
                 "operator_signature_roots_verified": true,
@@ -2191,6 +2192,11 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("operators[{index}].operator_id"),
             &operator.operator_id,
         );
+        require_no_whitespace(
+            errors,
+            &format!("operators[{index}].operator_id"),
+            &operator.operator_id,
+        );
         require_non_empty(
             errors,
             &format!("operators[{index}].region"),
@@ -2263,7 +2269,17 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("bootstrap_nodes[{index}].node_id"),
             &node.node_id,
         );
+        require_no_whitespace(
+            errors,
+            &format!("bootstrap_nodes[{index}].node_id"),
+            &node.node_id,
+        );
         require_non_empty(
+            errors,
+            &format!("bootstrap_nodes[{index}].operator_id"),
+            &node.operator_id,
+        );
+        require_no_whitespace(
             errors,
             &format!("bootstrap_nodes[{index}].operator_id"),
             &node.operator_id,
@@ -2337,6 +2353,11 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
     let mut observer_regions = BTreeSet::new();
     for (index, observer) in attestation.observers.iter().enumerate() {
         require_non_empty(
+            errors,
+            &format!("observers[{index}].observer_id"),
+            &observer.observer_id,
+        );
+        require_no_whitespace(
             errors,
             &format!("observers[{index}].observer_id"),
             &observer.observer_id,
@@ -3023,6 +3044,12 @@ fn endpoint_host<'a>(endpoint: &'a str, scheme: &str) -> Option<&'a str> {
 fn require_non_empty(errors: &mut Vec<String>, label: &str, value: &str) {
     if value.trim().is_empty() {
         errors.push(format!("{label} must not be empty"));
+    }
+}
+
+fn require_no_whitespace(errors: &mut Vec<String>, label: &str, value: &str) {
+    if value.chars().any(char::is_whitespace) {
+        errors.push(format!("{label} must not contain whitespace"));
     }
 }
 
@@ -3760,6 +3787,30 @@ mod public_launch {
                     .any(|error| error == "operators[1].operator_id must be unique"));
                 assert!(errors.iter().any(|error| {
                     error == "operators must include at least 2 unique operator_id values"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_operator_id_with_whitespace() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["operators"][0]["operator_id"] = json!("operator a");
+        value["bootstrap_nodes"][0]["operator_id"] = json!("operator a");
+        refresh_operator_signature_root(&mut value, 0);
+        refresh_bootstrap_node_root(&mut value, 0);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "operators[0].operator_id must not contain whitespace"));
+                assert!(errors.iter().any(|error| {
+                    error == "bootstrap_nodes[0].operator_id must not contain whitespace"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

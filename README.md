@@ -81,6 +81,7 @@ The public launch suite covers:
 - unique bootstrap node, operator, observer, endpoint, witness-key,
   bootstrap-region, operator-region, and observer-region validation
 - role-separated operator and observer identities
+- whitespace-free bootstrap, operator, and observer identities
 - 64-character hex and role-separated witness/validator public-key material
   validation
 - unique and role-separated TLS certificate/public-key pin validation
@@ -176,6 +177,7 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - duplicate bootstrap node IDs, bootstrap endpoints, operator IDs, operator
   keys, observer IDs, and observer keys
 - observer IDs that reuse operator IDs
+- bootstrap, operator, and observer identities containing whitespace
 - bootstrap node sets that do not cover at least two regions
 - bootstrap nodes whose region does not match the attested operator region
 - operator quorums that do not cover at least two regions
