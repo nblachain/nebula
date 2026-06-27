@@ -21,6 +21,7 @@ pub const DEFAULT_SUBSECOND_BLOCK_MS: u64 = 250;
 pub const MAX_PUBLIC_TESTNET_BLOCK_MS: u64 = 999;
 pub const DEFAULT_GAS_PRICE_NEBULAI: u128 = 1;
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: usize = 512;
+pub const DEFAULT_MAX_MEMPOOL_TRANSACTIONS: usize = 10_000;
 pub const DEFAULT_FAUCET_NBLA: u128 = 10_000 * NEBULAI_PER_NBLA;
 pub const DEFAULT_FAUCET_NXMR: u128 = 10_000 * TARGET_NXMR_BASE_UNITS_PER_NXMR;
 pub const MIN_BRIDGE_CONFIRMATIONS: u64 = 10;
@@ -29,7 +30,7 @@ pub const MIN_WITHDRAWAL_OPERATOR_QUORUM: usize = 2;
 pub const BRIDGE_CUSTODY_POLICY_ID: &str = "nebula-monero-bridge-custody-testnet-v1";
 pub const VALIDATOR_REWARD_ACCOUNT_PREFIX: &str = "validator:";
 pub const RUNTIME_SNAPSHOT_FILE: &str = "nebula-runtime-snapshot.json";
-pub const RUNTIME_SNAPSHOT_VERSION: u32 = 4;
+pub const RUNTIME_SNAPSHOT_VERSION: u32 = 5;
 pub const DEFAULT_PEER_SYNC_MS: u64 = 100;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
 pub const DEFAULT_MAX_REQUESTS_PER_MINUTE: u32 = 600;
@@ -71,6 +72,7 @@ pub struct RuntimeConfig {
     pub block_target_ms: u64,
     pub gas_price_nebulai: u128,
     pub max_block_transactions: usize,
+    pub max_mempool_transactions: usize,
     pub faucet_nbla_nebulai: u128,
     pub faucet_nxmr_units: u128,
     pub produce_blocks: bool,
@@ -86,6 +88,7 @@ impl RuntimeConfig {
             block_target_ms: DEFAULT_SUBSECOND_BLOCK_MS,
             gas_price_nebulai: DEFAULT_GAS_PRICE_NEBULAI,
             max_block_transactions: DEFAULT_MAX_BLOCK_TRANSACTIONS,
+            max_mempool_transactions: DEFAULT_MAX_MEMPOOL_TRANSACTIONS,
             faucet_nbla_nebulai: DEFAULT_FAUCET_NBLA,
             faucet_nxmr_units: DEFAULT_FAUCET_NXMR,
             produce_blocks: true,
@@ -113,6 +116,9 @@ impl RuntimeConfig {
         }
         if self.max_block_transactions == 0 {
             return Err("max_block_transactions must be greater than zero".to_string());
+        }
+        if self.max_mempool_transactions == 0 {
+            return Err("max_mempool_transactions must be greater than zero".to_string());
         }
         validate_fixed_hex(
             &self.sequencer_public_key_hex,
@@ -275,6 +281,7 @@ pub struct RuntimeSnapshot {
     pub total_nxmr_fees_units: u128,
     pub buyback_pool_nebulai: u128,
     pub validator_reward_nebulai: u128,
+    pub mempool_full_rejection_count: u64,
     pub sequencer_key_rotations: Vec<RuntimeSequencerKeyRotation>,
     pub accountability_reports: Vec<RuntimeAccountabilityReport>,
     pub root: String,
@@ -330,6 +337,9 @@ pub struct RuntimeStatus {
     pub accountability_root: String,
     pub sequencer_accountability_clean: bool,
     pub mempool_size: usize,
+    pub max_mempool_transactions: usize,
+    pub mempool_capacity_remaining: usize,
+    pub mempool_full_rejection_count: u64,
     pub account_count: usize,
     pub bridge_deposit_count: usize,
     pub withdrawal_request_count: usize,
@@ -382,6 +392,10 @@ pub struct RuntimeOpsStatus {
     pub sync_peer_count: usize,
     pub rpc_max_request_bytes: usize,
     pub rpc_max_requests_per_minute: u32,
+    pub max_mempool_transactions: usize,
+    pub mempool_size: usize,
+    pub mempool_capacity_remaining: usize,
+    pub mempool_full_rejection_count: u64,
     pub sequencer_public_key_hex: String,
     pub sequencer_key_rotation_count: usize,
     pub sequencer_latest_rotation_activation_height: Option<u64>,
@@ -423,6 +437,10 @@ pub struct RuntimeBackupManifest {
     pub sync_peer_count: usize,
     pub rpc_max_request_bytes: usize,
     pub rpc_max_requests_per_minute: u32,
+    pub max_mempool_transactions: usize,
+    pub mempool_size: usize,
+    pub mempool_capacity_remaining: usize,
+    pub mempool_full_rejection_count: u64,
     pub backup_root: String,
 }
 
@@ -432,6 +450,8 @@ pub struct SubmitTransactionReport {
     pub tx_id: String,
     pub status: TransactionStatus,
     pub mempool_size: usize,
+    pub max_mempool_transactions: usize,
+    pub mempool_capacity_remaining: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -489,6 +509,7 @@ pub struct NebulaRuntime {
     total_nxmr_fees_units: u128,
     buyback_pool_nebulai: u128,
     validator_reward_nebulai: u128,
+    mempool_full_rejection_count: u64,
     sequencer_key_rotations: Vec<RuntimeSequencerKeyRotation>,
     accountability_reports: Vec<RuntimeAccountabilityReport>,
 }
@@ -679,6 +700,9 @@ impl RuntimeRpcState {
         if bridge_policy().live_value_enabled {
             blocking_gaps.push("bridge-live-value-enabled".to_string());
         }
+        if status.mempool_size >= status.max_mempool_transactions {
+            blocking_gaps.push("mempool-at-capacity".to_string());
+        }
         if !status.sequencer_accountability_clean {
             blocking_gaps.push("sequencer-accountability-evidence-open".to_string());
         }
@@ -706,6 +730,10 @@ impl RuntimeRpcState {
             sync_peer_count: self.sync_peers.sync_peer_urls.len(),
             rpc_max_request_bytes: self.rpc_limits.max_request_bytes,
             rpc_max_requests_per_minute: self.rpc_limits.max_requests_per_minute,
+            max_mempool_transactions: status.max_mempool_transactions,
+            mempool_size: status.mempool_size,
+            mempool_capacity_remaining: status.mempool_capacity_remaining,
+            mempool_full_rejection_count: status.mempool_full_rejection_count,
             sequencer_public_key_hex: status.sequencer_public_key_hex,
             sequencer_key_rotation_count: status.sequencer_key_rotation_count,
             sequencer_latest_rotation_activation_height: status
@@ -753,6 +781,10 @@ impl RuntimeRpcState {
             sync_peer_count: ops_status.sync_peer_count,
             rpc_max_request_bytes: ops_status.rpc_max_request_bytes,
             rpc_max_requests_per_minute: ops_status.rpc_max_requests_per_minute,
+            max_mempool_transactions: ops_status.max_mempool_transactions,
+            mempool_size: ops_status.mempool_size,
+            mempool_capacity_remaining: ops_status.mempool_capacity_remaining,
+            mempool_full_rejection_count: ops_status.mempool_full_rejection_count,
             backup_root: String::new(),
         };
         manifest.backup_root = backup_manifest_root(&manifest);
@@ -883,6 +915,7 @@ impl NebulaRuntime {
             total_nxmr_fees_units: 0,
             buyback_pool_nebulai: 0,
             validator_reward_nebulai: 0,
+            mempool_full_rejection_count: 0,
             sequencer_key_rotations: Vec::new(),
             accountability_reports: Vec::new(),
         };
@@ -940,6 +973,7 @@ impl NebulaRuntime {
         }
         config.gas_price_nebulai = snapshot.config.gas_price_nebulai;
         config.max_block_transactions = snapshot.config.max_block_transactions;
+        config.max_mempool_transactions = snapshot.config.max_mempool_transactions;
         config.faucet_nbla_nebulai = snapshot.config.faucet_nbla_nebulai;
         config.faucet_nxmr_units = snapshot.config.faucet_nxmr_units;
 
@@ -955,6 +989,7 @@ impl NebulaRuntime {
             total_nxmr_fees_units: snapshot.total_nxmr_fees_units,
             buyback_pool_nebulai: snapshot.buyback_pool_nebulai,
             validator_reward_nebulai: snapshot.validator_reward_nebulai,
+            mempool_full_rejection_count: snapshot.mempool_full_rejection_count,
             sequencer_key_rotations: snapshot.sequencer_key_rotations,
             accountability_reports: snapshot.accountability_reports,
         };
@@ -984,6 +1019,7 @@ impl NebulaRuntime {
             total_nxmr_fees_units: self.total_nxmr_fees_units,
             buyback_pool_nebulai: self.buyback_pool_nebulai,
             validator_reward_nebulai: self.validator_reward_nebulai,
+            mempool_full_rejection_count: self.mempool_full_rejection_count,
             sequencer_key_rotations: self.sequencer_key_rotations.clone(),
             accountability_reports: self.accountability_reports.clone(),
             root: String::new(),
@@ -1039,6 +1075,12 @@ impl NebulaRuntime {
             accountability_root: accountability_root(&self.accountability_reports),
             sequencer_accountability_clean: self.accountability_reports.is_empty(),
             mempool_size: self.mempool.len(),
+            max_mempool_transactions: self.config.max_mempool_transactions,
+            mempool_capacity_remaining: self
+                .config
+                .max_mempool_transactions
+                .saturating_sub(self.mempool.len()),
+            mempool_full_rejection_count: self.mempool_full_rejection_count,
             account_count: self.accounts.len(),
             bridge_deposit_count: self.bridge_deposits.len(),
             withdrawal_request_count: self.withdrawals.len(),
@@ -1093,6 +1135,17 @@ impl NebulaRuntime {
         {
             return Err(format!("transaction {tx_id} already exists"));
         }
+        if self.mempool.len() >= self.config.max_mempool_transactions {
+            self.mempool_full_rejection_count = self
+                .mempool_full_rejection_count
+                .checked_add(1)
+                .ok_or_else(|| "mempool full rejection counter overflowed".to_string())?;
+            return Err(format!(
+                "mempool is full: {} pending transactions at configured max {}",
+                self.mempool.len(),
+                self.config.max_mempool_transactions
+            ));
+        }
         self.receipts.insert(
             tx_id.clone(),
             RuntimeReceipt {
@@ -1112,6 +1165,11 @@ impl NebulaRuntime {
             tx_id,
             status: TransactionStatus::Pending,
             mempool_size: self.mempool.len(),
+            max_mempool_transactions: self.config.max_mempool_transactions,
+            mempool_capacity_remaining: self
+                .config
+                .max_mempool_transactions
+                .saturating_sub(self.mempool.len()),
         })
     }
 
@@ -2059,6 +2117,10 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
                     "bootstrap_peer_urls": state.sync_peers.bootstrap_peer_urls,
                     "sync_peer_urls": state.sync_peers.sync_peer_urls,
                     "sync_peer_count": state.sync_peers.sync_peer_urls.len(),
+                    "max_mempool_transactions": status["max_mempool_transactions"],
+                    "mempool_size": status["mempool_size"],
+                    "mempool_capacity_remaining": status["mempool_capacity_remaining"],
+                    "mempool_full_rejection_count": status["mempool_full_rejection_count"],
                     "sequencer_public_key_hex": status["sequencer_public_key_hex"],
                     "sequencer_key_rotation_count": status["sequencer_key_rotation_count"],
                     "sequencer_latest_rotation_activation_height": status["sequencer_latest_rotation_activation_height"],
@@ -2444,6 +2506,13 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
     }
     if snapshot.blocks[0].height != 0 {
         return Err("snapshot genesis block must have height 0".to_string());
+    }
+    if snapshot.mempool.len() > snapshot.config.max_mempool_transactions {
+        return Err(format!(
+            "snapshot mempool size {} exceeds max_mempool_transactions {}",
+            snapshot.mempool.len(),
+            snapshot.config.max_mempool_transactions
+        ));
     }
     if snapshot.root != snapshot_root(snapshot) {
         return Err("snapshot root does not match snapshot contents".to_string());
@@ -3118,6 +3187,10 @@ fn ops_status_root(report: &RuntimeOpsStatus) -> String {
         "sync_peer_count": report.sync_peer_count,
         "rpc_max_request_bytes": report.rpc_max_request_bytes,
         "rpc_max_requests_per_minute": report.rpc_max_requests_per_minute,
+        "max_mempool_transactions": report.max_mempool_transactions,
+        "mempool_size": report.mempool_size,
+        "mempool_capacity_remaining": report.mempool_capacity_remaining,
+        "mempool_full_rejection_count": report.mempool_full_rejection_count,
         "sequencer_public_key_hex": report.sequencer_public_key_hex,
         "sequencer_key_rotation_count": report.sequencer_key_rotation_count,
         "sequencer_latest_rotation_activation_height": report.sequencer_latest_rotation_activation_height,
@@ -3160,6 +3233,10 @@ fn backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
         "sync_peer_count": manifest.sync_peer_count,
         "rpc_max_request_bytes": manifest.rpc_max_request_bytes,
         "rpc_max_requests_per_minute": manifest.rpc_max_requests_per_minute,
+        "max_mempool_transactions": manifest.max_mempool_transactions,
+        "mempool_size": manifest.mempool_size,
+        "mempool_capacity_remaining": manifest.mempool_capacity_remaining,
+        "mempool_full_rejection_count": manifest.mempool_full_rejection_count,
     }))
 }
 
@@ -3294,6 +3371,7 @@ fn snapshot_root(snapshot: &RuntimeSnapshot) -> String {
         "total_nxmr_fees_units": snapshot.total_nxmr_fees_units,
         "buyback_pool_nebulai": snapshot.buyback_pool_nebulai,
         "validator_reward_nebulai": snapshot.validator_reward_nebulai,
+        "mempool_full_rejection_count": snapshot.mempool_full_rejection_count,
         "sequencer_key_rotations": snapshot.sequencer_key_rotations,
         "accountability_reports": snapshot.accountability_reports,
     }))
@@ -3358,6 +3436,19 @@ mod tests {
             relayer_set_root: "8".repeat(64),
             observer_signature_roots: vec!["9".repeat(64), "a".repeat(64)],
             observed_at_unix_ms: 1,
+        }
+    }
+
+    fn test_nbla_transaction(nonce: u64, to: &str) -> RuntimeTransaction {
+        RuntimeTransaction {
+            from: "alice".to_string(),
+            to: to.to_string(),
+            amount_nebulai: 1,
+            gas_units: 1,
+            gas_price_nebulai: 1,
+            fee_asset: NBLA_SYMBOL.to_string(),
+            nonce,
+            memo: Some(format!("test-nbla-{nonce}")),
         }
     }
 
@@ -3448,6 +3539,15 @@ mod tests {
 
         assert_eq!(status["rpc_max_request_bytes"], 2048);
         assert_eq!(status["rpc_max_requests_per_minute"], 7);
+        assert_eq!(
+            status["max_mempool_transactions"],
+            DEFAULT_MAX_MEMPOOL_TRANSACTIONS
+        );
+        assert_eq!(
+            status["mempool_capacity_remaining"],
+            DEFAULT_MAX_MEMPOOL_TRANSACTIONS
+        );
+        assert_eq!(status["mempool_full_rejection_count"], 0);
         assert_eq!(status["sync_peer_count"], 2);
         assert_eq!(
             status["sync_peer_urls"],
@@ -3514,12 +3614,24 @@ mod tests {
             DEFAULT_MAX_REQUESTS_PER_MINUTE
         );
         assert_eq!(ops.bridge_policy_root, bridge_policy_root());
+        assert_eq!(
+            ops.max_mempool_transactions,
+            DEFAULT_MAX_MEMPOOL_TRANSACTIONS
+        );
+        assert_eq!(
+            ops.mempool_capacity_remaining,
+            DEFAULT_MAX_MEMPOOL_TRANSACTIONS
+        );
         assert_eq!(ops.ops_root.len(), 64);
 
         let manifest = state.backup_manifest().unwrap();
         assert_eq!(manifest.snapshot_root.len(), 64);
         assert!(manifest.snapshot_persisted);
         assert!(manifest.storage_snapshot_matches_runtime);
+        assert_eq!(
+            manifest.max_mempool_transactions,
+            DEFAULT_MAX_MEMPOOL_TRANSACTIONS
+        );
         assert_eq!(manifest.backup_root.len(), 64);
         let rpc_ops = dispatch_json_rpc_method(&state, "nebula_opsStatus", json!({})).unwrap();
         assert_eq!(rpc_ops["ops_root"].as_str().unwrap().len(), 64);
@@ -3532,6 +3644,30 @@ mod tests {
         assert_eq!(rpc_backup["storage_snapshot_matches_runtime"], true);
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn runtime_ops_status_fails_closed_when_mempool_is_full() {
+        let mut config = RuntimeConfig::public_testnet_default();
+        config.max_mempool_transactions = 1;
+        let mut runtime = NebulaRuntime::new(config).unwrap();
+        runtime
+            .submit_transaction(test_nbla_transaction(0, "bob"))
+            .unwrap();
+        let state = test_rpc_state_with_limits(
+            runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+
+        let ops = state.ops_status().unwrap();
+        assert!(!ops.public_ops_ready);
+        assert_eq!(ops.max_mempool_transactions, 1);
+        assert_eq!(ops.mempool_size, 1);
+        assert_eq!(ops.mempool_capacity_remaining, 0);
+        assert!(ops
+            .blocking_gaps
+            .contains(&"mempool-at-capacity".to_string()));
     }
 
     #[test]
