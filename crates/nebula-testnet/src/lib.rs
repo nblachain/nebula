@@ -637,6 +637,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "deployment_attestation_expires_after_generated": true,
                 "minimum_tls_pin_validity_ms": MIN_TLS_PIN_VALIDITY_MS,
                 "rollback_drill_max_age_ms": ROLLBACK_DRILL_MAX_AGE_MS,
+                "preflight_runbook_evidence_domains_disjoint": true,
                 "deployment_witness_root_verified": true,
                 "public_https_endpoint_required": true,
                 "public_endpoint_authority_required": true,
@@ -1512,6 +1513,11 @@ pub fn verify_deployment_attestation_json(
         &attestation.runbook_receipt,
         now,
     );
+    verify_receipt_evidence_separation(
+        &mut errors,
+        &attestation.preflight_receipt,
+        &attestation.runbook_receipt,
+    );
     verify_network_witnesses(&mut errors, &attestation);
     verify_rollback_evidence(&mut errors, &attestation.rollback_evidence, now);
 
@@ -2082,6 +2088,29 @@ fn verify_receipt(errors: &mut Vec<String>, label: &str, receipt: &Receipt, now:
         &receipt.root,
         &receipt_root(receipt),
     );
+}
+
+fn verify_receipt_evidence_separation(
+    errors: &mut Vec<String>,
+    preflight_receipt: &Receipt,
+    runbook_receipt: &Receipt,
+) {
+    let preflight_evidence_roots = preflight_receipt
+        .phases
+        .iter()
+        .flat_map(|phase| phase.steps.iter())
+        .map(|step| step.evidence_sha3_256.as_str())
+        .collect::<BTreeSet<_>>();
+
+    for (phase_index, phase) in runbook_receipt.phases.iter().enumerate() {
+        for (step_index, step) in phase.steps.iter().enumerate() {
+            if preflight_evidence_roots.contains(step.evidence_sha3_256.as_str()) {
+                errors.push(format!(
+                    "runbook_receipt.phases[{phase_index}].steps[{step_index}].evidence_sha3_256 must not reuse preflight_receipt evidence"
+                ));
+            }
+        }
+    }
 }
 
 fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAttestation) {
@@ -3344,6 +3373,29 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "preflight_receipt.completed_at_unix_ms is stale"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_runbook_reusing_preflight_evidence() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["runbook_receipt"]["phases"][0]["steps"][0]["evidence_sha3_256"] =
+            value["preflight_receipt"]["phases"][0]["steps"][0]["evidence_sha3_256"].clone();
+        value["runbook_receipt"]["root"] = json!(receipt_root(
+            &serde_json::from_value::<Receipt>(value["runbook_receipt"].clone()).unwrap()
+        ));
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "runbook_receipt.phases[0].steps[0].evidence_sha3_256 must not reuse preflight_receipt evidence"
+                }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
