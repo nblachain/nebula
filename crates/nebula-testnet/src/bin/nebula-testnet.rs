@@ -260,6 +260,7 @@ fn run_rpc_node(args: &[String], wants_json: bool) {
         sync_rpc_url: arg_value(args, "--sync-rpc").map(str::to_string),
         sync_rpc_urls: arg_values(args, "--sync-rpc"),
         sync_peer_quorum,
+        auto_produce_blocks: true,
         sequencer_secret_key_hex: arg_value(args, "--sequencer-secret-key").map(str::to_string),
         admin_token: arg_value(args, "--admin-token").map(str::to_string),
         max_request_bytes,

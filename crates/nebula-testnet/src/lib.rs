@@ -4938,8 +4938,17 @@ const RUNTIME_STATUS_DURABLE_FIELDS: &[&str] = &[
     "mempool_capacity_remaining",
     "mempool_full_rejection_count",
     "mempool_admission_rejection_count",
+    "total_nxmr_fees_units",
+    "buyback_pool_nebulai",
+    "validator_reward_nebulai",
     "faucet_nxmr_units",
     "bridge_only_nxmr",
+    "bridge_deposited_nxmr_units",
+    "account_nxmr_units",
+    "withdrawal_reserved_nxmr_units",
+    "nxmr_fee_units",
+    "nxmr_custody_required_units",
+    "nxmr_custody_surplus_units",
     "bridge_custody_reconciled",
     "nxmr_custody_deficit_units",
     "bridge_policy_root",
@@ -5497,6 +5506,27 @@ fn require_metrics_agreement(
         "nebula_mempool_capacity_remaining",
         status,
         "mempool_capacity_remaining",
+    );
+    require_metric_from_json(
+        errors,
+        metrics_text,
+        "nebula_total_nxmr_fees_units",
+        status,
+        "total_nxmr_fees_units",
+    );
+    require_metric_from_json(
+        errors,
+        metrics_text,
+        "nebula_buyback_pool_nebulai",
+        status,
+        "buyback_pool_nebulai",
+    );
+    require_metric_from_json(
+        errors,
+        metrics_text,
+        "nebula_validator_reward_nebulai",
+        status,
+        "validator_reward_nebulai",
     );
     require_metric_from_json(
         errors,

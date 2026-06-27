@@ -686,8 +686,10 @@ The active GitHub Actions workflow is Nebula-owned:
 1. Install stable Rust.
 2. Check Rust formatting.
 3. Build `nebula-testnet`.
-4. Smoke a launch-bound sequencer/follower RPC rehearsal and verify
-   runtime-surface evidence from the live follower.
+4. Smoke a launch-bound sequencer/follower RPC rehearsal that rotates the
+   sequencer key, exercises NBLA faucet credit, nXMR bridge deposit, nXMR gas
+   buyback/reward accounting, withdrawal finalization, follower sync, and
+   verified runtime-surface evidence from the live follower.
 5. Run the Nebula test suite.
 6. Assert the current readiness contract.
 7. Generate and verify public status and probe samples.
@@ -696,7 +698,8 @@ The active GitHub Actions workflow is Nebula-owned:
 10. Generate and verify a validator-set manifest sample.
 11. Build and verify a genesis manifest from the verified samples.
 12. Verify the launch package is internally coherent.
-13. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
+13. Rehearse launch-bound accountability evidence fail-closed behavior.
+14. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
 
 Legacy upstream CI for daemon, wallet, Guix, depends, Docker daemon images, and
 source archives has been removed.

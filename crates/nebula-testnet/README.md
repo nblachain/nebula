@@ -145,8 +145,12 @@ The public launch sequence for this crate is:
    public-surface, validator, genesis, fee-policy, and bundle roots.
 13. Open the public launch gate only after the signed launch package, verified
     bundle, sequencer/follower rehearsal evidence, verified snapshots, and
-    launch certificate all agree. Run the `NBLA`/`nXMR` economics trial with
-    live value disabled, and keep reporting any remaining blocking evidence
+    launch certificate all agree. The sequencer/follower rehearsal must cover
+    sequencer key rotation, NBLA faucet credit, nXMR bridge deposit, nXMR gas
+    buyback/reward accounting, withdrawal finalization, follower sync, verified
+    runtime-surface evidence from the live follower, and launch-bound
+    accountability evidence fail-closed behavior. Run the `NBLA`/`nXMR`
+    economics trial with live value disabled, and keep reporting any remaining blocking evidence
     until every deployment, operator, validator, observer, RPC, snapshot, bridge
     custody, ops/backup, key-rotation/accountability, certificate, and economics
     gap is closed.

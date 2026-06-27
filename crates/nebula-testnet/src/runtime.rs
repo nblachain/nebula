@@ -45,6 +45,7 @@ pub struct RuntimeNodeOptions {
     pub sync_rpc_url: Option<String>,
     pub sync_rpc_urls: Vec<String>,
     pub sync_peer_quorum: usize,
+    pub auto_produce_blocks: bool,
     pub sequencer_secret_key_hex: Option<String>,
     pub admin_token: Option<String>,
     pub max_request_bytes: usize,
@@ -59,6 +60,7 @@ impl Default for RuntimeNodeOptions {
             sync_rpc_url: None,
             sync_rpc_urls: Vec::new(),
             sync_peer_quorum: DEFAULT_SYNC_PEER_QUORUM,
+            auto_produce_blocks: true,
             sequencer_secret_key_hex: None,
             admin_token: None,
             max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
@@ -938,6 +940,15 @@ struct RuntimeNxmrCustodyReconciliation {
 }
 
 impl RuntimeRpcState {
+    fn commit_direct_state_mutation(&self) -> Result<(), String> {
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "runtime mutex poisoned".to_string())?;
+        runtime.try_produce_block()?;
+        Ok(())
+    }
+
     fn persist(&self) -> Result<(), String> {
         let Some(storage) = &self.storage else {
             return Ok(());
@@ -3058,6 +3069,7 @@ pub fn serve_runtime_rpc_with_options(
     let admin_token =
         normalize_admin_token(options.admin_token.clone()).map_err(std::io::Error::other)?;
     let sync_peers = RuntimeSyncPeerSet::from_options(&options).map_err(std::io::Error::other)?;
+    let auto_produce_blocks = options.auto_produce_blocks;
     let storage = options.data_dir.as_ref().map(RuntimeStorage::from_data_dir);
     let startup_bootstrap_peers = if sync_peers.bootstrap_peer_urls.is_empty() {
         sync_peers.sync_peer_urls.clone()
@@ -3092,7 +3104,7 @@ pub fn serve_runtime_rpc_with_options(
         .lock()
         .map(|runtime| runtime.config.produce_blocks)
         .unwrap_or(false);
-    if produce_blocks {
+    if produce_blocks && auto_produce_blocks {
         let producer_state = state.clone();
         thread::spawn(move || loop {
             thread::sleep(block_target);
@@ -3743,6 +3755,7 @@ fn dispatch_json_rpc_method(
                 let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
                 runtime.faucet(&account)?
             };
+            state.commit_direct_state_mutation()?;
             state.persist()?;
             Ok(json!(report))
         }
@@ -3774,6 +3787,7 @@ fn dispatch_json_rpc_method(
                 let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
                 runtime.observe_bridge_deposit(deposit)?
             };
+            state.commit_direct_state_mutation()?;
             state.persist()?;
             Ok(json!(report))
         }
@@ -3794,6 +3808,7 @@ fn dispatch_json_rpc_method(
                     &signature,
                 )?
             };
+            state.commit_direct_state_mutation()?;
             state.persist()?;
             Ok(json!(report))
         }
@@ -3817,6 +3832,7 @@ fn dispatch_json_rpc_method(
                     operator_approval_roots,
                 )?
             };
+            state.commit_direct_state_mutation()?;
             state.persist()?;
             Ok(json!(report))
         }
@@ -3835,6 +3851,7 @@ fn dispatch_json_rpc_method(
                     &approval_root,
                 )?
             };
+            state.commit_direct_state_mutation()?;
             state.persist()?;
             Ok(json!(report))
         }
@@ -6382,6 +6399,12 @@ mod tests {
         .unwrap();
         assert_eq!(rotation["rotated"], true);
         assert_eq!(rotation["sequencer_public_key_hex"], new_public_key_hex);
+        assert_eq!(rotation["rotation"]["activation_height"], 1);
+
+        let activation_block =
+            dispatch_json_rpc_method(&state, "nebula_getBlockByHeight", json!({"height": 1}))
+                .unwrap();
+        assert_eq!(activation_block["producer_public_key"], new_public_key_hex);
 
         let block = dispatch_json_rpc_method(
             &state,
@@ -6389,7 +6412,7 @@ mod tests {
             json!({"admin_token": "admin"}),
         )
         .unwrap();
-        assert_eq!(block["height"], 1);
+        assert_eq!(block["height"], 2);
         assert_eq!(block["producer_public_key"], new_public_key_hex);
 
         let receipt = dispatch_json_rpc_method(
@@ -6397,7 +6420,7 @@ mod tests {
             "nebula_reportEquivocation",
             json!({
                 "admin_token": "admin",
-                "height": 1,
+                "height": block["height"],
                 "first_block_hash": block["block_hash"].as_str().unwrap(),
                 "second_block_hash": "f".repeat(64),
                 "reporter_id": "observer-a",

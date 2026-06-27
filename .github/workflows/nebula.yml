@@ -30,7 +30,7 @@ jobs:
       - name: Build Nebula testnet binary
         run: cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
 
-      - name: Smoke launch-bound follower runtime evidence
+      - name: Smoke launch-bound lifecycle and follower evidence
         run: >
           cargo test --manifest-path crates/nebula-testnet/Cargo.toml
           --test public_admin_rpc_separation
