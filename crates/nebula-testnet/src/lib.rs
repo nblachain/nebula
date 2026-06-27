@@ -610,6 +610,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "fee_policy_root_required": true,
                 "signed_admission_root_binds_validator_payload": true,
                 "operator_contact_required": true,
+                "operator_contact_address_required": true,
                 "unique_consensus_keys_required": true,
                 "unique_reward_accounts_required": true,
                 "unique_p2p_endpoints_required": true,
@@ -2449,13 +2450,11 @@ fn verify_validator_admission(
         &format!("validators[{index}].p2p_endpoint"),
         &validator.p2p_endpoint,
     );
-    if !validator.operator_contact.starts_with("mailto:")
-        && !validator.operator_contact.starts_with("https://")
-    {
-        errors.push(format!(
-            "validators[{index}].operator_contact must use mailto: or https://"
-        ));
-    }
+    require_operator_contact(
+        errors,
+        &format!("validators[{index}].operator_contact"),
+        &validator.operator_contact,
+    );
     if validator.commission_bps > FEE_BASIS_POINTS as u16 {
         errors.push(format!(
             "validators[{index}].commission_bps must be <= {}",
@@ -2777,6 +2776,25 @@ fn require_tcp_endpoint_with_port(errors: &mut Vec<String>, label: &str, endpoin
     {
         errors.push(format!("{label} must include a numeric port"));
     }
+}
+
+fn require_operator_contact(errors: &mut Vec<String>, label: &str, contact: &str) {
+    if let Some(address) = contact.strip_prefix("mailto:") {
+        if address.trim().is_empty()
+            || address.chars().any(char::is_whitespace)
+            || !address.contains('@')
+        {
+            errors.push(format!(
+                "{label} must include an email address after mailto:"
+            ));
+        }
+        return;
+    }
+    if contact.starts_with("https://") {
+        require_https_endpoint(errors, label, contact);
+        return;
+    }
+    errors.push(format!("{label} must use mailto: or https://"));
 }
 
 fn require_endpoint_authority<'a>(
@@ -3651,6 +3669,43 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "validators[0].operator_contact must use mailto: or https://"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_operator_contact_without_email_address() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["operator_contact"] = json!("mailto:");
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "validators[0].operator_contact must include an email address after mailto:"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_operator_contact_without_https_host() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["operator_contact"] = json!("https://");
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "validators[0].operator_contact must include a host after https://"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
