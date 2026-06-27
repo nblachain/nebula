@@ -2030,7 +2030,9 @@ RPC BRIDGE POLICY:
     relayer_set_root, observer_signature_roots, and observed_at_unix_ms.
     Public testnet policy requires the Monero confirmation floor, custody
     proof, relayer/observer evidence, and replay protection before crediting
-    nXMR.
+    nXMR. The faucet must keep faucet_nxmr_units at zero; bridge_only_nxmr,
+    bridge_custody_reconciled, and nxmr_custody_deficit_units must prove that
+    nXMR balances are backed by bridge deposits.
     Withdrawals use nebula_requestWithdrawal with account, monero_address,
     amount_nxmr_units, nonce, and signature, then remain operator_pending until
     nebula_finalizeWithdrawal binds withdrawal_id, finalized_monero_tx_id,
@@ -2043,9 +2045,9 @@ RPC OPERATOR OPS, BACKUP, AND METRICS:
     /metrics. Public operators must verify block freshness, latest height/hash,
     state and snapshot roots, persisted snapshot path and presence, sync peer
     count, mempool capacity and full/admission rejection counts, RPC
-    request-size/rate-limit policy, admin RPC state, bridge policy root, backup
-    manifest root, and public ops readiness gauges before opening a public
-    testnet endpoint.
+    request-size/rate-limit policy, admin RPC state, bridge policy root, bridge
+    custody reconciliation, backup manifest root, and public ops readiness
+    gauges before opening a public testnet endpoint.
 
 RPC ADMIN BOUNDARY:
     Public RPC methods remain callable without an admin token. Operator-only

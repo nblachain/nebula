@@ -179,6 +179,8 @@ flow methods remain callable without that token.
 
 Bridge custody policy is rehearsed over the existing RPC names.
 `nebula_bridgePolicy` reports the active policy root and quorum constants.
+The faucet credits only `NBLA`; `faucet_nxmr_units` must remain `0`, and nXMR
+enters runtime state only through bridge deposit evidence.
 `nebula_observeBridgeDeposit` accepts a deposit with `monero_tx_id`, `account`,
 `amount_nxmr_units`, `confirmations`, `observer_id`, `proof_root`,
 `custody_proof_root`, `relayer_set_root`, `observer_signature_roots`, and
@@ -191,7 +193,8 @@ withdrawal `operator_pending` until `nebula_finalizeWithdrawal` supplies
 `/status`, and `nebula_status` to report or agree with the bridge policy root,
 confirmation floor, observer quorum, withdrawal operator quorum, live-value
 disabled state, deposit count, withdrawal count, finalized withdrawal count,
-and replay cache count before advertising `nXMR` gas.
+replay cache count, `bridge_only_nxmr`, `bridge_custody_reconciled`, and zero
+`nxmr_custody_deficit_units` before advertising `nXMR` gas.
 
 Operator ops, backup, and metrics evidence is exposed through `GET /ops`,
 `GET /backup`, `GET /metrics`, JSON-RPC `nebula_opsStatus`, and JSON-RPC
@@ -201,13 +204,18 @@ compare those reports with `/health`, `/status`, `/snapshot`, and
 freshness, latest height/hash, state root, snapshot root, persisted snapshot
 path and presence, configured sync peer count, mempool cap/remaining capacity,
 full/admission rejection counts, RPC max-request/rate-limit policy, admin RPC
-state, bridge policy root, and backup manifest root. The metrics scrape must
-expose matching block freshness, mempool pressure, RPC limit, peer count, bridge
-counter, storage snapshot, accountability, and public ops readiness gauges.
+state, bridge policy root, bridge custody reconciliation, and backup manifest
+root. The metrics scrape must expose matching block freshness, mempool pressure,
+RPC limit, peer count, bridge counter, storage snapshot, accountability, bridge
+custody, and public ops readiness gauges.
 Backup manifests must bind the node role, validator ID, latest chain head,
 state/snapshot roots, persisted snapshot location, sync peer coverage, mempool
 capacity policy, full/admission rejection counters, RPC limit policy, admin RPC
-state, and bridge policy root without exporting sequencer secret key material.
+state, bridge policy root, and nXMR custody reconciliation without exporting
+sequencer secret key material. Snapshots imported by followers must have a state
+root that matches the latest signed block state root; wait for the next
+sub-second block after direct bridge/faucet/withdrawal mutations before using a
+snapshot as bootstrap evidence.
 
 The default dev sequencer key is only for throwaway local rehearsals. Public
 rehearsals should pass `--sequencer-public-key <hex>` to all nodes and pass the
@@ -358,7 +366,8 @@ evidence roots. Receipts must complete before deployment evidence is generated,
 and receipts older than `24` hours are rejected.
 
 Gas can be paid in native `NBLA` or bridged Monero as `nXMR`. `NBLA` fees go
-directly to the validator reward ledger. `nXMR` fees are converted into NBLA
+directly to the validator reward ledger. The faucet credits only `NBLA`; `nXMR`
+must be credited by bridge deposits. `nXMR` fees are converted into NBLA
 accounting value and are the funding source for NBLA buybacks, NBLA backing, and
 validator rewards. Converted `nXMR` value is split with `90%` reserved for NBLA
 buybacks and backing and `10%` credited to validator rewards. Fees and

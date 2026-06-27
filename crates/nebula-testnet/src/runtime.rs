@@ -1,7 +1,6 @@
 use crate::{
     quote_hybrid_fee, FeeAsset, HybridFeeQuote, CHAIN_ID, NBLA_SYMBOL, NEBULAI_PER_NBLA,
-    NXMR_SYMBOL, TARGET_NXMR_BASE_UNITS_PER_NXMR, TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT,
-    VERSION,
+    NXMR_SYMBOL, TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT, VERSION,
 };
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -23,14 +22,14 @@ pub const DEFAULT_GAS_PRICE_NEBULAI: u128 = 1;
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: usize = 512;
 pub const DEFAULT_MAX_MEMPOOL_TRANSACTIONS: usize = 10_000;
 pub const DEFAULT_FAUCET_NBLA: u128 = 10_000 * NEBULAI_PER_NBLA;
-pub const DEFAULT_FAUCET_NXMR: u128 = 10_000 * TARGET_NXMR_BASE_UNITS_PER_NXMR;
+pub const DEFAULT_FAUCET_NXMR: u128 = 0;
 pub const MIN_BRIDGE_CONFIRMATIONS: u64 = 10;
 pub const MIN_BRIDGE_DEPOSIT_OBSERVER_QUORUM: usize = 2;
 pub const MIN_WITHDRAWAL_OPERATOR_QUORUM: usize = 2;
 pub const BRIDGE_CUSTODY_POLICY_ID: &str = "nebula-monero-bridge-custody-testnet-v1";
 pub const VALIDATOR_REWARD_ACCOUNT_PREFIX: &str = "validator:";
 pub const RUNTIME_SNAPSHOT_FILE: &str = "nebula-runtime-snapshot.json";
-pub const RUNTIME_SNAPSHOT_VERSION: u32 = 7;
+pub const RUNTIME_SNAPSHOT_VERSION: u32 = 8;
 pub const DEFAULT_PEER_SYNC_MS: u64 = 100;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
 pub const DEFAULT_MAX_REQUESTS_PER_MINUTE: u32 = 600;
@@ -121,6 +120,12 @@ impl RuntimeConfig {
         }
         if self.max_mempool_transactions == 0 {
             return Err("max_mempool_transactions must be greater than zero".to_string());
+        }
+        if self.faucet_nxmr_units != 0 {
+            return Err(
+                "faucet_nxmr_units must be zero; nXMR is credited only by bridge deposits"
+                    .to_string(),
+            );
         }
         validate_fixed_hex(
             &self.sequencer_public_key_hex,
@@ -379,6 +384,17 @@ pub struct RuntimeStatus {
     pub buyback_pool_nebulai: u128,
     pub validator_reward_nebulai: u128,
     pub validator_reward_account: String,
+    pub faucet_nbla_nebulai: u128,
+    pub faucet_nxmr_units: u128,
+    pub bridge_only_nxmr: bool,
+    pub bridge_deposited_nxmr_units: u128,
+    pub account_nxmr_units: u128,
+    pub withdrawal_reserved_nxmr_units: u128,
+    pub nxmr_fee_units: u128,
+    pub nxmr_custody_required_units: u128,
+    pub nxmr_custody_surplus_units: u128,
+    pub nxmr_custody_deficit_units: u128,
+    pub bridge_custody_reconciled: bool,
     pub bridge_policy_root: String,
     pub bridge_min_deposit_confirmations: u64,
     pub bridge_deposit_observer_quorum: usize,
@@ -438,6 +454,17 @@ pub struct RuntimeOpsStatus {
     pub sequencer_accountability_clean: bool,
     pub bridge_policy_root: String,
     pub bridge_live_value_enabled: bool,
+    pub faucet_nbla_nebulai: u128,
+    pub faucet_nxmr_units: u128,
+    pub bridge_only_nxmr: bool,
+    pub bridge_deposited_nxmr_units: u128,
+    pub account_nxmr_units: u128,
+    pub withdrawal_reserved_nxmr_units: u128,
+    pub nxmr_fee_units: u128,
+    pub nxmr_custody_required_units: u128,
+    pub nxmr_custody_surplus_units: u128,
+    pub nxmr_custody_deficit_units: u128,
+    pub bridge_custody_reconciled: bool,
     pub public_ops_ready: bool,
     pub blocking_gaps: Vec<String>,
     pub ops_root: String,
@@ -476,6 +503,17 @@ pub struct RuntimeBackupManifest {
     pub mempool_capacity_remaining: usize,
     pub mempool_full_rejection_count: u64,
     pub mempool_admission_rejection_count: u64,
+    pub faucet_nbla_nebulai: u128,
+    pub faucet_nxmr_units: u128,
+    pub bridge_only_nxmr: bool,
+    pub bridge_deposited_nxmr_units: u128,
+    pub account_nxmr_units: u128,
+    pub withdrawal_reserved_nxmr_units: u128,
+    pub nxmr_fee_units: u128,
+    pub nxmr_custody_required_units: u128,
+    pub nxmr_custody_surplus_units: u128,
+    pub nxmr_custody_deficit_units: u128,
+    pub bridge_custody_reconciled: bool,
     pub backup_root: String,
 }
 
@@ -588,6 +626,18 @@ struct RuntimeTransactionExecutionPlan {
     asset: FeeAsset,
     quote: HybridFeeQuote,
     next_sender: RuntimeAccount,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeNxmrCustodyReconciliation {
+    bridge_deposited_nxmr_units: u128,
+    account_nxmr_units: u128,
+    withdrawal_reserved_nxmr_units: u128,
+    nxmr_fee_units: u128,
+    nxmr_custody_required_units: u128,
+    nxmr_custody_surplus_units: u128,
+    nxmr_custody_deficit_units: u128,
+    bridge_custody_reconciled: bool,
 }
 
 impl RuntimeRpcState {
@@ -748,6 +798,12 @@ impl RuntimeRpcState {
         if bridge_policy().live_value_enabled {
             blocking_gaps.push("bridge-live-value-enabled".to_string());
         }
+        if !status.bridge_only_nxmr {
+            blocking_gaps.push("nxmr-faucet-enabled".to_string());
+        }
+        if !status.bridge_custody_reconciled {
+            blocking_gaps.push("bridge-custody-not-reconciled".to_string());
+        }
         if status.mempool_size >= status.max_mempool_transactions {
             blocking_gaps.push("mempool-at-capacity".to_string());
         }
@@ -794,6 +850,17 @@ impl RuntimeRpcState {
             sequencer_accountability_clean: status.sequencer_accountability_clean,
             bridge_policy_root: bridge_policy_root(),
             bridge_live_value_enabled: bridge_policy().live_value_enabled,
+            faucet_nbla_nebulai: status.faucet_nbla_nebulai,
+            faucet_nxmr_units: status.faucet_nxmr_units,
+            bridge_only_nxmr: status.bridge_only_nxmr,
+            bridge_deposited_nxmr_units: status.bridge_deposited_nxmr_units,
+            account_nxmr_units: status.account_nxmr_units,
+            withdrawal_reserved_nxmr_units: status.withdrawal_reserved_nxmr_units,
+            nxmr_fee_units: status.nxmr_fee_units,
+            nxmr_custody_required_units: status.nxmr_custody_required_units,
+            nxmr_custody_surplus_units: status.nxmr_custody_surplus_units,
+            nxmr_custody_deficit_units: status.nxmr_custody_deficit_units,
+            bridge_custody_reconciled: status.bridge_custody_reconciled,
             public_ops_ready: blocking_gaps.is_empty(),
             blocking_gaps,
             ops_root: String::new(),
@@ -837,6 +904,17 @@ impl RuntimeRpcState {
             mempool_capacity_remaining: ops_status.mempool_capacity_remaining,
             mempool_full_rejection_count: ops_status.mempool_full_rejection_count,
             mempool_admission_rejection_count: ops_status.mempool_admission_rejection_count,
+            faucet_nbla_nebulai: ops_status.faucet_nbla_nebulai,
+            faucet_nxmr_units: ops_status.faucet_nxmr_units,
+            bridge_only_nxmr: ops_status.bridge_only_nxmr,
+            bridge_deposited_nxmr_units: ops_status.bridge_deposited_nxmr_units,
+            account_nxmr_units: ops_status.account_nxmr_units,
+            withdrawal_reserved_nxmr_units: ops_status.withdrawal_reserved_nxmr_units,
+            nxmr_fee_units: ops_status.nxmr_fee_units,
+            nxmr_custody_required_units: ops_status.nxmr_custody_required_units,
+            nxmr_custody_surplus_units: ops_status.nxmr_custody_surplus_units,
+            nxmr_custody_deficit_units: ops_status.nxmr_custody_deficit_units,
+            bridge_custody_reconciled: ops_status.bridge_custody_reconciled,
             backup_root: String::new(),
         };
         manifest.backup_root = backup_manifest_root(&manifest);
@@ -966,6 +1044,54 @@ impl RuntimeRpcState {
             "nebula_validator_reward_nebulai",
             "NBLA rewards accrued to the local validator account.",
             status.validator_reward_nebulai,
+        );
+        push_metric(
+            &mut output,
+            "nebula_faucet_nxmr_units",
+            "Configured nXMR units credited by the faucet. Public testnet requires zero.",
+            status.faucet_nxmr_units,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_bridge_only_nxmr",
+            "Whether nXMR is credited only by bridge deposits.",
+            status.bridge_only_nxmr,
+        );
+        push_metric(
+            &mut output,
+            "nebula_bridge_deposited_nxmr_units",
+            "Total nXMR units credited from observed bridge deposits.",
+            status.bridge_deposited_nxmr_units,
+        );
+        push_metric(
+            &mut output,
+            "nebula_account_nxmr_units",
+            "Total nXMR units held in runtime accounts.",
+            status.account_nxmr_units,
+        );
+        push_metric(
+            &mut output,
+            "nebula_withdrawal_reserved_nxmr_units",
+            "Total nXMR units burned into withdrawal requests.",
+            status.withdrawal_reserved_nxmr_units,
+        );
+        push_metric(
+            &mut output,
+            "nebula_nxmr_custody_required_units",
+            "nXMR units required by accounts, withdrawals, and collected fees.",
+            status.nxmr_custody_required_units,
+        );
+        push_metric(
+            &mut output,
+            "nebula_nxmr_custody_deficit_units",
+            "nXMR custody deficit units. Public testnet requires zero.",
+            status.nxmr_custody_deficit_units,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_bridge_custody_reconciled",
+            "Whether bridge deposits reconcile with account balances, withdrawals, and fees.",
+            status.bridge_custody_reconciled,
         );
         push_metric(
             &mut output,
@@ -1277,6 +1403,13 @@ impl NebulaRuntime {
             .values()
             .filter(|withdrawal| withdrawal.status == "finalized")
             .count();
+        let nxmr_custody = nxmr_custody_reconciliation(
+            &self.accounts,
+            &self.bridge_deposits,
+            &self.withdrawals,
+            self.total_nxmr_fees_units,
+        )
+        .expect("runtime nXMR custody reconciliation remains valid");
         RuntimeStatus {
             chain_id: self.config.chain_id.clone(),
             runtime_version: self.config.runtime_version.clone(),
@@ -1318,6 +1451,18 @@ impl NebulaRuntime {
             buyback_pool_nebulai: self.buyback_pool_nebulai,
             validator_reward_nebulai: self.validator_reward_nebulai,
             validator_reward_account: self.config.validator_reward_account(),
+            faucet_nbla_nebulai: self.config.faucet_nbla_nebulai,
+            faucet_nxmr_units: self.config.faucet_nxmr_units,
+            bridge_only_nxmr: self.config.faucet_nxmr_units == 0
+                && nxmr_custody.bridge_custody_reconciled,
+            bridge_deposited_nxmr_units: nxmr_custody.bridge_deposited_nxmr_units,
+            account_nxmr_units: nxmr_custody.account_nxmr_units,
+            withdrawal_reserved_nxmr_units: nxmr_custody.withdrawal_reserved_nxmr_units,
+            nxmr_fee_units: nxmr_custody.nxmr_fee_units,
+            nxmr_custody_required_units: nxmr_custody.nxmr_custody_required_units,
+            nxmr_custody_surplus_units: nxmr_custody.nxmr_custody_surplus_units,
+            nxmr_custody_deficit_units: nxmr_custody.nxmr_custody_deficit_units,
+            bridge_custody_reconciled: nxmr_custody.bridge_custody_reconciled,
             bridge_policy_root: bridge_policy_root(),
             bridge_min_deposit_confirmations: MIN_BRIDGE_CONFIRMATIONS,
             bridge_deposit_observer_quorum: MIN_BRIDGE_DEPOSIT_OBSERVER_QUORUM,
@@ -1338,14 +1483,10 @@ impl NebulaRuntime {
             .nbla_nebulai
             .checked_add(self.config.faucet_nbla_nebulai)
             .ok_or_else(|| "faucet NBLA credit overflowed".to_string())?;
-        state.nxmr_units = state
-            .nxmr_units
-            .checked_add(self.config.faucet_nxmr_units)
-            .ok_or_else(|| "faucet nXMR credit overflowed".to_string())?;
         Ok(FaucetReport {
             account: account.to_string(),
             credited_nbla_nebulai: self.config.faucet_nbla_nebulai,
-            credited_nxmr_units: self.config.faucet_nxmr_units,
+            credited_nxmr_units: 0,
             account_state: state.clone(),
         })
     }
@@ -2452,6 +2593,17 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
                     "bridge_deposit_observer_quorum": status["bridge_deposit_observer_quorum"],
                     "bridge_withdrawal_operator_quorum": status["bridge_withdrawal_operator_quorum"],
                     "bridge_live_value_enabled": status["bridge_live_value_enabled"],
+                    "faucet_nbla_nebulai": status["faucet_nbla_nebulai"],
+                    "faucet_nxmr_units": status["faucet_nxmr_units"],
+                    "bridge_only_nxmr": status["bridge_only_nxmr"],
+                    "bridge_deposited_nxmr_units": status["bridge_deposited_nxmr_units"],
+                    "account_nxmr_units": status["account_nxmr_units"],
+                    "withdrawal_reserved_nxmr_units": status["withdrawal_reserved_nxmr_units"],
+                    "nxmr_fee_units": status["nxmr_fee_units"],
+                    "nxmr_custody_required_units": status["nxmr_custody_required_units"],
+                    "nxmr_custody_surplus_units": status["nxmr_custody_surplus_units"],
+                    "nxmr_custody_deficit_units": status["nxmr_custody_deficit_units"],
+                    "bridge_custody_reconciled": status["bridge_custody_reconciled"],
                     "bridge_deposit_count": status["bridge_deposit_count"],
                     "withdrawal_request_count": status["withdrawal_request_count"],
                     "finalized_withdrawal_count": status["finalized_withdrawal_count"],
@@ -3094,7 +3246,77 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
     if snapshot.state_root != expected_state_root {
         return Err("snapshot state_root does not match snapshot state".to_string());
     }
+    let latest_block = snapshot
+        .blocks
+        .last()
+        .ok_or_else(|| "snapshot must contain at least the genesis block".to_string())?;
+    if latest_block.state_root != snapshot.state_root {
+        return Err(
+            "snapshot state_root must match the latest signed block state_root".to_string(),
+        );
+    }
+    let nxmr_custody = nxmr_custody_reconciliation(
+        &snapshot.accounts,
+        &snapshot.bridge_deposits,
+        &snapshot.withdrawals,
+        snapshot.total_nxmr_fees_units,
+    )?;
+    if !nxmr_custody.bridge_custody_reconciled {
+        return Err(format!(
+            "nXMR custody mismatch: deposited {}, required {}, surplus {}, deficit {}",
+            nxmr_custody.bridge_deposited_nxmr_units,
+            nxmr_custody.nxmr_custody_required_units,
+            nxmr_custody.nxmr_custody_surplus_units,
+            nxmr_custody.nxmr_custody_deficit_units
+        ));
+    }
     Ok(())
+}
+
+fn nxmr_custody_reconciliation(
+    accounts: &BTreeMap<String, RuntimeAccount>,
+    bridge_deposits: &BTreeMap<String, RuntimeBridgeDeposit>,
+    withdrawals: &BTreeMap<String, RuntimeWithdrawalRequest>,
+    total_nxmr_fees_units: u128,
+) -> Result<RuntimeNxmrCustodyReconciliation, String> {
+    let bridge_deposited_nxmr_units =
+        bridge_deposits.values().try_fold(0u128, |sum, deposit| {
+            sum.checked_add(deposit.amount_nxmr_units)
+                .ok_or_else(|| "bridge deposited nXMR accounting overflowed".to_string())
+        })?;
+    let account_nxmr_units = accounts.values().try_fold(0u128, |sum, account| {
+        sum.checked_add(account.nxmr_units)
+            .ok_or_else(|| "account nXMR accounting overflowed".to_string())
+    })?;
+    let withdrawal_reserved_nxmr_units =
+        withdrawals.values().try_fold(0u128, |sum, withdrawal| {
+            sum.checked_add(withdrawal.amount_nxmr_units)
+                .ok_or_else(|| "withdrawal nXMR accounting overflowed".to_string())
+        })?;
+    let account_and_withdrawal = account_nxmr_units
+        .checked_add(withdrawal_reserved_nxmr_units)
+        .ok_or_else(|| "nXMR custody required accounting overflowed".to_string())?;
+    let nxmr_custody_required_units = account_and_withdrawal
+        .checked_add(total_nxmr_fees_units)
+        .ok_or_else(|| "nXMR custody required accounting overflowed".to_string())?;
+    let (nxmr_custody_surplus_units, nxmr_custody_deficit_units) =
+        if bridge_deposited_nxmr_units >= nxmr_custody_required_units {
+            (bridge_deposited_nxmr_units - nxmr_custody_required_units, 0)
+        } else {
+            (0, nxmr_custody_required_units - bridge_deposited_nxmr_units)
+        };
+
+    Ok(RuntimeNxmrCustodyReconciliation {
+        bridge_deposited_nxmr_units,
+        account_nxmr_units,
+        withdrawal_reserved_nxmr_units,
+        nxmr_fee_units: total_nxmr_fees_units,
+        nxmr_custody_required_units,
+        nxmr_custody_surplus_units,
+        nxmr_custody_deficit_units,
+        bridge_custody_reconciled: nxmr_custody_surplus_units == 0
+            && nxmr_custody_deficit_units == 0,
+    })
 }
 
 fn validate_sequencer_key_history(snapshot: &RuntimeSnapshot) -> Result<(), String> {
@@ -3652,6 +3874,17 @@ fn ops_status_root(report: &RuntimeOpsStatus) -> String {
         "sequencer_accountability_clean": report.sequencer_accountability_clean,
         "bridge_policy_root": report.bridge_policy_root,
         "bridge_live_value_enabled": report.bridge_live_value_enabled,
+        "faucet_nbla_nebulai": report.faucet_nbla_nebulai,
+        "faucet_nxmr_units": report.faucet_nxmr_units,
+        "bridge_only_nxmr": report.bridge_only_nxmr,
+        "bridge_deposited_nxmr_units": report.bridge_deposited_nxmr_units,
+        "account_nxmr_units": report.account_nxmr_units,
+        "withdrawal_reserved_nxmr_units": report.withdrawal_reserved_nxmr_units,
+        "nxmr_fee_units": report.nxmr_fee_units,
+        "nxmr_custody_required_units": report.nxmr_custody_required_units,
+        "nxmr_custody_surplus_units": report.nxmr_custody_surplus_units,
+        "nxmr_custody_deficit_units": report.nxmr_custody_deficit_units,
+        "bridge_custody_reconciled": report.bridge_custody_reconciled,
         "public_ops_ready": report.public_ops_ready,
         "blocking_gaps": report.blocking_gaps,
     }))
@@ -3691,6 +3924,17 @@ fn backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
         "mempool_capacity_remaining": manifest.mempool_capacity_remaining,
         "mempool_full_rejection_count": manifest.mempool_full_rejection_count,
         "mempool_admission_rejection_count": manifest.mempool_admission_rejection_count,
+        "faucet_nbla_nebulai": manifest.faucet_nbla_nebulai,
+        "faucet_nxmr_units": manifest.faucet_nxmr_units,
+        "bridge_only_nxmr": manifest.bridge_only_nxmr,
+        "bridge_deposited_nxmr_units": manifest.bridge_deposited_nxmr_units,
+        "account_nxmr_units": manifest.account_nxmr_units,
+        "withdrawal_reserved_nxmr_units": manifest.withdrawal_reserved_nxmr_units,
+        "nxmr_fee_units": manifest.nxmr_fee_units,
+        "nxmr_custody_required_units": manifest.nxmr_custody_required_units,
+        "nxmr_custody_surplus_units": manifest.nxmr_custody_surplus_units,
+        "nxmr_custody_deficit_units": manifest.nxmr_custody_deficit_units,
+        "bridge_custody_reconciled": manifest.bridge_custody_reconciled,
     }))
 }
 
@@ -3928,6 +4172,18 @@ mod tests {
         }
     }
 
+    fn snapshot_test_state_root(snapshot: &RuntimeSnapshot) -> String {
+        stable_runtime_root(&json!({
+            "state_domain": "nebula-runtime-state-v1",
+            "accounts": snapshot.accounts,
+            "bridge_deposits": snapshot.bridge_deposits,
+            "withdrawals": snapshot.withdrawals,
+            "total_nxmr_fees_units": snapshot.total_nxmr_fees_units,
+            "buyback_pool_nebulai": snapshot.buyback_pool_nebulai,
+            "validator_reward_nebulai": snapshot.validator_reward_nebulai,
+        }))
+    }
+
     fn test_nbla_transaction(nonce: u64, to: &str) -> RuntimeTransaction {
         sign_test_transaction(RuntimeTransaction {
             from: test_account_id(),
@@ -3946,10 +4202,84 @@ mod tests {
     fn public_testnet_runtime_uses_sub_second_blocks() {
         let config = RuntimeConfig::public_testnet_default();
         assert!(config.block_target_ms < 1_000);
+        assert_eq!(config.faucet_nxmr_units, 0);
         let runtime = NebulaRuntime::new(config).unwrap();
         let status = runtime.status();
         assert!(status.sub_second_blocks);
         assert_eq!(status.block_target_ms, DEFAULT_SUBSECOND_BLOCK_MS);
+        assert!(status.bridge_only_nxmr);
+    }
+
+    #[test]
+    fn runtime_rejects_nxmr_faucet_configuration() {
+        let mut config = RuntimeConfig::public_testnet_default();
+        config.faucet_nxmr_units = 1;
+        assert!(NebulaRuntime::new(config)
+            .unwrap_err()
+            .contains("faucet_nxmr_units"));
+    }
+
+    #[test]
+    fn runtime_faucet_credits_only_nbla_and_keeps_nxmr_bridge_only() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let report = runtime.faucet("alice").unwrap();
+
+        assert_eq!(report.credited_nbla_nebulai, DEFAULT_FAUCET_NBLA);
+        assert_eq!(report.credited_nxmr_units, 0);
+        assert_eq!(report.account_state.nbla_nebulai, DEFAULT_FAUCET_NBLA);
+        assert_eq!(report.account_state.nxmr_units, 0);
+        let status = runtime.status();
+        assert_eq!(status.faucet_nxmr_units, 0);
+        assert!(status.bridge_only_nxmr);
+    }
+
+    #[test]
+    fn snapshot_rejects_unbacked_nxmr_balance() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        runtime
+            .accounts
+            .entry("alice".to_string())
+            .or_insert_with(RuntimeAccount::empty)
+            .nxmr_units = 1;
+        runtime.produce_block();
+        let snapshot = runtime.export_snapshot();
+
+        assert!(validate_snapshot(&snapshot)
+            .unwrap_err()
+            .contains("nXMR custody mismatch"));
+    }
+
+    #[test]
+    fn snapshot_rejects_bridge_amount_mismatch() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let deposit = test_bridge_deposit('1', '2');
+        runtime.observe_bridge_deposit(deposit.clone()).unwrap();
+        runtime
+            .bridge_deposits
+            .get_mut(&deposit.monero_tx_id)
+            .unwrap()
+            .amount_nxmr_units = 4_999;
+        runtime.produce_block();
+        let snapshot = runtime.export_snapshot();
+
+        assert!(validate_snapshot(&snapshot)
+            .unwrap_err()
+            .contains("nXMR custody mismatch"));
+    }
+
+    #[test]
+    fn snapshot_rejects_state_not_bound_to_latest_signed_block() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        runtime.faucet("alice").unwrap();
+        runtime.produce_block();
+        let mut snapshot = runtime.export_snapshot();
+        snapshot.accounts.get_mut("alice").unwrap().nbla_nebulai += 1;
+        snapshot.state_root = snapshot_test_state_root(&snapshot);
+        snapshot.root = snapshot_root(&snapshot);
+
+        assert!(validate_snapshot(&snapshot)
+            .unwrap_err()
+            .contains("latest signed block state_root"));
     }
 
     #[test]
@@ -4044,6 +4374,10 @@ mod tests {
         );
         assert_eq!(status["mempool_full_rejection_count"], 0);
         assert_eq!(status["mempool_admission_rejection_count"], 0);
+        assert_eq!(status["faucet_nxmr_units"], 0);
+        assert_eq!(status["bridge_only_nxmr"], true);
+        assert_eq!(status["bridge_custody_reconciled"], true);
+        assert_eq!(status["nxmr_custody_deficit_units"], 0);
         assert_eq!(status["sync_peer_count"], 2);
         assert_eq!(
             status["sync_peer_urls"],
@@ -4120,6 +4454,10 @@ mod tests {
             DEFAULT_MAX_MEMPOOL_TRANSACTIONS
         );
         assert_eq!(ops.mempool_admission_rejection_count, 0);
+        assert_eq!(ops.faucet_nxmr_units, 0);
+        assert!(ops.bridge_only_nxmr);
+        assert!(ops.bridge_custody_reconciled);
+        assert_eq!(ops.nxmr_custody_deficit_units, 0);
         assert_eq!(ops.ops_root.len(), 64);
 
         let manifest = state.backup_manifest().unwrap();
@@ -4132,17 +4470,29 @@ mod tests {
             DEFAULT_MAX_MEMPOOL_TRANSACTIONS
         );
         assert_eq!(manifest.mempool_admission_rejection_count, 0);
+        assert_eq!(manifest.faucet_nxmr_units, 0);
+        assert!(manifest.bridge_only_nxmr);
+        assert!(manifest.bridge_custody_reconciled);
+        assert_eq!(manifest.nxmr_custody_deficit_units, 0);
         assert_eq!(manifest.backup_root.len(), 64);
         let rpc_ops = dispatch_json_rpc_method(&state, "nebula_opsStatus", json!({})).unwrap();
         assert_eq!(rpc_ops["ops_root"].as_str().unwrap().len(), 64);
         assert_eq!(rpc_ops["public_ops_ready"], true);
         assert_eq!(rpc_ops["mempool_admission_rejection_count"], 0);
+        assert_eq!(rpc_ops["faucet_nxmr_units"], 0);
+        assert_eq!(rpc_ops["bridge_only_nxmr"], true);
+        assert_eq!(rpc_ops["bridge_custody_reconciled"], true);
+        assert_eq!(rpc_ops["nxmr_custody_deficit_units"], 0);
         assert_eq!(rpc_ops["storage_snapshot_matches_runtime"], true);
         let rpc_backup =
             dispatch_json_rpc_method(&state, "nebula_backupManifest", json!({})).unwrap();
         assert_eq!(rpc_backup["backup_root"].as_str().unwrap().len(), 64);
         assert_eq!(rpc_backup["snapshot_persisted"], true);
         assert_eq!(rpc_backup["mempool_admission_rejection_count"], 0);
+        assert_eq!(rpc_backup["faucet_nxmr_units"], 0);
+        assert_eq!(rpc_backup["bridge_only_nxmr"], true);
+        assert_eq!(rpc_backup["bridge_custody_reconciled"], true);
+        assert_eq!(rpc_backup["nxmr_custody_deficit_units"], 0);
         assert_eq!(rpc_backup["storage_snapshot_matches_runtime"], true);
 
         let _ = fs::remove_dir_all(dir);
@@ -4188,6 +4538,10 @@ mod tests {
         assert!(metrics.contains("nebula_sync_peer_count 0"));
         assert!(metrics.contains("nebula_admin_rpc_enabled 0"));
         assert!(metrics.contains("nebula_mempool_admission_rejection_count 0"));
+        assert!(metrics.contains("nebula_faucet_nxmr_units 0"));
+        assert!(metrics.contains("nebula_bridge_only_nxmr 1"));
+        assert!(metrics.contains("nebula_bridge_custody_reconciled 1"));
+        assert!(metrics.contains("nebula_nxmr_custody_deficit_units 0"));
         assert!(metrics.contains("nebula_bridge_deposit_count 0"));
         assert!(metrics.contains("nebula_withdrawal_request_count 0"));
         assert!(metrics.contains("nebula_sequencer_accountability_clean 1"));
@@ -4550,6 +4904,9 @@ mod tests {
         let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
         let account = test_account_id();
         runtime.faucet(&account).unwrap();
+        runtime
+            .observe_bridge_deposit(test_bridge_deposit('2', '3'))
+            .unwrap();
         let tx = sign_test_transaction(RuntimeTransaction {
             from: account,
             to: "bob".to_string(),
@@ -4636,6 +4993,8 @@ mod tests {
             MIN_WITHDRAWAL_OPERATOR_QUORUM
         );
         assert!(!status.bridge_live_value_enabled);
+        assert_eq!(status.faucet_nxmr_units, 0);
+        assert!(status.bridge_only_nxmr);
     }
 
     #[test]
@@ -4752,6 +5111,8 @@ mod tests {
         let genesis_hash = runtime.latest_block().block_hash;
         let account = test_account_id();
         runtime.faucet(&account).unwrap();
+        runtime.produce_block();
+        let faucet_commit_hash = runtime.latest_block().block_hash;
         let tx = sign_test_transaction(RuntimeTransaction {
             from: account,
             to: "bob".to_string(),
@@ -4769,14 +5130,15 @@ mod tests {
         let mut config = RuntimeConfig::public_testnet_default();
         config.validator_id = "validator-after-restart".to_string();
         let mut restored = NebulaRuntime::from_snapshot(config, snapshot).unwrap();
-        assert_eq!(restored.latest_block().block_hash, genesis_hash);
+        assert_ne!(restored.latest_block().block_hash, genesis_hash);
+        assert_eq!(restored.latest_block().block_hash, faucet_commit_hash);
         assert_eq!(
             restored.receipt(&tx_id).unwrap().status,
             TransactionStatus::Pending
         );
 
         let block = restored.produce_block();
-        assert_eq!(block.height, 1);
+        assert_eq!(block.height, 2);
         assert_eq!(block.producer, "validator-after-restart");
         assert_eq!(
             restored.receipt(&tx_id).unwrap().status,
@@ -4814,6 +5176,7 @@ mod tests {
         let storage = RuntimeStorage::from_data_dir(&dir);
         let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
         runtime.faucet("alice").unwrap();
+        runtime.produce_block();
         storage.save_runtime(&runtime).unwrap();
 
         let snapshot = storage.load_snapshot().unwrap().unwrap();
@@ -4841,6 +5204,7 @@ mod tests {
                 &test_withdrawal_signature("9xTestnetMoneroAddressForNebulaWithdrawals", 2_000, 0),
             )
             .unwrap();
+        runtime.produce_block();
         let snapshot = runtime.export_snapshot();
         let mut restored =
             NebulaRuntime::from_snapshot(RuntimeConfig::public_testnet_default(), snapshot)

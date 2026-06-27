@@ -57,7 +57,8 @@ The target architecture is:
   `nebula_observeBridgeDeposit`, `nebula_requestWithdrawal`, and
   `nebula_finalizeWithdrawal`: minimum confirmations, operator custody quorum,
   relayer/observer quorum, replay protection, withdrawal finalization evidence,
-  and `/health`/`/status` visibility
+  bridge-only nXMR crediting, custody reconciliation, and `/health`/`/status`
+  visibility
 - Ed25519 account signatures for public spend paths: `nebula_sendTransaction`
   transactions must be signed by `tx.from`, and `nebula_requestWithdrawal`
   must bind account, destination, amount, nonce, and signature before nXMR burns
@@ -146,8 +147,10 @@ evidence is absent or stale.
     state root, snapshot root, sequencer public key, and configured follower sync
     peers. Every snapshot block must commit to the producer public key and verify
     its Ed25519 signature before a follower treats the peer as ready; exported
-    snapshots must never include the sequencer secret key. Public RPC nodes must
-    reject invalid signed spend attempts before mempool admission, reject
+    snapshots must never include the sequencer secret key. Imported snapshots
+    must bind the current state root to the latest signed block and reconcile
+    bridge-deposited nXMR against account balances, withdrawal burns, and nXMR
+    fees. Public RPC nodes must reject invalid signed spend attempts before mempool admission, reject
     transactions beyond the configured mempool cap, reject oversized requests,
     and throttle per-client request bursts before launch observers treat the
     endpoint as ready.
@@ -166,7 +169,9 @@ evidence is absent or stale.
     expose or agree with `bridge_policy_root`,
     `bridge_min_deposit_confirmations`, `bridge_deposit_observer_quorum`,
     `bridge_withdrawal_operator_quorum`, `bridge_live_value_enabled`,
-    `bridge_deposit_count`, and `withdrawal_request_count`.
+    `faucet_nxmr_units`, `bridge_only_nxmr`, `bridge_custody_reconciled`,
+    `nxmr_custody_deficit_units`, `bridge_deposit_count`, and
+    `withdrawal_request_count`.
 14. Gate operator ops, backup, and metrics evidence before public endpoint
     exposure. `/ops`, `/backup`, `/metrics`, `nebula_opsStatus`, and
     `nebula_backupManifest` must agree with `/health`, `/status`, and
@@ -174,13 +179,13 @@ evidence is absent or stale.
     latest height/hash, state root, snapshot root, persisted snapshot path and
     presence, sync peer count, mempool cap/remaining capacity/full and
     admission rejection counts, RPC request-size and rate-limit policy, admin
-    RPC state, bridge policy root, backup manifest root, and public ops
-    readiness gauges. Operators must treat
+    RPC state, bridge policy root, bridge custody reconciliation, backup
+    manifest root, and public ops readiness gauges. Operators must treat
     stale blocks, missing
     persisted snapshots, mismatched backup roots, missing bridge policy roots,
-    full mempools, unexpected admission-rejection spikes, disabled or
-    unexpected admin RPC state, or unexpected sync/RPC-limit values as
-    public-launch blockers.
+    nXMR custody deficits, full mempools, unexpected admission-rejection spikes,
+    disabled or unexpected admin RPC state, or unexpected sync/RPC-limit values
+    as public-launch blockers.
 15. Gate sequencer key rotation and operator accountability before public
     endpoint exposure. `/health`, `/status`, and `nebula_status` must expose
     the current sequencer public key, sequencer key-rotation history/root,
@@ -291,7 +296,9 @@ nXMR into `operator_pending`.
 
 Bridge custody rehearsal uses the runtime RPC names that public operators will
 see. `nebula_bridgePolicy` reports the active policy root and quorum constants.
-Deposits enter through `nebula_observeBridgeDeposit` with `monero_tx_id`,
+The faucet credits only `NBLA`; `faucet_nxmr_units` must remain `0`, and nXMR
+enters runtime state only through bridge deposit evidence. Deposits enter through
+`nebula_observeBridgeDeposit` with `monero_tx_id`,
 `account`, `amount_nxmr_units`, `confirmations`, `observer_id`, `proof_root`,
 `custody_proof_root`, `relayer_set_root`, `observer_signature_roots`, and
 `observed_at_unix_ms`. Withdrawals enter through `nebula_requestWithdrawal`
@@ -300,7 +307,9 @@ with `account`, `monero_address`, `amount_nxmr_units`, `nonce`, and
 supplies `withdrawal_id`,
 `finalized_monero_tx_id`, `finalization_proof_root`, and
 `operator_approval_roots`. `/health`, `/status`, and `nebula_status` are the
-operator-facing surfaces for bridge policy visibility.
+operator-facing surfaces for bridge policy visibility and must show
+`bridge_only_nxmr`, `bridge_custody_reconciled`, and zero
+`nxmr_custody_deficit_units` before `nXMR` gas is advertised.
 
 Operator ops, backup, and metrics evidence uses the runtime surfaces public
 operators need during launch rehearsals: `GET /ops`, `GET /backup`,
@@ -311,13 +320,18 @@ public testnet endpoint, operators must compare those reports with `/health`,
 height/hash, state root, snapshot root, persisted snapshot path and presence,
 configured sync peer count, mempool cap/remaining capacity/full and admission
 rejection counts, RPC max-request/rate-limit policy, admin RPC state, bridge
-policy root, and backup manifest root. The `/metrics` scrape must expose the
-same block freshness, mempool pressure, RPC limit, peer count, bridge counter, storage snapshot,
-accountability, and public ops readiness gauges. A valid backup manifest must
+policy root, bridge custody reconciliation, and backup manifest root. The
+`/metrics` scrape must expose the same block freshness, mempool pressure, RPC
+limit, peer count, bridge counter, storage snapshot, accountability, bridge
+custody, and public ops readiness gauges. A valid backup manifest must
 bind the node role, validator ID, latest chain head, state/snapshot roots,
 persisted snapshot location, sync peer coverage, mempool capacity policy,
-full/admission rejection counters, RPC limit policy, admin RPC state, and
-bridge policy root without exporting any sequencer secret key material.
+full/admission rejection counters, RPC limit policy, admin RPC state, bridge
+policy root, and nXMR custody reconciliation without exporting any sequencer
+secret key material. Snapshots imported by followers must have a state root that
+matches the latest signed block state root; operators should wait for the next
+sub-second block after direct bridge/faucet/withdrawal mutations before using a
+snapshot as bootstrap evidence.
 
 A follower can import once from an ahead peer before it starts serving RPC:
 
@@ -379,7 +393,7 @@ Example trial:
 curl -s http://127.0.0.1:9944/status
 curl -s http://127.0.0.1:9944/metrics
 curl -s -X POST http://127.0.0.1:9944/rpc -d '{"jsonrpc":"2.0","id":1,"method":"nebula_faucet","params":{"account":"alice"}}'
-curl -s -X POST http://127.0.0.1:9944/rpc -d '{"jsonrpc":"2.0","id":2,"method":"nebula_sendTransaction","params":{"tx":{"from":"alice","to":"bob","amount_nebulai":100,"gas_units":100,"gas_price_nebulai":10,"fee_asset":"nXMR","nonce":0,"memo":"first nXMR gas transfer"}}}'
+curl -s -X POST http://127.0.0.1:9944/rpc -d '{"jsonrpc":"2.0","id":2,"method":"nebula_sendTransaction","params":{"tx":{"from":"alice","to":"bob","amount_nebulai":100,"gas_units":100,"gas_price_nebulai":10,"fee_asset":"NBLA","nonce":0,"memo":"first NBLA gas transfer"}}}'
 curl -s -X POST http://127.0.0.1:9944/rpc -d '{"jsonrpc":"2.0","id":3,"method":"nebula_getAccount","params":{"account":"bob"}}'
 ```
 
@@ -533,6 +547,7 @@ Nebula testnet uses a hybrid fee policy:
 
 - Gas can be paid in native `NBLA`.
 - Gas can also be paid in bridged Monero as `nXMR`.
+- The faucet credits only `NBLA`; `nXMR` must be credited by bridge deposits.
 - `nebulai` is the base accounting unit for gas and validator rewards.
 - `1 NBLA = 1,000,000 nebulai`.
 - The target buyback and reserve reference is `1 NBLA = 0.001 XMR`; on Nebula
@@ -588,9 +603,12 @@ Public launch observers should treat the bridge as launch-blocked unless
 `/health`, `/status`, and `nebula_status` expose or agree with
 `bridge_policy_root`, `bridge_min_deposit_confirmations`,
 `bridge_deposit_observer_quorum`, `bridge_withdrawal_operator_quorum`,
-`bridge_live_value_enabled`, `bridge_deposit_count`, and
-`withdrawal_request_count`, and `nebula_bridgePolicy` returns the same policy
-root. `bridge_live_value_enabled` must remain `false` for public testnet.
+`bridge_live_value_enabled`, `faucet_nxmr_units`, `bridge_only_nxmr`,
+`bridge_custody_reconciled`, `nxmr_custody_deficit_units`,
+`bridge_deposit_count`, and `withdrawal_request_count`, and
+`nebula_bridgePolicy` returns the same policy root. `bridge_live_value_enabled`
+must remain `false`, `faucet_nxmr_units` must remain `0`, and
+`nxmr_custody_deficit_units` must remain `0` for public testnet.
 
 ## Sequencer Key Rotation And Accountability
 

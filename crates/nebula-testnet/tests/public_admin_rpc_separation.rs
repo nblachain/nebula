@@ -2,7 +2,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use nebula_testnet::{
     runtime::{
         serve_runtime_rpc_with_options, withdrawal_authorization_root, RuntimeConfig,
-        RuntimeNodeOptions, RuntimeTransaction,
+        RuntimeNodeOptions, RuntimeTransaction, MIN_BRIDGE_CONFIRMATIONS,
     },
     NBLA_SYMBOL,
 };
@@ -73,6 +73,16 @@ fn public_rpc_methods_remain_callable_without_admin_token() {
         rpc_result(&withdrawal_faucet)["account"],
         withdrawal_account
     );
+    assert_eq!(rpc_result(&withdrawal_faucet)["credited_nxmr_units"], 0);
+    let bridge_deposit = rpc_call(
+        &rpc_addr,
+        "nebula_observeBridgeDeposit",
+        json!({
+            "admin_token": ADMIN_TOKEN,
+            "deposit": bridge_deposit(0x45, 1),
+        }),
+    );
+    assert_eq!(rpc_result(&bridge_deposit)["credited"], true);
 
     let submitted = rpc_call(
         &rpc_addr,
@@ -113,6 +123,10 @@ fn metrics_endpoint_exposes_public_rpc_operational_gauges() {
     assert!(body.contains("nebula_rpc_max_request_bytes "));
     assert!(body.contains("nebula_rpc_max_requests_per_minute 10000"));
     assert!(body.contains("nebula_mempool_admission_rejection_count 0"));
+    assert!(body.contains("nebula_faucet_nxmr_units 0"));
+    assert!(body.contains("nebula_bridge_only_nxmr 1"));
+    assert!(body.contains("nebula_bridge_custody_reconciled 1"));
+    assert!(body.contains("nebula_nxmr_custody_deficit_units 0"));
     assert!(body.contains("nebula_admin_rpc_enabled 1"));
     assert!(body.contains("nebula_bridge_deposit_count 0"));
     assert!(body.contains("nebula_sequencer_accountability_clean 1"));
@@ -367,6 +381,21 @@ fn withdrawal_signature(
         seed,
         &withdrawal_authorization_root(&account_id(seed), monero_address, amount_nxmr_units, nonce),
     )
+}
+
+fn bridge_deposit(seed: u8, amount_nxmr_units: u128) -> Value {
+    json!({
+        "monero_tx_id": hex_64("m45"),
+        "account": account_id(seed),
+        "amount_nxmr_units": amount_nxmr_units,
+        "confirmations": MIN_BRIDGE_CONFIRMATIONS,
+        "observer_id": "observer-public-rpc",
+        "proof_root": hex_64("p45"),
+        "custody_proof_root": hex_64("c45"),
+        "relayer_set_root": hex_64("r45"),
+        "observer_signature_roots": [hex_64("s45a"), hex_64("s45b")],
+        "observed_at_unix_ms": 1,
+    })
 }
 
 fn hex_64(label: &str) -> String {
