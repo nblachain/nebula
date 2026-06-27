@@ -75,6 +75,8 @@ The public launch suite covers:
 - final package binding for the public status/probe surface
 - shared deployment witness root binding for bootstrap nodes, operators, and
   observers
+- deterministic operator, observer, and validator admission signature-root
+  validation
 - standalone preflight/runbook receipt exact-shape validation
 - policy claim and public probe body exact-shape validation
 - preflight and runbook receipt exact-shape validation
@@ -141,6 +143,8 @@ Public launch requires a filled deployment attestation. The verifier rejects:
   public status manifest identities
 - operator and observer witness roots that do not match the deployment surface
 - bootstrap node attestation roots that do not bind the deployment witness root
+- operator, observer, and validator admission signature roots that do not bind
+  the signed payload
 
 Until an operator provides fresh deployment evidence that satisfies those rules,
 `public_launch_ready` must remain `false`.
@@ -179,7 +183,9 @@ requires at least two validators, two operators, and two regions. Validator IDs,
 node IDs, consensus keys, network keys, and P2P endpoints must be unique.
 Genesis power must be positive, commission must be at or below `10000` basis
 points, reward accounts must use the `nbla-reward-` prefix, and rewards must be
-denominated in `nebulai`.
+denominated in `nebulai`. Each validator admission signature root must bind the
+validator identity, keys, reward account, commission, genesis power, reward unit,
+and fee-policy root.
 
 Operators can generate the required shape and verify a filled validator set
 with:

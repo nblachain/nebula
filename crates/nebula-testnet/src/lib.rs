@@ -599,6 +599,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "minimum_region_count": MIN_PUBLIC_TESTNET_REGIONS,
                 "reward_unit": NEBULAI_UNIT,
                 "fee_policy_root_required": true,
+                "signed_admission_root_binds_validator_payload": true,
                 "unique_consensus_keys_required": true,
                 "unique_p2p_endpoints_required": true,
             })),
@@ -614,6 +615,8 @@ pub fn readiness_report() -> NebulaReadiness {
             "launch_package": stable_root(&json!({
                 "deployment_attestation_verified": true,
                 "deployment_witness_root_verified": true,
+                "operator_signature_roots_verified": true,
+                "observer_signature_roots_verified": true,
                 "public_status_surface_verified": true,
                 "public_probe_surface_verified": true,
                 "validator_set_verified": true,
@@ -760,48 +763,62 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
         preflight_receipt,
         runbook_receipt,
         bootstrap_nodes,
-        operators: vec![
-            OperatorAttestation {
-                operator_id: "operator-a".to_string(),
-                region: "us-east".to_string(),
-                public_key: "nebula-operator-key-a".to_string(),
-                signed_evidence_root: witness_evidence_root.clone(),
-                signature_sha3_256: hex_64("operator-a-signature"),
-            },
-            OperatorAttestation {
-                operator_id: "operator-b".to_string(),
-                region: "eu-west".to_string(),
-                public_key: "nebula-operator-key-b".to_string(),
-                signed_evidence_root: witness_evidence_root.clone(),
-                signature_sha3_256: hex_64("operator-b-signature"),
-            },
-        ],
-        observers: vec![
-            ObserverAttestation {
-                observer_id: "observer-us-east-1".to_string(),
-                region: "us-east".to_string(),
-                observed_endpoint: endpoint_url.clone(),
-                observed_evidence_root: witness_evidence_root.clone(),
-                signature: SignatureVerification {
-                    algorithm: "ed25519-testnet-attestation".to_string(),
-                    public_key: "nebula-observer-key-a".to_string(),
-                    signature_sha3_256: hex_64("observer-a-signature"),
-                    verified: true,
+        operators: {
+            let mut operators = vec![
+                OperatorAttestation {
+                    operator_id: "operator-a".to_string(),
+                    region: "us-east".to_string(),
+                    public_key: "nebula-operator-key-a".to_string(),
+                    signed_evidence_root: witness_evidence_root.clone(),
+                    signature_sha3_256: String::new(),
                 },
-            },
-            ObserverAttestation {
-                observer_id: "observer-eu-west-1".to_string(),
-                region: "eu-west".to_string(),
-                observed_endpoint: endpoint_url,
-                observed_evidence_root: witness_evidence_root,
-                signature: SignatureVerification {
-                    algorithm: "ed25519-testnet-attestation".to_string(),
-                    public_key: "nebula-observer-key-b".to_string(),
-                    signature_sha3_256: hex_64("observer-b-signature"),
-                    verified: true,
+                OperatorAttestation {
+                    operator_id: "operator-b".to_string(),
+                    region: "eu-west".to_string(),
+                    public_key: "nebula-operator-key-b".to_string(),
+                    signed_evidence_root: witness_evidence_root.clone(),
+                    signature_sha3_256: String::new(),
                 },
-            },
-        ],
+            ];
+            for operator in &mut operators {
+                operator.signature_sha3_256 =
+                    operator_signature_root(operator, &witness_evidence_root);
+            }
+            operators
+        },
+        observers: {
+            let mut observers = vec![
+                ObserverAttestation {
+                    observer_id: "observer-us-east-1".to_string(),
+                    region: "us-east".to_string(),
+                    observed_endpoint: endpoint_url.clone(),
+                    observed_evidence_root: witness_evidence_root.clone(),
+                    signature: SignatureVerification {
+                        algorithm: "ed25519-testnet-attestation".to_string(),
+                        public_key: "nebula-observer-key-a".to_string(),
+                        signature_sha3_256: String::new(),
+                        verified: true,
+                    },
+                },
+                ObserverAttestation {
+                    observer_id: "observer-eu-west-1".to_string(),
+                    region: "eu-west".to_string(),
+                    observed_endpoint: endpoint_url,
+                    observed_evidence_root: witness_evidence_root.clone(),
+                    signature: SignatureVerification {
+                        algorithm: "ed25519-testnet-attestation".to_string(),
+                        public_key: "nebula-observer-key-b".to_string(),
+                        signature_sha3_256: String::new(),
+                        verified: true,
+                    },
+                },
+            ];
+            for observer in &mut observers {
+                observer.signature.signature_sha3_256 =
+                    observer_signature_root(observer, &witness_evidence_root);
+            }
+            observers
+        },
         rollback_evidence: RollbackEvidence {
             rollback_plan_sha3_256: hex_64("rollback-plan"),
             last_drill_unix_ms: now,
@@ -901,7 +918,7 @@ pub fn sample_validator_set_json_pretty() -> String {
         .expect("economics root is a string")
         .to_string();
 
-    let validators = vec![
+    let mut validators = vec![
         ValidatorAdmission {
             validator_id: "validator-a".to_string(),
             operator_id: "operator-a".to_string(),
@@ -913,7 +930,7 @@ pub fn sample_validator_set_json_pretty() -> String {
             reward_account: "nbla-reward-operator-a".to_string(),
             commission_bps: 500,
             genesis_power: 1,
-            signed_admission_root: hex_64("validator-a-admission"),
+            signed_admission_root: String::new(),
         },
         ValidatorAdmission {
             validator_id: "validator-b".to_string(),
@@ -926,9 +943,13 @@ pub fn sample_validator_set_json_pretty() -> String {
             reward_account: "nbla-reward-operator-b".to_string(),
             commission_bps: 500,
             genesis_power: 1,
-            signed_admission_root: hex_64("validator-b-admission"),
+            signed_admission_root: String::new(),
         },
     ];
+    for validator in &mut validators {
+        validator.signed_admission_root =
+            validator_admission_signature_root(validator, &economics_root);
+    }
 
     let mut manifest = ValidatorSetManifest {
         chain_id: CHAIN_ID.to_string(),
@@ -1022,6 +1043,7 @@ pub fn verify_validator_set_json(input: &str) -> Result<ValidatorSetReport, Atte
             &mut network_keys,
             &mut endpoints,
             &mut total_genesis_power,
+            economics_root,
         );
     }
 
@@ -1971,6 +1993,12 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("operators[{index}].signature_sha3_256"),
             &operator.signature_sha3_256,
         );
+        require_root(
+            errors,
+            &format!("operators[{index}].signature_sha3_256"),
+            &operator.signature_sha3_256,
+            &operator_signature_root(operator, &witness_evidence_root),
+        );
     }
     for (index, observer) in attestation.observers.iter().enumerate() {
         require_eq(
@@ -1994,6 +2022,23 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             errors,
             &format!("observers[{index}].signature.signature_sha3_256"),
             &observer.signature.signature_sha3_256,
+        );
+        require_eq(
+            errors,
+            &format!("observers[{index}].signature.algorithm"),
+            &observer.signature.algorithm,
+            "ed25519-testnet-attestation",
+        );
+        require_non_empty(
+            errors,
+            &format!("observers[{index}].signature.public_key"),
+            &observer.signature.public_key,
+        );
+        require_root(
+            errors,
+            &format!("observers[{index}].signature.signature_sha3_256"),
+            &observer.signature.signature_sha3_256,
+            &observer_signature_root(observer, &witness_evidence_root),
         );
         if !observer.signature.verified {
             errors.push(format!(
@@ -2070,6 +2115,7 @@ fn verify_validator_admission(
     network_keys: &mut BTreeSet<String>,
     endpoints: &mut BTreeSet<String>,
     total_genesis_power: &mut u64,
+    fee_policy_root: &str,
 ) {
     require_non_empty(
         errors,
@@ -2140,6 +2186,12 @@ fn verify_validator_admission(
         errors,
         &format!("validators[{index}].signed_admission_root"),
         &validator.signed_admission_root,
+    );
+    require_root(
+        errors,
+        &format!("validators[{index}].signed_admission_root"),
+        &validator.signed_admission_root,
+        &validator_admission_signature_root(validator, fee_policy_root),
     );
 
     insert_unique(
@@ -2272,6 +2324,49 @@ fn bootstrap_node_root(node: &BootstrapNode, witness_evidence_root: &str) -> Str
         "region": node.region,
         "endpoint": node.endpoint,
         "witness_evidence_root": witness_evidence_root,
+    }))
+}
+
+fn operator_signature_root(operator: &OperatorAttestation, witness_evidence_root: &str) -> String {
+    stable_root(&json!({
+        "signature_domain": "nebula-operator-witness-v1",
+        "operator_id": operator.operator_id,
+        "region": operator.region,
+        "public_key": operator.public_key,
+        "signed_evidence_root": witness_evidence_root,
+    }))
+}
+
+fn observer_signature_root(observer: &ObserverAttestation, witness_evidence_root: &str) -> String {
+    stable_root(&json!({
+        "signature_domain": "nebula-observer-witness-v1",
+        "algorithm": observer.signature.algorithm,
+        "observer_id": observer.observer_id,
+        "region": observer.region,
+        "public_key": observer.signature.public_key,
+        "observed_endpoint": observer.observed_endpoint,
+        "observed_evidence_root": witness_evidence_root,
+    }))
+}
+
+fn validator_admission_signature_root(
+    validator: &ValidatorAdmission,
+    fee_policy_root: &str,
+) -> String {
+    stable_root(&json!({
+        "signature_domain": "nebula-validator-admission-v1",
+        "validator_id": validator.validator_id,
+        "operator_id": validator.operator_id,
+        "node_id": validator.node_id,
+        "region": validator.region,
+        "consensus_public_key": validator.consensus_public_key,
+        "network_public_key": validator.network_public_key,
+        "p2p_endpoint": validator.p2p_endpoint,
+        "reward_account": validator.reward_account,
+        "commission_bps": validator.commission_bps,
+        "genesis_power": validator.genesis_power,
+        "fee_policy_root": fee_policy_root,
+        "reward_unit": NEBULAI_UNIT,
     }))
 }
 
@@ -2582,6 +2677,24 @@ mod public_launch {
     }
 
     #[test]
+    fn deployment_attestation_rejects_operator_wrong_signature_root() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["operators"][0]["signature_sha3_256"] = json!(hex_64("wrong-operator-signature"));
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("operators[0].signature_sha3_256 does not match")
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
     fn deployment_attestation_rejects_observer_wrong_witness_root() {
         let mut value =
             serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
@@ -2593,6 +2706,25 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error.starts_with("observers[0].observed_evidence_root expected")
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_observer_wrong_signature_root() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["observers"][0]["signature"]["signature_sha3_256"] =
+            json!(hex_64("wrong-observer-signature"));
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("observers[0].signature.signature_sha3_256 does not match")
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
@@ -2635,6 +2767,24 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "validators[1].consensus_public_key must be unique"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_wrong_admission_signature_root() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["signed_admission_root"] =
+            json!(hex_64("wrong-validator-admission"));
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("validators[0].signed_admission_root does not match")
+                }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
@@ -2812,9 +2962,7 @@ mod public_launch {
         let mut validators =
             serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
         validators["validators"][0]["operator_id"] = json!("operator-c");
-        validators["root"] = json!(validator_set_root(
-            &serde_json::from_value::<ValidatorSetManifest>(validators.clone()).unwrap()
-        ));
+        refresh_validator_manifest_root(&mut validators, 0);
         let genesis =
             build_genesis_manifest_json_pretty(&deployment, &validators.to_string()).unwrap();
 
@@ -2850,9 +2998,7 @@ mod public_launch {
         let mut validators =
             serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
         validators["validators"][0]["node_id"] = json!("bootstrap-ap-south-1");
-        validators["root"] = json!(validator_set_root(
-            &serde_json::from_value::<ValidatorSetManifest>(validators.clone()).unwrap()
-        ));
+        refresh_validator_manifest_root(&mut validators, 0);
         let genesis =
             build_genesis_manifest_json_pretty(&deployment, &validators.to_string()).unwrap();
 
@@ -2874,6 +3020,23 @@ mod public_launch {
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
+    }
+
+    fn refresh_validator_manifest_root(manifest: &mut Value, validator_index: usize) {
+        let fee_policy_root = manifest["fee_policy_root"]
+            .as_str()
+            .expect("sample fee policy root")
+            .to_string();
+        let validator = serde_json::from_value::<ValidatorAdmission>(
+            manifest["validators"][validator_index].clone(),
+        )
+        .unwrap();
+        manifest["validators"][validator_index]["signed_admission_root"] = json!(
+            validator_admission_signature_root(&validator, &fee_policy_root)
+        );
+        manifest["root"] = json!(validator_set_root(
+            &serde_json::from_value::<ValidatorSetManifest>(manifest.clone()).unwrap()
+        ));
     }
 }
 

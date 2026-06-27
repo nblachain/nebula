@@ -37,7 +37,8 @@ before wrapping it in deployment evidence.
 
 Deployment evidence binds bootstrap nodes, operators, and observers to one
 shared witness root for the launch bundle, public status, endpoint/TLS pins,
-policy claim, and public probe.
+policy claim, and public probe. Operator and observer signature roots must bind
+their signer identity and that witness root.
 
 Preflight and runbook receipt verifiers let operators prove launch steps before
 wrapping those receipts in deployment evidence.
@@ -50,7 +51,9 @@ Fees and validator points are denominated in `nebulai`, where
 `1 NBLA = 0.001 nXMR`.
 
 The validator-set verifier requires at least two validators, two operators, and
-two regions. Validator admission rewards are denominated in `nebulai`.
+two regions. Validator admission rewards are denominated in `nebulai`, and each
+signed admission root must bind the validator identity, keys, reward account,
+commission, genesis power, reward unit, and fee-policy root.
 
 The genesis manifest builder binds verified deployment evidence and validator
 admission into the root artifact used to start a public testnet.
