@@ -296,6 +296,7 @@ pub struct DeploymentAttestationReport {
     pub public_surface_root: String,
     pub operator_approval_root: String,
     pub observer_confirmation_root: String,
+    pub rollback_readiness_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub attestation_expires_at_unix_ms: u128,
@@ -362,6 +363,7 @@ pub struct GenesisManifest {
     pub public_surface_root: String,
     pub operator_approval_root: String,
     pub observer_confirmation_root: String,
+    pub rollback_readiness_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub validator_set_root: String,
@@ -389,6 +391,7 @@ pub struct GenesisManifestReport {
     pub public_surface_root: String,
     pub operator_approval_root: String,
     pub observer_confirmation_root: String,
+    pub rollback_readiness_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub validator_set_root: String,
@@ -414,6 +417,7 @@ pub struct LaunchPackageReport {
     pub public_surface_root: String,
     pub operator_approval_root: String,
     pub observer_confirmation_root: String,
+    pub rollback_readiness_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub public_status_manifest_root: String,
@@ -716,6 +720,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "receipts_complete_before_deployment_generation": true,
                 "rollback_drill_before_deployment_generation": true,
                 "rollback_plan_recovery_roots_disjoint": true,
+                "rollback_readiness_root_reported": true,
                 "operational_evidence_root_reported": true,
                 "deployment_component_roots_disjoint": true,
                 "deployment_witness_root_verified": true,
@@ -773,6 +778,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "genesis_binds_public_surface_root": true,
                 "genesis_binds_operator_approval_root": true,
                 "genesis_binds_observer_confirmation_root": true,
+                "genesis_binds_rollback_readiness_root": true,
                 "genesis_binds_bootstrap_roster_root": true,
                 "genesis_binds_operational_evidence_root": true,
                 "genesis_binds_validator_set_root": true,
@@ -1303,6 +1309,7 @@ pub fn build_genesis_manifest_json_pretty(
         public_surface_root: deployment_report.public_surface_root,
         operator_approval_root: deployment_report.operator_approval_root,
         observer_confirmation_root: deployment_report.observer_confirmation_root,
+        rollback_readiness_root: deployment_report.rollback_readiness_root,
         bootstrap_roster_root: deployment_report.bootstrap_roster_root,
         operational_evidence_root: deployment_report.operational_evidence_root,
         validator_set_root: validator_set_report.validator_set_root,
@@ -1379,6 +1386,11 @@ pub fn verify_genesis_manifest_json(
         &mut errors,
         "observer_confirmation_root",
         &manifest.observer_confirmation_root,
+    );
+    require_hex_root(
+        &mut errors,
+        "rollback_readiness_root",
+        &manifest.rollback_readiness_root,
     );
     require_hex_root(
         &mut errors,
@@ -1478,6 +1490,7 @@ pub fn verify_genesis_manifest_json(
         public_surface_root: manifest.public_surface_root,
         operator_approval_root: manifest.operator_approval_root,
         observer_confirmation_root: manifest.observer_confirmation_root,
+        rollback_readiness_root: manifest.rollback_readiness_root,
         bootstrap_roster_root: manifest.bootstrap_roster_root,
         operational_evidence_root: manifest.operational_evidence_root,
         validator_set_root: manifest.validator_set_root,
@@ -1510,6 +1523,10 @@ fn verify_genesis_root_domains(errors: &mut Vec<String>, manifest: &GenesisManif
         (
             "observer_confirmation_root",
             manifest.observer_confirmation_root.as_str(),
+        ),
+        (
+            "rollback_readiness_root",
+            manifest.rollback_readiness_root.as_str(),
         ),
         (
             "bootstrap_roster_root",
@@ -1634,6 +1651,12 @@ pub fn verify_launch_package_jsons(
             deployment_report.observer_confirmation_root
         ));
     }
+    if genesis_report.rollback_readiness_root != deployment_report.rollback_readiness_root {
+        errors.push(format!(
+            "genesis rollback_readiness_root does not match deployment rollback readiness root {}",
+            deployment_report.rollback_readiness_root
+        ));
+    }
     if genesis_report.bootstrap_roster_root != deployment_report.bootstrap_roster_root {
         errors.push(format!(
             "genesis bootstrap_roster_root does not match deployment bootstrap roster root {}",
@@ -1719,6 +1742,7 @@ pub fn verify_launch_package_jsons(
         public_surface_root: deployment_report.public_surface_root,
         operator_approval_root: deployment_report.operator_approval_root,
         observer_confirmation_root: deployment_report.observer_confirmation_root,
+        rollback_readiness_root: deployment_report.rollback_readiness_root,
         bootstrap_roster_root: deployment_report.bootstrap_roster_root,
         operational_evidence_root: deployment_report.operational_evidence_root,
         public_status_manifest_root: public_status_manifest.root,
@@ -1895,6 +1919,7 @@ pub fn verify_deployment_attestation_json(
         public_surface_root: deployment_public_surface_root(&attestation),
         operator_approval_root: deployment_operator_approval_root(&attestation),
         observer_confirmation_root: deployment_observer_confirmation_root(&attestation),
+        rollback_readiness_root: deployment_rollback_readiness_root(&attestation),
         bootstrap_roster_root: deployment_bootstrap_roster_root(&attestation),
         operational_evidence_root: deployment_operational_evidence_root(&attestation),
         attestation_expires_at_unix_ms: attestation.expires_at_unix_ms,
@@ -3508,6 +3533,20 @@ fn deployment_observer_confirmation_root(attestation: &DeploymentAttestation) ->
     }))
 }
 
+fn deployment_rollback_readiness_root(attestation: &DeploymentAttestation) -> String {
+    stable_root(&json!({
+        "rollback_domain": "nebula-deployment-rollback-readiness-v1",
+        "chain_id": attestation.chain_id,
+        "launch_bundle_root": attestation.launch_bundle.root,
+        "generated_at_unix_ms": attestation.generated_at_unix_ms,
+        "preflight_receipt_root": attestation.preflight_receipt.root,
+        "runbook_receipt_root": attestation.runbook_receipt.root,
+        "rollback_plan_sha3_256": attestation.rollback_evidence.rollback_plan_sha3_256,
+        "rollback_last_drill_unix_ms": attestation.rollback_evidence.last_drill_unix_ms,
+        "rollback_recovery_point_root": attestation.rollback_evidence.recovery_point_root,
+    }))
+}
+
 fn deployment_bootstrap_roster_root(attestation: &DeploymentAttestation) -> String {
     let mut nodes = attestation
         .bootstrap_nodes
@@ -3692,6 +3731,7 @@ fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
         "public_surface_root": manifest.public_surface_root,
         "operator_approval_root": manifest.operator_approval_root,
         "observer_confirmation_root": manifest.observer_confirmation_root,
+        "rollback_readiness_root": manifest.rollback_readiness_root,
         "bootstrap_roster_root": manifest.bootstrap_roster_root,
         "operational_evidence_root": manifest.operational_evidence_root,
         "validator_set_root": manifest.validator_set_root,
@@ -3970,6 +4010,7 @@ mod public_launch {
         assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.operator_approval_root.len(), 64);
         assert_eq!(report.observer_confirmation_root.len(), 64);
+        assert_eq!(report.rollback_readiness_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
     }
@@ -5653,6 +5694,7 @@ mod public_launch {
         assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.operator_approval_root.len(), 64);
         assert_eq!(report.observer_confirmation_root.len(), 64);
+        assert_eq!(report.rollback_readiness_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.validator_set_root.len(), 64);
@@ -5678,6 +5720,7 @@ mod public_launch {
         assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.operator_approval_root.len(), 64);
         assert_eq!(report.observer_confirmation_root.len(), 64);
+        assert_eq!(report.rollback_readiness_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.operator_roster_root.len(), 64);
@@ -5850,6 +5893,7 @@ mod public_launch {
         assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.operator_approval_root.len(), 64);
         assert_eq!(report.observer_confirmation_root.len(), 64);
+        assert_eq!(report.rollback_readiness_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.public_status_manifest_root.len(), 64);
@@ -6004,6 +6048,40 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error.starts_with("genesis observer_confirmation_root does not match")
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_rejects_mismatched_genesis_rollback_readiness_root() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let mut genesis = serde_json::from_str::<Value>(
+            &build_genesis_manifest_json_pretty(&deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        genesis["rollback_readiness_root"] = json!(hex_64("different-rollback-readiness-root"));
+        genesis["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(genesis.clone()).unwrap()
+        ));
+
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &genesis.to_string(),
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("genesis rollback_readiness_root does not match")
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
