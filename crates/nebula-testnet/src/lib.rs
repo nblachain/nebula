@@ -658,6 +658,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "unique_tls_public_key_pins_required": true,
                 "tls_cert_public_key_pin_domains_disjoint": true,
                 "unique_bootstrap_node_ids_required": true,
+                "bootstrap_operator_id_domains_disjoint": true,
                 "unique_bootstrap_endpoints_required": true,
                 "bootstrap_endpoint_authority_required": true,
                 "bootstrap_region_spread_required": true,
@@ -2291,6 +2292,11 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("bootstrap_nodes[{index}].node_id"),
             &node.node_id,
         );
+        if operator_ids.contains(&node.node_id) {
+            errors.push(format!(
+                "bootstrap_nodes[{index}].node_id must not reuse an operator_id"
+            ));
+        }
         require_non_empty(
             errors,
             &format!("bootstrap_nodes[{index}].operator_id"),
@@ -4020,6 +4026,25 @@ mod public_launch {
                     .any(|error| error == "bootstrap_nodes[1].node_id must be unique"));
                 assert!(errors.iter().any(|error| {
                     error == "bootstrap_nodes must include at least 2 unique node_id values"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_bootstrap_node_id_reused_as_operator_id() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["bootstrap_nodes"][0]["node_id"] = value["operators"][0]["operator_id"].clone();
+        refresh_bootstrap_node_root(&mut value, 0);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "bootstrap_nodes[0].node_id must not reuse an operator_id"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
