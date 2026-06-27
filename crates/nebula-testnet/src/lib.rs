@@ -609,6 +609,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "signed_admission_root_binds_validator_payload": true,
                 "operator_contact_required": true,
                 "unique_consensus_keys_required": true,
+                "unique_reward_accounts_required": true,
                 "unique_p2p_endpoints_required": true,
                 "max_single_validator_genesis_power_bps": MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS,
             })),
@@ -1051,6 +1052,7 @@ pub fn verify_validator_set_json(input: &str) -> Result<ValidatorSetReport, Atte
     let mut regions = BTreeSet::new();
     let mut consensus_keys = BTreeSet::new();
     let mut network_keys = BTreeSet::new();
+    let mut reward_accounts = BTreeSet::new();
     let mut endpoints = BTreeSet::new();
     let mut total_genesis_power = 0_u64;
 
@@ -1065,6 +1067,7 @@ pub fn verify_validator_set_json(input: &str) -> Result<ValidatorSetReport, Atte
             &mut regions,
             &mut consensus_keys,
             &mut network_keys,
+            &mut reward_accounts,
             &mut endpoints,
             &mut total_genesis_power,
             economics_root,
@@ -2273,6 +2276,7 @@ fn verify_validator_admission(
     regions: &mut BTreeSet<String>,
     consensus_keys: &mut BTreeSet<String>,
     network_keys: &mut BTreeSet<String>,
+    reward_accounts: &mut BTreeSet<String>,
     endpoints: &mut BTreeSet<String>,
     total_genesis_power: &mut u64,
     fee_policy_root: &str,
@@ -2389,6 +2393,12 @@ fn verify_validator_admission(
         network_keys,
         &format!("validators[{index}].network_public_key"),
         &validator.network_public_key,
+    );
+    insert_unique(
+        errors,
+        reward_accounts,
+        &format!("validators[{index}].reward_account"),
+        &validator.reward_account,
     );
     insert_unique(
         errors,
@@ -3222,6 +3232,24 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "validators[1].consensus_public_key must be unique"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_duplicate_reward_accounts() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][1]["reward_account"] = value["validators"][0]["reward_account"].clone();
+        refresh_validator_manifest_root(&mut value, 1);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "validators[1].reward_account must be unique"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
