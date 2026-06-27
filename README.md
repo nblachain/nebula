@@ -105,8 +105,8 @@ The public launch suite covers:
 - validator-set admission, whitespace-free and role-separated identity,
   fixed genesis epoch, whitespace-free region, contact, reward-unit,
   uniqueness, operator power concentration, and region-spread validation
-- genesis manifest root binding across deployment evidence, validator set, and
-  fee policy
+- genesis manifest root and epoch binding across deployment evidence,
+  validator set, and fee policy
 - genesis manifest artifact-root domain separation
 - genesis manifest freshness validation
 - genesis timestamp binding to the deployment attestation validity window
@@ -282,11 +282,12 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 The final local launch artifact is a genesis manifest. It can only be built from
 a deployment attestation and validator-set manifest that already pass their
 verifiers. The manifest binds the deployment evidence root, validator-set root,
-fee-policy root, validator-admission root, initial validator count, total genesis
-power, fixed activation height `1`, and fee token identities. The verifier keeps
-deployment, validator-set, fee-policy, and validator-admission roots in separate
-domains. The final launch-package check requires the genesis timestamp to be
-fresh and to fall inside the deployment attestation validity window.
+validator-set epoch `0`, fee-policy root, validator-admission root, initial
+validator count, total genesis power, fixed activation height `1`, and fee token
+identities. The verifier keeps deployment, validator-set, fee-policy, and
+validator-admission roots in separate domains. The final launch-package check
+requires the genesis timestamp to be fresh and to fall inside the deployment
+attestation validity window.
 
 Operators can build and verify the launch manifest with:
 
@@ -301,8 +302,9 @@ The final package check verifies the deployment attestation, public status
 manifest, public probe, validator-set manifest, and genesis manifest together.
 It rejects a package when the public surface roots do not match the deployment
 attestation, or when the genesis manifest does not bind the exact deployment
-evidence root, validator-set root, validator count, total genesis power, and
-deployment validity window produced by the other verified files. It also rejects
+evidence root, validator-set root, validator-set epoch, validator count, total
+genesis power, and deployment validity window produced by the other verified
+files. It also rejects
 validator consensus/network keys that reuse deployment witness keys,
 validator-set manifests whose admitted validators do not map to the attested
 deployment operators and bootstrap nodes, validator P2P hosts that do not match

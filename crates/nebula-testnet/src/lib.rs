@@ -352,6 +352,7 @@ pub struct GenesisManifest {
     pub activation_height: u64,
     pub deployment_attestation_root: String,
     pub validator_set_root: String,
+    pub validator_set_epoch: u64,
     pub fee_policy_root: String,
     pub validator_admission_root: String,
     pub initial_validator_count: usize,
@@ -369,6 +370,7 @@ pub struct GenesisManifestReport {
     pub genesis_root: String,
     pub deployment_attestation_root: String,
     pub validator_set_root: String,
+    pub validator_set_epoch: u64,
     pub initial_validator_count: usize,
     pub initial_total_power: u64,
     pub activation_height: u64,
@@ -386,6 +388,7 @@ pub struct LaunchPackageReport {
     pub launch_bundle_root: String,
     pub fee_policy_root: String,
     pub validator_set_root: String,
+    pub validator_set_epoch: u64,
     pub genesis_root: String,
     pub matched_validator_count: usize,
     pub deployment_operator_count: usize,
@@ -639,6 +642,7 @@ pub fn readiness_report() -> NebulaReadiness {
             "genesis_manifest": stable_root(&json!({
                 "deployment_attestation_root_required": true,
                 "validator_set_root_required": true,
+                "validator_set_epoch": PUBLIC_TESTNET_GENESIS_EPOCH,
                 "fee_policy_root_required": true,
                 "validator_admission_root_required": true,
                 "artifact_root_domains_disjoint": true,
@@ -1225,6 +1229,7 @@ pub fn build_genesis_manifest_json_pretty(
         activation_height: PUBLIC_TESTNET_ACTIVATION_HEIGHT,
         deployment_attestation_root: deployment_report.evidence_root,
         validator_set_root: validator_set_report.validator_set_root,
+        validator_set_epoch: PUBLIC_TESTNET_GENESIS_EPOCH,
         fee_policy_root,
         validator_admission_root,
         initial_validator_count: validator_set_report.validator_count,
@@ -1284,6 +1289,11 @@ pub fn verify_genesis_manifest_json(
         "validator_set_root",
         &manifest.validator_set_root,
     );
+    if manifest.validator_set_epoch != PUBLIC_TESTNET_GENESIS_EPOCH {
+        errors.push(format!(
+            "validator_set_epoch must be {PUBLIC_TESTNET_GENESIS_EPOCH}"
+        ));
+    }
     require_eq(
         &mut errors,
         "fee_policy_root",
@@ -1340,6 +1350,7 @@ pub fn verify_genesis_manifest_json(
         genesis_root: manifest.root,
         deployment_attestation_root: manifest.deployment_attestation_root,
         validator_set_root: manifest.validator_set_root,
+        validator_set_epoch: manifest.validator_set_epoch,
         initial_validator_count: manifest.initial_validator_count,
         initial_total_power: manifest.initial_total_power,
         activation_height: manifest.activation_height,
@@ -1451,6 +1462,12 @@ pub fn verify_launch_package_jsons(
             validator_set_report.validator_set_root
         ));
     }
+    if genesis_report.validator_set_epoch != validator_set_manifest.epoch {
+        errors.push(format!(
+            "genesis validator_set_epoch expected {} but got {}",
+            validator_set_manifest.epoch, genesis_report.validator_set_epoch
+        ));
+    }
     if genesis_report.initial_validator_count != validator_set_report.validator_count {
         errors.push(format!(
             "genesis initial_validator_count expected {} but got {}",
@@ -1491,6 +1508,7 @@ pub fn verify_launch_package_jsons(
         launch_bundle_root: deployment_attestation.launch_bundle.root,
         fee_policy_root: economics_root.to_string(),
         validator_set_root: validator_set_report.validator_set_root,
+        validator_set_epoch: genesis_report.validator_set_epoch,
         genesis_root: genesis_report.genesis_root,
         matched_validator_count: validator_set_manifest.validators.len(),
         deployment_operator_count: deployment_attestation.operators.len(),
@@ -3162,6 +3180,7 @@ fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
         "activation_height": manifest.activation_height,
         "deployment_attestation_root": manifest.deployment_attestation_root,
         "validator_set_root": manifest.validator_set_root,
+        "validator_set_epoch": manifest.validator_set_epoch,
         "fee_policy_root": manifest.fee_policy_root,
         "validator_admission_root": manifest.validator_admission_root,
         "initial_validator_count": manifest.initial_validator_count,
@@ -5114,6 +5133,7 @@ mod public_launch {
 
         assert!(report.genesis_ready);
         assert_eq!(report.initial_validator_count, 2);
+        assert_eq!(report.validator_set_epoch, PUBLIC_TESTNET_GENESIS_EPOCH);
     }
 
     #[test]
@@ -5143,6 +5163,27 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "activation_height must be 1"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn genesis_manifest_rejects_wrong_validator_set_epoch() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_genesis_manifest_json_pretty()).unwrap();
+        value["validator_set_epoch"] = json!(PUBLIC_TESTNET_GENESIS_EPOCH + 1);
+        value["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(value.clone()).unwrap()
+        ));
+
+        let error = verify_genesis_manifest_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "validator_set_epoch must be 0"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
@@ -5219,6 +5260,7 @@ mod public_launch {
         assert_eq!(report.launch_bundle_root.len(), 64);
         assert_eq!(report.fee_policy_root.len(), 64);
         assert_eq!(report.validator_set_root.len(), 64);
+        assert_eq!(report.validator_set_epoch, PUBLIC_TESTNET_GENESIS_EPOCH);
         assert_eq!(report.genesis_root.len(), 64);
         assert_eq!(report.matched_validator_count, 2);
         assert_eq!(report.deployment_operator_count, 2);
