@@ -254,8 +254,10 @@ evidence is absent or stale.
     the current sequencer public key, sequencer key-rotation history/root,
     accountability evidence root, equivocation evidence, and mis-signing
     evidence. Operators must rehearse `nebula_rotateSequencerKey` with the old
-    key, new key, activation height, rotation proof root, and operator approval
-    roots, then prove followers fail closed on stale-key blocks. Operator-only
+    key, new key, activation height, previous key-history root, rotation proof
+    root, distinct launch-attested operator approval IDs/roots, and signed
+    `operator_approvals`, then prove followers fail closed on stale-key blocks.
+    Operator-only
     methods must require `params.admin_token` from a node started with
     `--admin-rpc-bind` and `--admin-token`, and public RPC must reject those
     methods before token validation.
@@ -378,8 +380,9 @@ Sequencer key rotation and accountability are public-testnet launch gates.
 public key, key-rotation history/root, accountability evidence root,
 equivocation evidence root, and mis-signing evidence root. Runtime rotation
 uses `nebula_rotateSequencerKey`; public rehearsals should prove the old key,
-new key, activation height, rotation proof root, and operator approval roots
-agree before followers accept post-rotation blocks. Accountability reports use
+new key, activation height, previous key-history root, rotation proof root,
+operator approval roots, and signed launch-attested `operator_approvals` agree
+before followers accept post-rotation blocks. Accountability reports use
 `nebula_reportEquivocation` to bind conflicting height/hash/signature evidence
 or other sequencer mis-signing evidence. Public endpoints fail closed when
 unresolved accountability evidence is present.
@@ -811,13 +814,15 @@ rotation activation height, the accountability evidence root, and unresolved
 equivocation or mis-signing evidence counts.
 
 Key rotation uses `nebula_rotateSequencerKey` with
-`new_sequencer_secret_key_hex`, `operator_id`, and `approval_root`. A public
-rehearsal must prove the response binds the old sequencer public key, new
-sequencer public key, activation height, approval root, and rotation root, then
-prove followers reject stale-key blocks and accept only blocks signed by the
-active key after the activation height. Rotation history must be rooted so
-launch observers can compare it across `/status`, `nebula_status`, and
-snapshots.
+`new_sequencer_secret_key_hex`, `rotation_proof_root`,
+`operator_approval_ids`, `operator_approval_roots`, and signed
+`operator_approvals`. A public rehearsal must prove the response binds the old
+sequencer public key, new sequencer public key, activation height, previous
+key-history root, rotation proof root, at least two launch-attested operator
+approval signatures, and rotation root, then prove followers reject stale-key
+blocks and accept only blocks signed by the active key after the activation
+height. Rotation history must be rooted so launch observers can compare it
+across `/status`, `nebula_status`, and snapshots.
 
 Accountability evidence uses `nebula_reportEquivocation` with `height`,
 `first_block_hash`, `second_block_hash`, `reporter_id`, and `evidence_root`.

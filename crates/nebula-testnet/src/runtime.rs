@@ -31,10 +31,11 @@ pub const DEFAULT_FAUCET_NXMR: u128 = 0;
 pub const MIN_BRIDGE_CONFIRMATIONS: u64 = 10;
 pub const MIN_BRIDGE_DEPOSIT_OBSERVER_QUORUM: usize = 2;
 pub const MIN_WITHDRAWAL_OPERATOR_QUORUM: usize = 2;
+pub const MIN_SEQUENCER_ROTATION_OPERATOR_QUORUM: usize = 2;
 pub const BRIDGE_CUSTODY_POLICY_ID: &str = "nebula-monero-bridge-custody-testnet-v1";
 pub const VALIDATOR_REWARD_ACCOUNT_PREFIX: &str = "validator:";
 pub const RUNTIME_SNAPSHOT_FILE: &str = "nebula-runtime-snapshot.json";
-pub const RUNTIME_SNAPSHOT_VERSION: u32 = 11;
+pub const RUNTIME_SNAPSHOT_VERSION: u32 = 12;
 pub const DEFAULT_PEER_SYNC_MS: u64 = 100;
 pub const DEFAULT_SYNC_PEER_QUORUM: usize = 1;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
@@ -466,6 +467,17 @@ pub struct RuntimeWithdrawalOperatorApproval {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct RuntimeSequencerKeyRotationApproval {
+    pub operator_id: String,
+    pub operator_public_key_hex: String,
+    pub payload_root: String,
+    pub signature: String,
+    pub signed_at_unix_ms: u128,
+    pub approval_root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeWithdrawalRequest {
     pub withdrawal_id: String,
     pub account: String,
@@ -492,8 +504,11 @@ pub struct RuntimeSequencerKeyRotation {
     pub activation_height: u64,
     pub old_public_key_hex: String,
     pub new_public_key_hex: String,
-    pub operator_id: String,
-    pub approval_root: String,
+    pub rotation_proof_root: String,
+    pub operator_approval_ids: Vec<String>,
+    pub operator_approval_roots: Vec<String>,
+    #[serde(default)]
+    pub operator_approvals: Vec<RuntimeSequencerKeyRotationApproval>,
     pub rotated_at_unix_ms: u128,
     pub root: String,
 }
@@ -3292,15 +3307,24 @@ impl NebulaRuntime {
     pub fn rotate_sequencer_key(
         &mut self,
         new_sequencer_secret_key_hex: &str,
-        operator_id: &str,
-        approval_root: &str,
+        rotation_proof_root: &str,
+        operator_approval_ids: Vec<String>,
+        operator_approval_roots: Vec<String>,
+        operator_approvals: Vec<RuntimeSequencerKeyRotationApproval>,
     ) -> Result<SequencerKeyRotationReport, String> {
         self.ensure_accountability_clean()?;
         if !self.config.produce_blocks {
             return Err("sequencer key rotation requires block production mode".to_string());
         }
-        validate_account_id(operator_id)?;
-        let approval_root = normalize_fixed_hex(approval_root, "approval_root", 64)?;
+        let rotation_proof_root =
+            normalize_fixed_hex(rotation_proof_root, "rotation_proof_root", 64)?;
+        validate_identity_root_quorum(
+            &operator_approval_ids,
+            &operator_approval_roots,
+            "operator_approval_ids",
+            "operator_approval_roots",
+            MIN_SEQUENCER_ROTATION_OPERATOR_QUORUM,
+        )?;
         let new_sequencer_secret_key_hex = normalize_fixed_hex(
             new_sequencer_secret_key_hex,
             "new_sequencer_secret_key_hex",
@@ -3319,19 +3343,27 @@ impl NebulaRuntime {
         {
             return Err("a sequencer key rotation is already pending activation".to_string());
         }
+        let previous_sequencer_key_history_root =
+            sequencer_key_history_root(&self.sequencer_key_rotations);
         let mut rotation = RuntimeSequencerKeyRotation {
             activation_height: latest_height
                 .checked_add(1)
                 .ok_or_else(|| "activation_height overflowed".to_string())?,
             old_public_key_hex: self.config.sequencer_public_key_hex.clone(),
             new_public_key_hex,
-            operator_id: operator_id.to_string(),
-            approval_root,
+            rotation_proof_root,
+            operator_approval_ids,
+            operator_approval_roots,
+            operator_approvals,
             rotated_at_unix_ms: unix_ms(),
             root: String::new(),
         };
         rotation.root = sequencer_key_rotation_root(&rotation);
-        validate_sequencer_key_rotation(&rotation)?;
+        validate_sequencer_key_rotation(
+            &rotation,
+            self.config.launch_binding.as_ref(),
+            &previous_sequencer_key_history_root,
+        )?;
         self.config.sequencer_public_key_hex = rotation.new_public_key_hex.clone();
         self.sequencer_secret_key_hex = Some(new_sequencer_secret_key_hex);
         self.sequencer_key_rotations.push(rotation.clone());
@@ -4711,14 +4743,22 @@ fn dispatch_json_rpc_method(
             ensure_block_producer(state)?;
             let new_sequencer_secret_key_hex =
                 required_str_param(&params, "new_sequencer_secret_key_hex")?;
-            let operator_id = required_str_param(&params, "operator_id")?;
-            let approval_root = required_str_param(&params, "approval_root")?;
+            let rotation_proof_root = required_str_param(&params, "rotation_proof_root")?;
+            let operator_approval_ids =
+                required_string_array_param(&params, "operator_approval_ids")?;
+            let operator_approval_roots =
+                required_string_array_param(&params, "operator_approval_roots")?;
+            let operator_approvals = optional_json_array_param::<
+                RuntimeSequencerKeyRotationApproval,
+            >(&params, "operator_approvals")?;
             let report = {
                 let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
                 runtime.rotate_sequencer_key(
                     &new_sequencer_secret_key_hex,
-                    &operator_id,
-                    &approval_root,
+                    &rotation_proof_root,
+                    operator_approval_ids,
+                    operator_approval_roots,
+                    operator_approvals,
                 )?
             };
             state.commit_direct_state_mutation()?;
@@ -5329,8 +5369,14 @@ fn validate_sequencer_key_history(snapshot: &RuntimeSnapshot) -> Result<(), Stri
     let mut previous_activation_height: Option<u64> = None;
 
     for (index, rotation) in snapshot.sequencer_key_rotations.iter().enumerate() {
-        validate_sequencer_key_rotation(rotation)
-            .map_err(|error| format!("sequencer_key_rotations[{index}]: {error}"))?;
+        let previous_sequencer_key_history_root =
+            sequencer_key_history_root(&snapshot.sequencer_key_rotations[..index]);
+        validate_sequencer_key_rotation(
+            rotation,
+            snapshot.config.launch_binding.as_ref(),
+            &previous_sequencer_key_history_root,
+        )
+        .map_err(|error| format!("sequencer_key_rotations[{index}]: {error}"))?;
         if let Some(previous) = previous_activation_height {
             if rotation.activation_height <= previous {
                 return Err(format!(
@@ -5359,7 +5405,11 @@ fn validate_sequencer_key_history(snapshot: &RuntimeSnapshot) -> Result<(), Stri
     Ok(())
 }
 
-fn validate_sequencer_key_rotation(rotation: &RuntimeSequencerKeyRotation) -> Result<(), String> {
+fn validate_sequencer_key_rotation(
+    rotation: &RuntimeSequencerKeyRotation,
+    launch_binding: Option<&RuntimeLaunchBinding>,
+    previous_sequencer_key_history_root: &str,
+) -> Result<(), String> {
     if rotation.activation_height == 0 {
         return Err("activation_height must be greater than zero".to_string());
     }
@@ -5373,8 +5423,24 @@ fn validate_sequencer_key_rotation(rotation: &RuntimeSequencerKeyRotation) -> Re
     {
         return Err("new_public_key_hex must differ from old_public_key_hex".to_string());
     }
-    validate_account_id(&rotation.operator_id)?;
-    validate_fixed_hex(&rotation.approval_root, "approval_root", 64)?;
+    validate_fixed_hex(&rotation.rotation_proof_root, "rotation_proof_root", 64)?;
+    validate_identity_root_quorum(
+        &rotation.operator_approval_ids,
+        &rotation.operator_approval_roots,
+        "operator_approval_ids",
+        "operator_approval_roots",
+        MIN_SEQUENCER_ROTATION_OPERATOR_QUORUM,
+    )?;
+    validate_fixed_hex(
+        previous_sequencer_key_history_root,
+        "previous_sequencer_key_history_root",
+        64,
+    )?;
+    validate_sequencer_key_rotation_operator_approvals(
+        rotation,
+        launch_binding,
+        previous_sequencer_key_history_root,
+    )?;
     if rotation.root != sequencer_key_rotation_root(rotation) {
         return Err("root does not match sequencer key rotation contents".to_string());
     }
@@ -5835,6 +5901,130 @@ fn validate_withdrawal_operator_approvals(
             ));
         }
         if !operator_approval_roots[index].eq_ignore_ascii_case(&expected_root) {
+            return Err(format!(
+                "operator_approval_roots[{index}] does not match operator_approvals[{index}].approval_root"
+            ));
+        }
+        let root = approval.approval_root.to_ascii_lowercase();
+        if let Some(previous_index) = seen_roots.insert(root, index) {
+            return Err(format!(
+                "operator_approvals[{index}].approval_root duplicates operator_approvals[{previous_index}]"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sequencer_key_rotation_operator_approvals(
+    rotation: &RuntimeSequencerKeyRotation,
+    launch_binding: Option<&RuntimeLaunchBinding>,
+    previous_sequencer_key_history_root: &str,
+) -> Result<(), String> {
+    if rotation.operator_approvals.is_empty() {
+        if launch_binding.is_some() {
+            return Err(
+                "launch-bound sequencer key rotation requires operator_approvals signed by attested operators"
+                    .to_string(),
+            );
+        }
+        return Ok(());
+    }
+    if rotation.operator_approvals.len() != rotation.operator_approval_ids.len() {
+        return Err(format!(
+            "operator_approvals length {} must match operator_approval_ids length {}",
+            rotation.operator_approvals.len(),
+            rotation.operator_approval_ids.len()
+        ));
+    }
+    if rotation.operator_approvals.len() != rotation.operator_approval_roots.len() {
+        return Err(format!(
+            "operator_approvals length {} must match operator_approval_roots length {}",
+            rotation.operator_approvals.len(),
+            rotation.operator_approval_roots.len()
+        ));
+    }
+
+    let operator_roster = launch_binding.map(launch_bridge_operator_key_map);
+    let payload_root = sequencer_key_rotation_payload_root(
+        launch_binding,
+        previous_sequencer_key_history_root,
+        rotation.activation_height,
+        &rotation.old_public_key_hex,
+        &rotation.new_public_key_hex,
+        &rotation.rotation_proof_root,
+    );
+    let mut seen_ids = BTreeMap::<String, usize>::new();
+    let mut seen_keys = BTreeMap::<String, usize>::new();
+    let mut seen_roots = BTreeMap::<String, usize>::new();
+    for (index, approval) in rotation.operator_approvals.iter().enumerate() {
+        validate_account_id(&approval.operator_id)?;
+        if !approval
+            .operator_id
+            .eq_ignore_ascii_case(&rotation.operator_approval_ids[index])
+        {
+            return Err(format!(
+                "operator_approvals[{index}].operator_id must match operator_approval_ids[{index}]"
+            ));
+        }
+        let operator_key_name = format!("operator_approvals[{index}].operator_public_key_hex");
+        validate_fixed_hex(&approval.operator_public_key_hex, &operator_key_name, 64)?;
+        let operator_id = approval.operator_id.to_ascii_lowercase();
+        if let Some(previous_index) = seen_ids.insert(operator_id.clone(), index) {
+            return Err(format!(
+                "operator_approvals[{index}].operator_id duplicates operator_approvals[{previous_index}]"
+            ));
+        }
+        let public_key = approval.operator_public_key_hex.to_ascii_lowercase();
+        if let Some(previous_index) = seen_keys.insert(public_key.clone(), index) {
+            return Err(format!(
+                "operator_approvals[{index}].operator_public_key_hex duplicates operator_approvals[{previous_index}]"
+            ));
+        }
+        if let Some(roster) = &operator_roster {
+            let expected = roster.get(&operator_id).ok_or_else(|| {
+                format!(
+                    "operator_approvals[{index}].operator_id {} is not launch-attested",
+                    approval.operator_id
+                )
+            })?;
+            if !approval
+                .operator_public_key_hex
+                .eq_ignore_ascii_case(&expected.public_key)
+            {
+                return Err(format!(
+                    "operator_approvals[{index}].operator_public_key_hex does not match launch-attested operator key"
+                ));
+            }
+        }
+        validate_fixed_hex(
+            &approval.payload_root,
+            &format!("operator_approvals[{index}].payload_root"),
+            64,
+        )?;
+        if !approval.payload_root.eq_ignore_ascii_case(&payload_root) {
+            return Err(format!(
+                "operator_approvals[{index}].payload_root does not match sequencer key rotation payload"
+            ));
+        }
+        verify_ed25519_signature(
+            &approval.operator_public_key_hex,
+            &operator_key_name,
+            &approval.payload_root,
+            &approval.signature,
+            &format!("operator_approvals[{index}].signature"),
+        )?;
+        validate_fixed_hex(
+            &approval.approval_root,
+            &format!("operator_approvals[{index}].approval_root"),
+            64,
+        )?;
+        let expected_root = sequencer_key_rotation_approval_root(approval);
+        if !approval.approval_root.eq_ignore_ascii_case(&expected_root) {
+            return Err(format!(
+                "operator_approvals[{index}].approval_root does not match operator approval contents"
+            ));
+        }
+        if !rotation.operator_approval_roots[index].eq_ignore_ascii_case(&expected_root) {
             return Err(format!(
                 "operator_approval_roots[{index}] does not match operator_approvals[{index}].approval_root"
             ));
@@ -6675,6 +6865,48 @@ pub fn withdrawal_operator_approval_root(approval: &RuntimeWithdrawalOperatorApp
     }))
 }
 
+pub fn sequencer_key_rotation_payload_root(
+    launch_binding: Option<&RuntimeLaunchBinding>,
+    previous_sequencer_key_history_root: &str,
+    activation_height: u64,
+    old_public_key_hex: &str,
+    new_public_key_hex: &str,
+    rotation_proof_root: &str,
+) -> String {
+    let chain_id = launch_binding
+        .map(|binding| binding.chain_id.as_str())
+        .unwrap_or(CHAIN_ID);
+    let runtime_version = launch_binding
+        .map(|binding| binding.runtime_version.as_str())
+        .unwrap_or(VERSION);
+    let launch_package_bundle_root =
+        launch_binding.map(|binding| binding.launch_package_bundle_root.as_str());
+    stable_runtime_root(&json!({
+        "sequencer_key_rotation_payload_domain": "nebula-runtime-sequencer-key-rotation-payload-v1",
+        "chain_id": chain_id,
+        "runtime_version": runtime_version,
+        "launch_package_bundle_root": launch_package_bundle_root,
+        "previous_sequencer_key_history_root": previous_sequencer_key_history_root,
+        "activation_height": activation_height,
+        "old_public_key_hex": old_public_key_hex,
+        "new_public_key_hex": new_public_key_hex,
+        "rotation_proof_root": rotation_proof_root,
+    }))
+}
+
+pub fn sequencer_key_rotation_approval_root(
+    approval: &RuntimeSequencerKeyRotationApproval,
+) -> String {
+    stable_runtime_root(&json!({
+        "sequencer_key_rotation_operator_approval_domain": "nebula-runtime-sequencer-key-rotation-operator-approval-v1",
+        "operator_id": approval.operator_id,
+        "operator_public_key_hex": approval.operator_public_key_hex,
+        "payload_root": approval.payload_root,
+        "signature": approval.signature,
+        "signed_at_unix_ms": approval.signed_at_unix_ms,
+    }))
+}
+
 fn withdrawal_root(withdrawal: &RuntimeWithdrawalRequest) -> String {
     stable_runtime_root(&json!({
         "withdrawal_domain": "nebula-runtime-monero-withdrawal-v1",
@@ -6702,8 +6934,10 @@ fn sequencer_key_rotation_root(rotation: &RuntimeSequencerKeyRotation) -> String
         "activation_height": rotation.activation_height,
         "old_public_key_hex": rotation.old_public_key_hex,
         "new_public_key_hex": rotation.new_public_key_hex,
-        "operator_id": rotation.operator_id,
-        "approval_root": rotation.approval_root,
+        "rotation_proof_root": rotation.rotation_proof_root,
+        "operator_approval_ids": rotation.operator_approval_ids,
+        "operator_approval_roots": rotation.operator_approval_roots,
+        "operator_approvals": rotation.operator_approvals,
         "rotated_at_unix_ms": rotation.rotated_at_unix_ms,
     }))
 }
@@ -6938,11 +7172,35 @@ mod tests {
     }
 
     fn rotate_runtime_off_default_dev_key(runtime: &mut NebulaRuntime) {
+        let new_secret_key_hex = public_ops_test_sequencer_secret_key_hex();
+        let new_public_key_hex = public_key_hex_for_secret(&new_secret_key_hex).unwrap();
+        let rotation_proof_root = "a".repeat(64);
+        let previous_history_root = sequencer_key_history_root(&runtime.sequencer_key_rotations);
+        let activation_height = runtime.latest_block().height + 1;
+        let (operator_approval_ids, operator_approval_roots, operator_approvals) =
+            if runtime.config.launch_binding.is_some() {
+                test_rotation_operator_approval_quorum(
+                    runtime.config.launch_binding.as_ref(),
+                    &previous_history_root,
+                    activation_height,
+                    &runtime.config.sequencer_public_key_hex,
+                    &new_public_key_hex,
+                    &rotation_proof_root,
+                )
+            } else {
+                (
+                    vec!["operator-a".to_string(), "operator-b".to_string()],
+                    vec!["a".repeat(64), "b".repeat(64)],
+                    Vec::new(),
+                )
+            };
         runtime
             .rotate_sequencer_key(
-                &public_ops_test_sequencer_secret_key_hex(),
-                "operator-a",
-                &"a".repeat(64),
+                &new_secret_key_hex,
+                &rotation_proof_root,
+                operator_approval_ids,
+                operator_approval_roots,
+                operator_approvals,
             )
             .unwrap();
     }
@@ -7097,6 +7355,85 @@ mod tests {
             withdrawal,
             finalized_monero_tx_id,
             finalization_proof_root,
+            "operator-b",
+            0xa2,
+            1,
+        );
+        (
+            vec![
+                approval_a.operator_id.clone(),
+                approval_b.operator_id.clone(),
+            ],
+            vec![
+                approval_a.approval_root.clone(),
+                approval_b.approval_root.clone(),
+            ],
+            vec![approval_a, approval_b],
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn test_rotation_operator_approval(
+        launch_binding: Option<&RuntimeLaunchBinding>,
+        previous_sequencer_key_history_root: &str,
+        activation_height: u64,
+        old_public_key_hex: &str,
+        new_public_key_hex: &str,
+        rotation_proof_root: &str,
+        operator_id: &str,
+        seed: u8,
+        signed_at_unix_ms: u128,
+    ) -> RuntimeSequencerKeyRotationApproval {
+        let payload_root = sequencer_key_rotation_payload_root(
+            launch_binding,
+            previous_sequencer_key_history_root,
+            activation_height,
+            old_public_key_hex,
+            new_public_key_hex,
+            rotation_proof_root,
+        );
+        let mut approval = RuntimeSequencerKeyRotationApproval {
+            operator_id: operator_id.to_string(),
+            operator_public_key_hex: test_public_key_hex(seed),
+            payload_root: payload_root.clone(),
+            signature: sign_root_with_seed(seed, &payload_root),
+            signed_at_unix_ms,
+            approval_root: String::new(),
+        };
+        approval.approval_root = sequencer_key_rotation_approval_root(&approval);
+        approval
+    }
+
+    fn test_rotation_operator_approval_quorum(
+        launch_binding: Option<&RuntimeLaunchBinding>,
+        previous_sequencer_key_history_root: &str,
+        activation_height: u64,
+        old_public_key_hex: &str,
+        new_public_key_hex: &str,
+        rotation_proof_root: &str,
+    ) -> (
+        Vec<String>,
+        Vec<String>,
+        Vec<RuntimeSequencerKeyRotationApproval>,
+    ) {
+        let approval_a = test_rotation_operator_approval(
+            launch_binding,
+            previous_sequencer_key_history_root,
+            activation_height,
+            old_public_key_hex,
+            new_public_key_hex,
+            rotation_proof_root,
+            "operator-a",
+            0xa1,
+            1,
+        );
+        let approval_b = test_rotation_operator_approval(
+            launch_binding,
+            previous_sequencer_key_history_root,
+            activation_height,
+            old_public_key_hex,
+            new_public_key_hex,
+            rotation_proof_root,
             "operator-b",
             0xa2,
             1,
@@ -8741,13 +9078,27 @@ mod tests {
 
         let new_secret_key_hex = "4d".repeat(32);
         let new_public_key_hex = public_key_hex_for_secret(&new_secret_key_hex).unwrap();
+        let rotation_proof_root = "b".repeat(64);
         let rotation = runtime
-            .rotate_sequencer_key(&new_secret_key_hex, "operator-a", &"b".repeat(64))
+            .rotate_sequencer_key(
+                &new_secret_key_hex,
+                &rotation_proof_root,
+                vec!["operator-a".to_string(), "operator-b".to_string()],
+                vec!["c".repeat(64), "d".repeat(64)],
+                Vec::new(),
+            )
             .unwrap();
         assert!(rotation.rotated);
         assert_eq!(rotation.rotation.activation_height, 2);
         assert_eq!(rotation.rotation.old_public_key_hex, old_public_key_hex);
         assert_eq!(rotation.rotation.new_public_key_hex, new_public_key_hex);
+        assert_eq!(rotation.rotation.rotation_proof_root, rotation_proof_root);
+        assert_eq!(
+            rotation.rotation.operator_approval_ids,
+            vec!["operator-a".to_string(), "operator-b".to_string()]
+        );
+        assert_eq!(rotation.rotation.operator_approval_roots.len(), 2);
+        assert!(rotation.rotation.operator_approvals.is_empty());
         assert_eq!(rotation.sequencer_key_history_root.len(), 64);
 
         let new_block = runtime.produce_block();
@@ -8786,6 +9137,208 @@ mod tests {
         assert!(validate_snapshot(&tampered)
             .unwrap_err()
             .contains("block 1 signature rejected"));
+    }
+
+    #[test]
+    fn launch_bound_sequencer_key_rotation_requires_signed_attested_operator_quorum() {
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        let old_public_key_hex = runtime.config().sequencer_public_key_hex.clone();
+        let new_secret_key_hex = "6a".repeat(32);
+        let new_public_key_hex = public_key_hex_for_secret(&new_secret_key_hex).unwrap();
+        let rotation_proof_root = "1".repeat(64);
+        let previous_history_root = sequencer_key_history_root(&runtime.sequencer_key_rotations);
+        let activation_height = runtime.latest_block().height + 1;
+
+        assert!(runtime
+            .rotate_sequencer_key(
+                &new_secret_key_hex,
+                &rotation_proof_root,
+                vec!["operator-a".to_string(), "operator-b".to_string()],
+                vec!["2".repeat(64), "3".repeat(64)],
+                Vec::new(),
+            )
+            .unwrap_err()
+            .contains("operator_approvals"));
+
+        let (operator_ids, approval_roots, approvals) = test_rotation_operator_approval_quorum(
+            runtime.config.launch_binding.as_ref(),
+            &previous_history_root,
+            activation_height,
+            &old_public_key_hex,
+            &new_public_key_hex,
+            &rotation_proof_root,
+        );
+        let report = runtime
+            .rotate_sequencer_key(
+                &new_secret_key_hex,
+                &rotation_proof_root,
+                operator_ids.clone(),
+                approval_roots.clone(),
+                approvals,
+            )
+            .unwrap();
+
+        assert!(report.rotated);
+        assert_eq!(report.rotation.operator_approval_ids, operator_ids);
+        assert_eq!(report.rotation.operator_approval_roots, approval_roots);
+        assert_eq!(report.rotation.operator_approvals.len(), 2);
+        assert_eq!(report.rotation.rotation_proof_root, rotation_proof_root);
+        validate_snapshot(&runtime.export_snapshot()).unwrap();
+    }
+
+    #[test]
+    fn launch_bound_sequencer_key_rotation_rejects_bad_operator_signature() {
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        let old_public_key_hex = runtime.config().sequencer_public_key_hex.clone();
+        let new_secret_key_hex = "6b".repeat(32);
+        let new_public_key_hex = public_key_hex_for_secret(&new_secret_key_hex).unwrap();
+        let rotation_proof_root = "4".repeat(64);
+        let previous_history_root = sequencer_key_history_root(&runtime.sequencer_key_rotations);
+        let (operator_ids, mut approval_roots, mut approvals) =
+            test_rotation_operator_approval_quorum(
+                runtime.config.launch_binding.as_ref(),
+                &previous_history_root,
+                runtime.latest_block().height + 1,
+                &old_public_key_hex,
+                &new_public_key_hex,
+                &rotation_proof_root,
+            );
+        approvals[0].signature = "0".repeat(128);
+        approvals[0].approval_root = sequencer_key_rotation_approval_root(&approvals[0]);
+        approval_roots[0] = approvals[0].approval_root.clone();
+
+        assert!(runtime
+            .rotate_sequencer_key(
+                &new_secret_key_hex,
+                &rotation_proof_root,
+                operator_ids,
+                approval_roots,
+                approvals,
+            )
+            .unwrap_err()
+            .contains("Ed25519"));
+    }
+
+    #[test]
+    fn launch_bound_sequencer_key_rotation_rejects_unattested_operator_or_key_mismatch() {
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        let old_public_key_hex = runtime.config().sequencer_public_key_hex.clone();
+        let new_secret_key_hex = "6c".repeat(32);
+        let new_public_key_hex = public_key_hex_for_secret(&new_secret_key_hex).unwrap();
+        let rotation_proof_root = "5".repeat(64);
+        let previous_history_root = sequencer_key_history_root(&runtime.sequencer_key_rotations);
+        let (operator_ids, mut approval_roots, mut approvals) =
+            test_rotation_operator_approval_quorum(
+                runtime.config.launch_binding.as_ref(),
+                &previous_history_root,
+                runtime.latest_block().height + 1,
+                &old_public_key_hex,
+                &new_public_key_hex,
+                &rotation_proof_root,
+            );
+        approvals[0].operator_public_key_hex = test_public_key_hex(0xee);
+        approvals[0].signature = sign_root_with_seed(0xee, &approvals[0].payload_root);
+        approvals[0].approval_root = sequencer_key_rotation_approval_root(&approvals[0]);
+        approval_roots[0] = approvals[0].approval_root.clone();
+
+        assert!(runtime
+            .rotate_sequencer_key(
+                &new_secret_key_hex,
+                &rotation_proof_root,
+                operator_ids,
+                approval_roots,
+                approvals,
+            )
+            .unwrap_err()
+            .contains("does not match launch-attested operator key"));
+
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        let old_public_key_hex = runtime.config().sequencer_public_key_hex.clone();
+        let new_secret_key_hex = "6d".repeat(32);
+        let new_public_key_hex = public_key_hex_for_secret(&new_secret_key_hex).unwrap();
+        let rotation_proof_root = "6".repeat(64);
+        let previous_history_root = sequencer_key_history_root(&runtime.sequencer_key_rotations);
+        let mut approval_c = test_rotation_operator_approval(
+            runtime.config.launch_binding.as_ref(),
+            &previous_history_root,
+            runtime.latest_block().height + 1,
+            &old_public_key_hex,
+            &new_public_key_hex,
+            &rotation_proof_root,
+            "operator-c",
+            0xc1,
+            1,
+        );
+        let approval_b = test_rotation_operator_approval(
+            runtime.config.launch_binding.as_ref(),
+            &previous_history_root,
+            runtime.latest_block().height + 1,
+            &old_public_key_hex,
+            &new_public_key_hex,
+            &rotation_proof_root,
+            "operator-b",
+            0xa2,
+            1,
+        );
+        approval_c.approval_root = sequencer_key_rotation_approval_root(&approval_c);
+        assert!(runtime
+            .rotate_sequencer_key(
+                &new_secret_key_hex,
+                &rotation_proof_root,
+                vec!["operator-c".to_string(), "operator-b".to_string()],
+                vec![
+                    approval_c.approval_root.clone(),
+                    approval_b.approval_root.clone()
+                ],
+                vec![approval_c, approval_b],
+            )
+            .unwrap_err()
+            .contains("is not launch-attested"));
+    }
+
+    #[test]
+    fn sequencer_key_rotation_payload_binds_old_new_activation_and_proof() {
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        let old_public_key_hex = runtime.config().sequencer_public_key_hex.clone();
+        let new_secret_key_hex = "6e".repeat(32);
+        let new_public_key_hex = public_key_hex_for_secret(&new_secret_key_hex).unwrap();
+        let previous_history_root = sequencer_key_history_root(&runtime.sequencer_key_rotations);
+        let (operator_ids, approval_roots, approvals) = test_rotation_operator_approval_quorum(
+            runtime.config.launch_binding.as_ref(),
+            &previous_history_root,
+            runtime.latest_block().height + 1,
+            &old_public_key_hex,
+            &new_public_key_hex,
+            &"7".repeat(64),
+        );
+
+        assert!(runtime
+            .rotate_sequencer_key(
+                &new_secret_key_hex,
+                &"8".repeat(64),
+                operator_ids,
+                approval_roots,
+                approvals,
+            )
+            .unwrap_err()
+            .contains("payload_root does not match sequencer key rotation payload"));
+    }
+
+    #[test]
+    fn validate_snapshot_rejects_launch_bound_rotation_without_signed_quorum() {
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        rotate_runtime_off_default_dev_key(&mut runtime);
+        let mut snapshot = runtime.export_snapshot();
+        snapshot.sequencer_key_rotations[0]
+            .operator_approvals
+            .clear();
+        snapshot.sequencer_key_rotations[0].root =
+            sequencer_key_rotation_root(&snapshot.sequencer_key_rotations[0]);
+        snapshot.root = snapshot_root(&snapshot);
+
+        assert!(validate_snapshot(&snapshot)
+            .unwrap_err()
+            .contains("operator_approvals"));
     }
 
     #[test]
@@ -8853,8 +9406,9 @@ mod tests {
             json!({
                 "admin_token": "admin",
                 "new_sequencer_secret_key_hex": new_secret_key_hex,
-                "operator_id": "operator-a",
-                "approval_root": "d".repeat(64),
+                "rotation_proof_root": "d".repeat(64),
+                "operator_approval_ids": ["operator-a", "operator-b"],
+                "operator_approval_roots": ["e".repeat(64), "f".repeat(64)],
             }),
         )
         .unwrap();

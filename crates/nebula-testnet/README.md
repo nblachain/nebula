@@ -174,10 +174,11 @@ The public launch sequence for this crate is:
    `/status`, and `nebula_status` must expose the current sequencer public key,
    key-rotation history/root, accountability evidence root, equivocation
    evidence, and mis-signing evidence. `nebula_rotateSequencerKey` must bind
-   old/new sequencer keys, activation height, rotation proof root, and operator
-   approval roots. `nebula_reportEquivocation` must bind conflicting
-   block/signature evidence, and unresolved accountability evidence must keep
-   the endpoint launch-blocked.
+   old/new sequencer keys, activation height, previous key-history root,
+   rotation proof root, distinct launch-attested operator approval IDs/roots,
+   and signed `operator_approvals`. `nebula_reportEquivocation` must bind
+   conflicting block/signature evidence, and unresolved accountability evidence
+   must keep the endpoint launch-blocked.
 12. Build and verify validator activation receipts, validator join receipts,
    operator join confirmations, public observer confirmations, and the public
    testnet launch-candidate certificate against the same deployment,
@@ -364,13 +365,15 @@ Sequencer key rotation and accountability are rehearsed over
 should require `/health`, `/status`, and `nebula_status` to expose the current
 sequencer key, key-rotation history/root, latest rotation activation height,
 accountability evidence root, equivocation evidence, and mis-signing evidence
-before advertising an endpoint. Rotation RPC parameters are
-`admin_token`, `new_sequencer_secret_key_hex`, `operator_id`, and
-`approval_root`; the response binds the old key, new key, activation height,
-approval root, and rotation root. Equivocation RPC parameters are `height`,
-`first_block_hash`, `second_block_hash`, `reporter_id`, `evidence_root`, and
-`admin_token`; unresolved evidence halts block production and state mutations
-while status/ops evidence remains visible.
+before advertising an endpoint. Rotation RPC parameters are `admin_token`,
+`new_sequencer_secret_key_hex`, `rotation_proof_root`,
+`operator_approval_ids`, `operator_approval_roots`, and signed
+`operator_approvals`; the response binds the old key, new key, activation
+height, previous key-history root, approval quorum, and rotation root.
+Equivocation RPC parameters are `height`, `first_block_hash`,
+`second_block_hash`, `reporter_id`, `evidence_root`, and `admin_token`;
+unresolved evidence halts block production and state mutations while status/ops
+evidence remains visible.
 
 Each node exposes `/health`, `/status`, `/snapshot`, `/ops`, `/backup`,
 `/metrics`, and JSON-RPC 2.0 on `/rpc` for

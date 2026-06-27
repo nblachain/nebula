@@ -2210,6 +2210,7 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
         .cloned()
         .unwrap_or_else(|| "none".to_string());
     let endpoint_url = sequencer_binding.endpoint_url.clone();
+    let sequencer_launch_binding = sequencer_binding.clone();
     let block_millis = runtime::DEFAULT_SUBSECOND_BLOCK_MS;
     let bridge_account_seed = 0x46;
     let bridge_account = live_account_id(bridge_account_seed);
@@ -2272,21 +2273,55 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
         "sequencer public ops ready",
         |ops| ops["public_ops_ready"] == true && ops["latest_height"].as_u64().unwrap_or(0) > 0,
     )?;
+    let initial_status = live_rpc_call(&sequencer_rpc_addr, "nebula_status", json!({}))?;
+    let initial_status = live_rpc_result(&initial_status)?.clone();
+    let rotation_secret_key_hex = "4d".repeat(32);
+    let rotation_public_key_hex = live_account_id(0x4d);
+    let rotation_proof_root = hex_64("live-rotation-proof");
+    let rotation_activation_height = live_value_u64(&initial_status, "latest_height")?
+        .checked_add(1)
+        .ok_or_else(|| live_rehearsal_invalid("rotation activation height overflowed"))?;
+    let previous_key_history_root = initial_status["sequencer_key_history_root"]
+        .as_str()
+        .ok_or_else(|| live_rehearsal_invalid("initial status missing key history root"))?;
+    let old_public_key_hex = initial_status["sequencer_public_key_hex"]
+        .as_str()
+        .ok_or_else(|| live_rehearsal_invalid("initial status missing sequencer public key"))?;
+    let (rotation_operator_ids, rotation_approval_roots, rotation_approvals) =
+        live_rotation_operator_approval_quorum(
+            Some(&sequencer_launch_binding),
+            previous_key_history_root,
+            rotation_activation_height,
+            old_public_key_hex,
+            &rotation_public_key_hex,
+            &rotation_proof_root,
+        );
 
     let rotation = live_rpc_call(
         &sequencer_admin_addr,
         "nebula_rotateSequencerKey",
         json!({
             "admin_token": ADMIN_TOKEN,
-            "new_sequencer_secret_key_hex": "4d".repeat(32),
-            "operator_id": "operator-a",
-            "approval_root": hex_64("live-rotation-approval"),
+            "new_sequencer_secret_key_hex": rotation_secret_key_hex,
+            "rotation_proof_root": rotation_proof_root,
+            "operator_approval_ids": rotation_operator_ids,
+            "operator_approval_roots": rotation_approval_roots,
+            "operator_approvals": rotation_approvals,
         }),
     )?;
     let rotation = live_rpc_result(&rotation)?;
     if rotation["rotated"] != true {
         return Err(live_rehearsal_invalid(
             "sequencer key rotation did not report rotated=true",
+        ));
+    }
+    if rotation["rotation"]["operator_approvals"]
+        .as_array()
+        .map(Vec::len)
+        != Some(2)
+    {
+        return Err(live_rehearsal_invalid(
+            "sequencer key rotation did not include signed operator approval quorum",
         ));
     }
     let rotated_public_key = rotation["sequencer_public_key_hex"]
@@ -7302,6 +7337,82 @@ fn live_operator_approval(
         approval_root: String::new(),
     };
     approval.approval_root = runtime::withdrawal_operator_approval_root(&approval);
+    approval
+}
+
+fn live_rotation_operator_approval_quorum(
+    launch_binding: Option<&runtime::RuntimeLaunchBinding>,
+    previous_sequencer_key_history_root: &str,
+    activation_height: u64,
+    old_public_key_hex: &str,
+    new_public_key_hex: &str,
+    rotation_proof_root: &str,
+) -> (
+    Vec<String>,
+    Vec<String>,
+    Vec<runtime::RuntimeSequencerKeyRotationApproval>,
+) {
+    let approval_a = live_rotation_operator_approval(
+        launch_binding,
+        previous_sequencer_key_history_root,
+        activation_height,
+        old_public_key_hex,
+        new_public_key_hex,
+        rotation_proof_root,
+        "operator-a",
+        0xa1,
+    );
+    let approval_b = live_rotation_operator_approval(
+        launch_binding,
+        previous_sequencer_key_history_root,
+        activation_height,
+        old_public_key_hex,
+        new_public_key_hex,
+        rotation_proof_root,
+        "operator-b",
+        0xa2,
+    );
+    (
+        vec![
+            approval_a.operator_id.clone(),
+            approval_b.operator_id.clone(),
+        ],
+        vec![
+            approval_a.approval_root.clone(),
+            approval_b.approval_root.clone(),
+        ],
+        vec![approval_a, approval_b],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn live_rotation_operator_approval(
+    launch_binding: Option<&runtime::RuntimeLaunchBinding>,
+    previous_sequencer_key_history_root: &str,
+    activation_height: u64,
+    old_public_key_hex: &str,
+    new_public_key_hex: &str,
+    rotation_proof_root: &str,
+    operator_id: &str,
+    seed: u8,
+) -> runtime::RuntimeSequencerKeyRotationApproval {
+    let payload_root = runtime::sequencer_key_rotation_payload_root(
+        launch_binding,
+        previous_sequencer_key_history_root,
+        activation_height,
+        old_public_key_hex,
+        new_public_key_hex,
+        rotation_proof_root,
+    );
+    let mut approval = runtime::RuntimeSequencerKeyRotationApproval {
+        operator_id: operator_id.to_string(),
+        operator_public_key_hex: live_account_id(seed),
+        payload_root: payload_root.clone(),
+        signature: live_sign_root(seed, &payload_root),
+        signed_at_unix_ms: 1,
+        approval_root: String::new(),
+    };
+    approval.approval_root = runtime::sequencer_key_rotation_approval_root(&approval);
     approval
 }
 

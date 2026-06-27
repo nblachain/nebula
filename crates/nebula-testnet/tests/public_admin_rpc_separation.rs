@@ -5,11 +5,13 @@ use nebula_testnet::{
     build_runtime_launch_binding_from_jsons, build_runtime_surface_evidence_json_pretty,
     runtime::{
         bridge_observer_deposit_payload_root, bridge_observer_evidence_root,
+        sequencer_key_rotation_approval_root, sequencer_key_rotation_payload_root,
         serve_runtime_rpc_with_options, withdrawal_authorization_root,
         withdrawal_operator_approval_root, withdrawal_operator_finalization_payload_root,
         NebulaRuntime, RuntimeBridgeDeposit, RuntimeBridgeObserverEvidence, RuntimeConfig,
-        RuntimeLaunchBinding, RuntimeNodeOptions, RuntimeStorage, RuntimeTransaction,
-        RuntimeWithdrawalOperatorApproval, RuntimeWithdrawalRequest, MIN_BRIDGE_CONFIRMATIONS,
+        RuntimeLaunchBinding, RuntimeNodeOptions, RuntimeSequencerKeyRotationApproval,
+        RuntimeStorage, RuntimeTransaction, RuntimeWithdrawalOperatorApproval,
+        RuntimeWithdrawalRequest, MIN_BRIDGE_CONFIRMATIONS,
     },
     sample_deployment_attestation_json_pretty, sample_public_probe_json_pretty,
     sample_public_status_manifest_json_pretty, sample_validator_set_json_pretty,
@@ -626,19 +628,50 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
         |ops| ops["public_ops_ready"] == true && ops["latest_height"].as_u64().unwrap_or(0) > 0,
     );
     let initial_status = rpc_result(&rpc_call(&sequencer_addr, "nebula_status", json!({}))).clone();
+    let rotation_secret_key_hex = "4d".repeat(32);
+    let rotation_public_key_hex = account_id(0x4d);
+    let rotation_proof_root = hex_64("live-rotation-proof");
+    let rotation_activation_height = initial_status["latest_height"]
+        .as_u64()
+        .expect("latest_height is numeric")
+        + 1;
+    let previous_key_history_root = initial_status["sequencer_key_history_root"]
+        .as_str()
+        .expect("sequencer key history root is a string");
+    let old_public_key_hex = initial_status["sequencer_public_key_hex"]
+        .as_str()
+        .expect("sequencer public key is a string");
+    let (rotation_operator_ids, rotation_approval_roots, rotation_approvals) =
+        rotation_operator_approval_quorum(
+            Some(&sequencer_binding),
+            previous_key_history_root,
+            rotation_activation_height,
+            old_public_key_hex,
+            &rotation_public_key_hex,
+            &rotation_proof_root,
+        );
 
     let rotation = rpc_call(
         &sequencer_admin_addr,
         "nebula_rotateSequencerKey",
         json!({
             "admin_token": ADMIN_TOKEN,
-            "new_sequencer_secret_key_hex": "4d".repeat(32),
-            "operator_id": "operator-a",
-            "approval_root": hex_64("live-rotation-approval"),
+            "new_sequencer_secret_key_hex": rotation_secret_key_hex,
+            "rotation_proof_root": rotation_proof_root,
+            "operator_approval_ids": rotation_operator_ids,
+            "operator_approval_roots": rotation_approval_roots,
+            "operator_approvals": rotation_approvals,
         }),
     );
     let rotation = rpc_result(&rotation);
     assert_eq!(rotation["rotated"], true);
+    assert_eq!(
+        rotation["rotation"]["operator_approvals"]
+            .as_array()
+            .expect("rotation operator approvals are an array")
+            .len(),
+        2
+    );
     assert_ne!(
         rotation["sequencer_public_key_hex"],
         initial_status["sequencer_public_key_hex"]
@@ -1029,8 +1062,12 @@ fn launch_bound_accountability_report_blocks_public_ops_and_mutations() {
         json!({
             "admin_token": ADMIN_TOKEN,
             "new_sequencer_secret_key_hex": "5e".repeat(32),
-            "operator_id": "operator-a",
-            "approval_root": hex_64("blocked-rotation-approval"),
+            "rotation_proof_root": hex_64("blocked-rotation-proof"),
+            "operator_approval_ids": ["operator-a", "operator-b"],
+            "operator_approval_roots": [
+                hex_64("blocked-rotation-approval-a"),
+                hex_64("blocked-rotation-approval-b")
+            ],
         }),
     );
     assert_rpc_error_contains(&rotation_after_evidence, "accountability evidence");
@@ -1095,8 +1132,12 @@ fn accountability_evidence_closes_admin_producer_mutations_but_remains_visible()
         json!({
             "admin_token": ADMIN_TOKEN,
             "new_sequencer_secret_key_hex": "4d".repeat(32),
-            "operator_id": "operator-a",
-            "approval_root": hex_64("rotation-approval"),
+            "rotation_proof_root": hex_64("rotation-proof"),
+            "operator_approval_ids": ["operator-a", "operator-b"],
+            "operator_approval_roots": [
+                hex_64("rotation-approval-a"),
+                hex_64("rotation-approval-b")
+            ],
         }),
     );
     assert_rpc_error_contains(&rotation_after_evidence, "accountability evidence");
@@ -1576,6 +1617,82 @@ fn operator_approval(
         approval_root: String::new(),
     };
     approval.approval_root = withdrawal_operator_approval_root(&approval);
+    approval
+}
+
+fn rotation_operator_approval_quorum(
+    launch_binding: Option<&RuntimeLaunchBinding>,
+    previous_sequencer_key_history_root: &str,
+    activation_height: u64,
+    old_public_key_hex: &str,
+    new_public_key_hex: &str,
+    rotation_proof_root: &str,
+) -> (
+    Vec<String>,
+    Vec<String>,
+    Vec<RuntimeSequencerKeyRotationApproval>,
+) {
+    let approval_a = rotation_operator_approval(
+        launch_binding,
+        previous_sequencer_key_history_root,
+        activation_height,
+        old_public_key_hex,
+        new_public_key_hex,
+        rotation_proof_root,
+        "operator-a",
+        0xa1,
+    );
+    let approval_b = rotation_operator_approval(
+        launch_binding,
+        previous_sequencer_key_history_root,
+        activation_height,
+        old_public_key_hex,
+        new_public_key_hex,
+        rotation_proof_root,
+        "operator-b",
+        0xa2,
+    );
+    (
+        vec![
+            approval_a.operator_id.clone(),
+            approval_b.operator_id.clone(),
+        ],
+        vec![
+            approval_a.approval_root.clone(),
+            approval_b.approval_root.clone(),
+        ],
+        vec![approval_a, approval_b],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rotation_operator_approval(
+    launch_binding: Option<&RuntimeLaunchBinding>,
+    previous_sequencer_key_history_root: &str,
+    activation_height: u64,
+    old_public_key_hex: &str,
+    new_public_key_hex: &str,
+    rotation_proof_root: &str,
+    operator_id: &str,
+    seed: u8,
+) -> RuntimeSequencerKeyRotationApproval {
+    let payload_root = sequencer_key_rotation_payload_root(
+        launch_binding,
+        previous_sequencer_key_history_root,
+        activation_height,
+        old_public_key_hex,
+        new_public_key_hex,
+        rotation_proof_root,
+    );
+    let mut approval = RuntimeSequencerKeyRotationApproval {
+        operator_id: operator_id.to_string(),
+        operator_public_key_hex: account_id(seed),
+        payload_root: payload_root.clone(),
+        signature: sign_root(seed, &payload_root),
+        signed_at_unix_ms: 1,
+        approval_root: String::new(),
+    };
+    approval.approval_root = sequencer_key_rotation_approval_root(&approval);
     approval
 }
 

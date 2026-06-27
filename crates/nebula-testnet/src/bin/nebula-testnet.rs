@@ -3981,8 +3981,9 @@ RPC SEQUENCER KEY ACCOUNTABILITY:
     root, equivocation evidence, and mis-signing evidence before opening a
     public endpoint.
     Key rotation uses nebula_rotateSequencerKey with admin_token,
-    new_sequencer_secret_key_hex, operator_id, and approval_root; the response
-    binds old/new sequencer keys, activation height, and rotation root.
+    new_sequencer_secret_key_hex, rotation_proof_root, operator_approval_ids,
+    operator_approval_roots, and signed operator_approvals; the response binds
+    old/new sequencer keys, activation height, approval quorum, and rotation root.
     Equivocation reporting uses nebula_reportEquivocation with admin_token,
     height, first_block_hash, second_block_hash, reporter_id, and evidence_root.
     Unresolved accountability evidence keeps the endpoint fail-closed.
