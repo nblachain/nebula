@@ -762,6 +762,9 @@ pub struct PublicTestnetLaunchCertificate {
     pub runtime_version: String,
     pub launch_package_bundle_root: String,
     pub launch_package_root: String,
+    pub public_testnet_peer_manifest_root: String,
+    pub peer_manifest_sync_peer_quorum: usize,
+    pub peer_manifest_peer_count: usize,
     pub fee_policy_root: String,
     pub validator_activation_root: String,
     pub validator_join_root: String,
@@ -788,6 +791,9 @@ pub struct PublicTestnetLaunchCertificateReport {
     pub public_testnet_launch_certificate_root: String,
     pub launch_package_bundle_root: String,
     pub launch_package_root: String,
+    pub public_testnet_peer_manifest_root: String,
+    pub peer_manifest_sync_peer_quorum: usize,
+    pub peer_manifest_peer_count: usize,
     pub fee_policy_root: String,
     pub validator_activation_root: String,
     pub validator_join_root: String,
@@ -817,6 +823,9 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub deployment_attestation_root: String,
     pub launch_package_bundle_root: String,
     pub launch_package_root: String,
+    pub public_testnet_peer_manifest_root: String,
+    pub peer_manifest_sync_peer_quorum: usize,
+    pub peer_manifest_peer_count: usize,
     pub fee_policy_root: String,
     pub validator_activation_root: String,
     pub validator_join_root: String,
@@ -919,6 +928,8 @@ pub struct LiveRpcDevnetRehearsalReport {
     pub nxmr_custody_deficit_units: u128,
     pub sequencer_key_rotation_count: u64,
     pub launch_package_bundle_root: String,
+    pub public_testnet_peer_manifest_root: String,
+    pub peer_manifest_sync_peer_quorum: usize,
     pub rehearsal_root: String,
 }
 
@@ -1077,6 +1088,11 @@ pub struct RuntimeSurfaceEvidenceReport {
     pub gas_price_nebulai: u128,
     pub validator_set_root: String,
     pub genesis_root: String,
+    pub public_testnet_peer_manifest_present: bool,
+    pub public_testnet_peer_manifest_root: Option<String>,
+    pub public_testnet_peer_manifest_launch_package_bundle_root: Option<String>,
+    pub public_testnet_peer_manifest_snapshot_peer_count: usize,
+    pub public_testnet_peer_manifest_sync_peer_quorum: Option<usize>,
     pub latest_height: u64,
     pub latest_hash: String,
     pub snapshot_root: String,
@@ -1162,6 +1178,7 @@ struct PublicSurfaceSample {
 
 struct LaunchCertificateReports {
     launch_package_bundle: LaunchPackageBundleReport,
+    public_testnet_peer_manifest: PublicTestnetPeerManifestReport,
     validator_activation: ValidatorActivationReport,
     validator_join: ValidatorJoinReport,
     operator_join_confirmation: OperatorJoinConfirmationReport,
@@ -1169,6 +1186,13 @@ struct LaunchCertificateReports {
     runtime_surface: RuntimeSurfaceEvidenceReport,
     genesis: GenesisManifestReport,
     deployment: DeploymentAttestationReport,
+}
+
+#[derive(Debug, Clone)]
+struct LivePeerManifestBindingInput {
+    public_testnet_peer_manifest_root: String,
+    launch_package_bundle_root: String,
+    sync_peer_quorum: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1593,6 +1617,9 @@ pub fn readiness_report() -> NebulaReadiness {
                 "public_observer_confirmation_root_required": true,
                 "public_status_manifest_root_required": true,
                 "public_probe_root_required": true,
+                "public_testnet_peer_manifest_root_required": true,
+                "runtime_surface_peer_manifest_root_required": true,
+                "peer_manifest_quorum_bound": true,
                 "genesis_root_required": true,
                 "validator_set_root_required": true,
                 "certified_at_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
@@ -1854,8 +1881,21 @@ pub fn prove_local_public_testnet_rehearsal(
         &launch_package_bundle_json,
         "validator-b",
     )?;
+    let peer_manifest_binding = LivePeerManifestBindingInput {
+        public_testnet_peer_manifest_root: public_testnet_peer_manifest_report
+            .public_testnet_peer_manifest_root
+            .clone(),
+        launch_package_bundle_root: public_testnet_peer_manifest_report
+            .launch_package_bundle_root
+            .clone(),
+        sync_peer_quorum: public_testnet_peer_manifest_report.sync_peer_quorum,
+    };
     let (_live_rpc_report, runtime_surface_evidence) =
-        prove_live_rpc_devnet_rehearsal_with_bindings(sequencer_binding, follower_binding)?;
+        prove_live_rpc_devnet_rehearsal_with_bindings(
+            sequencer_binding,
+            follower_binding,
+            Some(peer_manifest_binding),
+        )?;
     let runtime_surface_evidence_json = runtime_surface_evidence.to_string();
     let runtime_surface_report =
         verify_runtime_surface_evidence_json(&runtime_surface_evidence_json)?;
@@ -1959,6 +1999,7 @@ pub fn prove_local_public_testnet_rehearsal(
         build_public_testnet_launch_certificate_json_pretty(
             &public_observer_confirmation_json,
             &runtime_surface_evidence_json,
+            &public_testnet_peer_manifest_json,
             &operator_join_confirmation_json,
             &validator_join_json,
             &validator_activation_json,
@@ -1975,6 +2016,7 @@ pub fn prove_local_public_testnet_rehearsal(
         &public_testnet_launch_certificate_json,
         &public_observer_confirmation_json,
         &runtime_surface_evidence_json,
+        &public_testnet_peer_manifest_json,
         &operator_join_confirmation_json,
         &validator_join_json,
         &validator_activation_json,
@@ -2139,7 +2181,7 @@ pub fn prove_live_rpc_devnet_rehearsal() -> Result<LiveRpcDevnetRehearsalReport,
 pub fn prove_live_rpc_devnet_rehearsal_with_evidence(
 ) -> Result<(LiveRpcDevnetRehearsalReport, Value), AttestationError> {
     let (sequencer_binding, follower_binding) = live_runtime_launch_bindings()?;
-    prove_live_rpc_devnet_rehearsal_with_bindings(sequencer_binding, follower_binding)
+    prove_live_rpc_devnet_rehearsal_with_bindings(sequencer_binding, follower_binding, None)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2177,6 +2219,41 @@ pub fn prove_live_rpc_devnet_rehearsal_with_jsons_and_evidence(
     operator_acceptance_json: &str,
     genesis_manifest_json: &str,
 ) -> Result<(LiveRpcDevnetRehearsalReport, Value), AttestationError> {
+    let public_testnet_peer_manifest_json = build_public_testnet_peer_manifest_json_pretty(
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    prove_live_rpc_devnet_rehearsal_with_peer_manifest_jsons_and_evidence(
+        launch_package_bundle_json,
+        &public_testnet_peer_manifest_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn prove_live_rpc_devnet_rehearsal_with_peer_manifest_jsons_and_evidence(
+    launch_package_bundle_json: &str,
+    public_testnet_peer_manifest_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<(LiveRpcDevnetRehearsalReport, Value), AttestationError> {
     let sequencer_binding = build_runtime_launch_binding_from_jsons(
         deployment_attestation_json,
         public_status_json,
@@ -2199,12 +2276,62 @@ pub fn prove_live_rpc_devnet_rehearsal_with_jsons_and_evidence(
         launch_package_bundle_json,
         "validator-b",
     )?;
-    prove_live_rpc_devnet_rehearsal_with_bindings(sequencer_binding, follower_binding)
+    let public_testnet_peer_manifest = live_peer_manifest_binding_from_jsons(
+        public_testnet_peer_manifest_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    prove_live_rpc_devnet_rehearsal_with_bindings(
+        sequencer_binding,
+        follower_binding,
+        Some(public_testnet_peer_manifest),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_live_rpc_devnet_runtime_surface_evidence_json_pretty(
     launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<String, AttestationError> {
+    let public_testnet_peer_manifest_json = build_public_testnet_peer_manifest_json_pretty(
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    build_live_rpc_devnet_runtime_surface_evidence_with_peer_manifest_json_pretty(
+        launch_package_bundle_json,
+        &public_testnet_peer_manifest_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_live_rpc_devnet_runtime_surface_evidence_with_peer_manifest_json_pretty(
+    launch_package_bundle_json: &str,
+    public_testnet_peer_manifest_json: &str,
     deployment_attestation_json: &str,
     public_status_json: &str,
     public_probe_json: &str,
@@ -2235,15 +2362,60 @@ pub fn build_live_rpc_devnet_runtime_surface_evidence_json_pretty(
         launch_package_bundle_json,
         "validator-b",
     )?;
-    let (_report, evidence) =
-        prove_live_rpc_devnet_rehearsal_with_bindings(sequencer_binding, follower_binding)?;
+    let public_testnet_peer_manifest = live_peer_manifest_binding_from_jsons(
+        public_testnet_peer_manifest_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let (_report, evidence) = prove_live_rpc_devnet_rehearsal_with_bindings(
+        sequencer_binding,
+        follower_binding,
+        Some(public_testnet_peer_manifest),
+    )?;
     serde_json::to_string_pretty(&evidence)
         .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn live_peer_manifest_binding_from_jsons(
+    public_testnet_peer_manifest_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<LivePeerManifestBindingInput, AttestationError> {
+    let report = verify_public_testnet_peer_manifest_jsons(
+        public_testnet_peer_manifest_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    Ok(LivePeerManifestBindingInput {
+        public_testnet_peer_manifest_root: report.public_testnet_peer_manifest_root,
+        launch_package_bundle_root: report.launch_package_bundle_root,
+        sync_peer_quorum: report.sync_peer_quorum,
+    })
 }
 
 fn prove_live_rpc_devnet_rehearsal_with_bindings(
     sequencer_binding: runtime::RuntimeLaunchBinding,
     follower_binding: runtime::RuntimeLaunchBinding,
+    public_testnet_peer_manifest: Option<LivePeerManifestBindingInput>,
 ) -> Result<(LiveRpcDevnetRehearsalReport, Value), AttestationError> {
     const ADMIN_TOKEN: &str = "live-rpc-devnet-rehearsal-admin";
     let readiness = readiness_report();
@@ -2571,6 +2743,12 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
     )?;
 
     let snapshot_url = format!("http://{sequencer_rpc_addr}/snapshot");
+    let peer_manifest_binding =
+        public_testnet_peer_manifest.unwrap_or_else(|| LivePeerManifestBindingInput {
+            public_testnet_peer_manifest_root: hex_64("live-peer-manifest"),
+            launch_package_bundle_root: follower_binding.launch_package_bundle_root.clone(),
+            sync_peer_quorum: 1,
+        });
     let mut follower_config = runtime::RuntimeConfig::public_testnet_default();
     follower_config.block_target_ms = block_millis;
     follower_config.validator_id = "validator-b".to_string();
@@ -2584,12 +2762,16 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
             data_dir: Some(live_temp_data_dir("follower")),
             bootstrap_rpc_url: Some(snapshot_url.clone()),
             sync_rpc_url: Some(snapshot_url.clone()),
-            sync_peer_quorum: 1,
+            sync_peer_quorum: peer_manifest_binding.sync_peer_quorum,
             public_testnet_peer_manifest: Some(runtime::RuntimePublicTestnetPeerManifestBinding {
-                public_testnet_peer_manifest_root: hex_64("live-peer-manifest"),
-                launch_package_bundle_root: follower_binding.launch_package_bundle_root.clone(),
+                public_testnet_peer_manifest_root: peer_manifest_binding
+                    .public_testnet_peer_manifest_root
+                    .clone(),
+                launch_package_bundle_root: peer_manifest_binding
+                    .launch_package_bundle_root
+                    .clone(),
                 snapshot_peer_urls: vec![snapshot_url],
-                sync_peer_quorum: 1,
+                sync_peer_quorum: peer_manifest_binding.sync_peer_quorum,
             }),
             max_requests_per_minute: 10_000,
             trusted_proxy_ips: vec!["127.0.0.1".to_string()],
@@ -2633,6 +2815,33 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
             runtime_surface_report.blocking_gaps.join(", ")
         )));
     }
+    let reported_peer_manifest_root = runtime_surface_report
+        .public_testnet_peer_manifest_root
+        .clone()
+        .ok_or_else(|| {
+            live_rehearsal_invalid(
+                "runtime surface evidence did not report a public testnet peer manifest root",
+            )
+        })?;
+    if reported_peer_manifest_root != peer_manifest_binding.public_testnet_peer_manifest_root {
+        return Err(live_rehearsal_invalid(format!(
+            "runtime surface peer manifest root {} did not match expected {}",
+            reported_peer_manifest_root, peer_manifest_binding.public_testnet_peer_manifest_root
+        )));
+    }
+    let reported_peer_manifest_quorum = runtime_surface_report
+        .public_testnet_peer_manifest_sync_peer_quorum
+        .ok_or_else(|| {
+            live_rehearsal_invalid(
+                "runtime surface evidence did not report a public testnet peer manifest quorum",
+            )
+        })?;
+    if reported_peer_manifest_quorum != peer_manifest_binding.sync_peer_quorum {
+        return Err(live_rehearsal_invalid(format!(
+            "runtime surface peer manifest quorum {} did not match expected {}",
+            reported_peer_manifest_quorum, peer_manifest_binding.sync_peer_quorum
+        )));
+    }
     let status = &evidence["status"];
     let produced_block_count = live_value_u64(status, "latest_height")?;
     let mut report = LiveRpcDevnetRehearsalReport {
@@ -2670,6 +2879,8 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
         nxmr_custody_deficit_units: live_value_u128(status, "nxmr_custody_deficit_units")?,
         sequencer_key_rotation_count: live_value_u64(status, "sequencer_key_rotation_count")?,
         launch_package_bundle_root: follower_binding.launch_package_bundle_root,
+        public_testnet_peer_manifest_root: reported_peer_manifest_root,
+        peer_manifest_sync_peer_quorum: reported_peer_manifest_quorum,
         rehearsal_root: String::new(),
     };
     if report.produced_block_count < 2 {
@@ -3329,6 +3540,29 @@ fn verify_runtime_surface_evidence(
         json_u128_field(&evidence.status, "status.gas_price_nebulai").ok();
     let validator_set_root = json_string_field(&evidence.status, "status.validator_set_root").ok();
     let genesis_root = json_string_field(&evidence.status, "status.genesis_root").ok();
+    let public_testnet_peer_manifest_present =
+        json_bool(&evidence.status, "public_testnet_peer_manifest_present").unwrap_or(false);
+    let public_testnet_peer_manifest_root = evidence
+        .status
+        .get("public_testnet_peer_manifest_root")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let public_testnet_peer_manifest_launch_package_bundle_root = evidence
+        .status
+        .get("public_testnet_peer_manifest_launch_package_bundle_root")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let public_testnet_peer_manifest_snapshot_peer_count = evidence
+        .status
+        .get("public_testnet_peer_manifest_snapshot_peer_count")
+        .and_then(Value::as_u64)
+        .map(|count| count as usize)
+        .unwrap_or_default();
+    let public_testnet_peer_manifest_sync_peer_quorum = evidence
+        .status
+        .get("public_testnet_peer_manifest_sync_peer_quorum")
+        .and_then(Value::as_u64)
+        .map(|quorum| quorum as usize);
     match &launch_package_bundle_root {
         Some(root) => require_hex_root(&mut errors, "status.launch_package_bundle_root", root),
         None => errors.push("status.launch_package_bundle_root must be a string".to_string()),
@@ -3362,6 +3596,40 @@ fn verify_runtime_surface_evidence(
     match &genesis_root {
         Some(root) => require_hex_root(&mut errors, "status.genesis_root", root),
         None => errors.push("status.genesis_root must be a string".to_string()),
+    }
+    if public_testnet_peer_manifest_present {
+        match &public_testnet_peer_manifest_root {
+            Some(root) => {
+                require_hex_root(&mut errors, "status.public_testnet_peer_manifest_root", root)
+            }
+            None => errors.push(
+                "status.public_testnet_peer_manifest_root must be a string when manifest is present"
+                    .to_string(),
+            ),
+        }
+        match &public_testnet_peer_manifest_launch_package_bundle_root {
+            Some(root) => require_hex_root(
+                &mut errors,
+                "status.public_testnet_peer_manifest_launch_package_bundle_root",
+                root,
+            ),
+            None => errors.push(
+                "status.public_testnet_peer_manifest_launch_package_bundle_root must be a string when manifest is present"
+                    .to_string(),
+            ),
+        }
+        if public_testnet_peer_manifest_snapshot_peer_count == 0 {
+            errors.push(
+                "status.public_testnet_peer_manifest_snapshot_peer_count must be greater than zero when manifest is present"
+                    .to_string(),
+            );
+        }
+        if public_testnet_peer_manifest_sync_peer_quorum.is_none() {
+            errors.push(
+                "status.public_testnet_peer_manifest_sync_peer_quorum must be a number when manifest is present"
+                    .to_string(),
+            );
+        }
     }
 
     let health_ready = json_bool(&evidence.health, "public_ops_ready").unwrap_or(false);
@@ -3408,6 +3676,11 @@ fn verify_runtime_surface_evidence(
         validator_set_root: validator_set_root
             .expect("validator set root was parsed when no errors were recorded"),
         genesis_root: genesis_root.expect("genesis root was parsed when no errors were recorded"),
+        public_testnet_peer_manifest_present,
+        public_testnet_peer_manifest_root,
+        public_testnet_peer_manifest_launch_package_bundle_root,
+        public_testnet_peer_manifest_snapshot_peer_count,
+        public_testnet_peer_manifest_sync_peer_quorum,
         latest_height: latest.height,
         latest_hash: latest.block_hash.clone(),
         snapshot_root: snapshot.root,
@@ -6127,6 +6400,7 @@ pub fn verify_public_observer_confirmation_jsons(
 pub fn build_public_testnet_launch_certificate_json_pretty(
     public_observer_confirmation_json: &str,
     runtime_surface_evidence_json: &str,
+    public_testnet_peer_manifest_json: &str,
     operator_join_confirmation_json: &str,
     validator_join_receipt_json: &str,
     validator_activation_json: &str,
@@ -6142,6 +6416,7 @@ pub fn build_public_testnet_launch_certificate_json_pretty(
     let reports = verified_launch_certificate_reports(
         public_observer_confirmation_json,
         runtime_surface_evidence_json,
+        public_testnet_peer_manifest_json,
         operator_join_confirmation_json,
         validator_join_receipt_json,
         validator_activation_json,
@@ -6165,6 +6440,7 @@ pub fn verify_public_testnet_launch_certificate_jsons(
     public_testnet_launch_certificate_json: &str,
     public_observer_confirmation_json: &str,
     runtime_surface_evidence_json: &str,
+    public_testnet_peer_manifest_json: &str,
     operator_join_confirmation_json: &str,
     validator_join_receipt_json: &str,
     validator_activation_json: &str,
@@ -6184,6 +6460,7 @@ pub fn verify_public_testnet_launch_certificate_jsons(
     let reports = verified_launch_certificate_reports(
         public_observer_confirmation_json,
         runtime_surface_evidence_json,
+        public_testnet_peer_manifest_json,
         operator_join_confirmation_json,
         validator_join_receipt_json,
         validator_activation_json,
@@ -6230,6 +6507,24 @@ pub fn verify_public_testnet_launch_certificate_jsons(
         &certificate.launch_package_root,
         &expected.launch_package_root,
     );
+    require_root(
+        &mut errors,
+        "public_testnet_peer_manifest_root",
+        &certificate.public_testnet_peer_manifest_root,
+        &expected.public_testnet_peer_manifest_root,
+    );
+    if certificate.peer_manifest_sync_peer_quorum != expected.peer_manifest_sync_peer_quorum {
+        errors.push(format!(
+            "peer_manifest_sync_peer_quorum expected {} but got {}",
+            expected.peer_manifest_sync_peer_quorum, certificate.peer_manifest_sync_peer_quorum
+        ));
+    }
+    if certificate.peer_manifest_peer_count != expected.peer_manifest_peer_count {
+        errors.push(format!(
+            "peer_manifest_peer_count expected {} but got {}",
+            expected.peer_manifest_peer_count, certificate.peer_manifest_peer_count
+        ));
+    }
     require_root(
         &mut errors,
         "fee_policy_root",
@@ -6343,6 +6638,9 @@ pub fn verify_public_testnet_launch_certificate_jsons(
         public_testnet_launch_certificate_root: certificate.root,
         launch_package_bundle_root: certificate.launch_package_bundle_root,
         launch_package_root: certificate.launch_package_root,
+        public_testnet_peer_manifest_root: certificate.public_testnet_peer_manifest_root,
+        peer_manifest_sync_peer_quorum: certificate.peer_manifest_sync_peer_quorum,
+        peer_manifest_peer_count: certificate.peer_manifest_peer_count,
         fee_policy_root: certificate.fee_policy_root,
         validator_activation_root: certificate.validator_activation_root,
         validator_join_root: certificate.validator_join_root,
@@ -6367,6 +6665,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
     public_testnet_launch_certificate_json: &str,
     public_observer_confirmation_json: &str,
     runtime_surface_evidence_json: &str,
+    public_testnet_peer_manifest_json: &str,
     live_rpc_devnet_rehearsal_json: &str,
     live_rpc_devnet_runtime_surface_evidence_json: &str,
     operator_join_confirmation_json: &str,
@@ -6385,6 +6684,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         public_testnet_launch_certificate_json,
         public_observer_confirmation_json,
         runtime_surface_evidence_json,
+        public_testnet_peer_manifest_json,
         operator_join_confirmation_json,
         validator_join_receipt_json,
         validator_activation_json,
@@ -6436,6 +6736,19 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         &live_rehearsal.launch_package_bundle_root,
         &certificate.launch_package_bundle_root,
     );
+    require_root(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.public_testnet_peer_manifest_root",
+        &live_rehearsal.public_testnet_peer_manifest_root,
+        &certificate.public_testnet_peer_manifest_root,
+    );
+    if live_rehearsal.peer_manifest_sync_peer_quorum != certificate.peer_manifest_sync_peer_quorum {
+        errors.push(format!(
+            "live_rpc_devnet_rehearsal.peer_manifest_sync_peer_quorum expected {} but got {}",
+            certificate.peer_manifest_sync_peer_quorum,
+            live_rehearsal.peer_manifest_sync_peer_quorum
+        ));
+    }
     require_eq(
         &mut errors,
         "live_rpc_devnet_runtime_surface.capture_mode",
@@ -6484,6 +6797,29 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         &live_runtime_surface.genesis_root,
         &certificate.genesis_root,
     );
+    match live_runtime_surface.public_testnet_peer_manifest_root.as_ref() {
+        Some(root) => require_root(
+            &mut errors,
+            "live_rpc_devnet_runtime_surface.public_testnet_peer_manifest_root",
+            root,
+            &certificate.public_testnet_peer_manifest_root,
+        ),
+        None => errors.push(
+            "live_rpc_devnet_runtime_surface.public_testnet_peer_manifest_root is required for final readiness"
+                .to_string(),
+        ),
+    }
+    match live_runtime_surface.public_testnet_peer_manifest_sync_peer_quorum {
+        Some(quorum) if quorum == certificate.peer_manifest_sync_peer_quorum => {}
+        Some(quorum) => errors.push(format!(
+            "live_rpc_devnet_runtime_surface.public_testnet_peer_manifest_sync_peer_quorum expected {} but got {quorum}",
+            certificate.peer_manifest_sync_peer_quorum
+        )),
+        None => errors.push(
+            "live_rpc_devnet_runtime_surface.public_testnet_peer_manifest_sync_peer_quorum is required for final readiness"
+                .to_string(),
+        ),
+    }
     if live_runtime_surface.latest_height != live_rehearsal.latest_height {
         errors.push(format!(
             "live_rpc_devnet_runtime_surface.latest_height expected {} but got {}",
@@ -6565,12 +6901,15 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         level: "public-testnet-launch-ready",
         blocking_gaps: Vec::new(),
         satisfied_attestation:
-            "operator-signed public endpoint, runtime surface, observer, rollback, and launch certificate evidence",
+            "operator-signed public endpoint, runtime surface, peer manifest, observer, rollback, and launch certificate evidence",
         public_launch_readiness_root: String::new(),
         public_testnet_launch_certificate_root: certificate.public_testnet_launch_certificate_root,
         deployment_attestation_root: deployment.evidence_root,
         launch_package_bundle_root: certificate.launch_package_bundle_root,
         launch_package_root: certificate.launch_package_root,
+        public_testnet_peer_manifest_root: certificate.public_testnet_peer_manifest_root,
+        peer_manifest_sync_peer_quorum: certificate.peer_manifest_sync_peer_quorum,
+        peer_manifest_peer_count: certificate.peer_manifest_peer_count,
         fee_policy_root: certificate.fee_policy_root,
         validator_activation_root: certificate.validator_activation_root,
         validator_join_root: certificate.validator_join_root,
@@ -6611,7 +6950,7 @@ pub fn public_testnet_launch_readiness_rejection_report(
         blocking_gaps,
         errors: errors.to_vec(),
         required_attestation:
-            "operator-signed public endpoint, runtime surface, observer, rollback, and launch certificate evidence",
+            "operator-signed public endpoint, runtime surface, peer manifest, observer, rollback, and launch certificate evidence",
         public_launch_readiness_rejection_root: String::new(),
         generated_at_unix_ms: unix_ms(),
     };
@@ -6680,6 +7019,17 @@ pub fn verify_live_rpc_devnet_rehearsal_json(
         "live_rpc_devnet_rehearsal.runtime_surface_root",
         &report.runtime_surface_root,
     );
+    require_hex_root(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.public_testnet_peer_manifest_root",
+        &report.public_testnet_peer_manifest_root,
+    );
+    if report.peer_manifest_sync_peer_quorum == 0 {
+        errors.push(
+            "live_rpc_devnet_rehearsal.peer_manifest_sync_peer_quorum must be greater than zero"
+                .to_string(),
+        );
+    }
     if !report.sync_quorum_met {
         errors.push("live_rpc_devnet_rehearsal.sync_quorum_met must be true".to_string());
     }
@@ -7684,6 +8034,8 @@ fn live_rpc_devnet_rehearsal_root(report: &LiveRpcDevnetRehearsalReport) -> Stri
         "nxmr_custody_deficit_units": report.nxmr_custody_deficit_units,
         "sequencer_key_rotation_count": report.sequencer_key_rotation_count,
         "launch_package_bundle_root": report.launch_package_bundle_root,
+        "public_testnet_peer_manifest_root": report.public_testnet_peer_manifest_root,
+        "peer_manifest_sync_peer_quorum": report.peer_manifest_sync_peer_quorum,
     }))
 }
 
@@ -11698,6 +12050,7 @@ fn public_observer_confirmation_manifest_root(
 fn verified_launch_certificate_reports(
     public_observer_confirmation_json: &str,
     runtime_surface_evidence_json: &str,
+    public_testnet_peer_manifest_json: &str,
     operator_join_confirmation_json: &str,
     validator_join_receipt_json: &str,
     validator_activation_json: &str,
@@ -11770,6 +12123,17 @@ fn verified_launch_certificate_reports(
         operator_acceptance_json,
         genesis_manifest_json,
     )?;
+    let public_testnet_peer_manifest = verify_public_testnet_peer_manifest_jsons(
+        public_testnet_peer_manifest_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
     let runtime_surface = verify_runtime_surface_evidence_json(runtime_surface_evidence_json)?;
     let genesis = verify_genesis_manifest_json(genesis_manifest_json)?;
     let deployment = verify_deployment_attestation_json(deployment_attestation_json)?;
@@ -11811,12 +12175,87 @@ fn verified_launch_certificate_reports(
         &runtime_surface.genesis_root,
         &genesis.genesis_root,
     );
+    require_eq(
+        &mut errors,
+        "public_testnet_peer_manifest.endpoint_url",
+        &public_testnet_peer_manifest.endpoint_url,
+        &public_observer_confirmation.endpoint_url,
+    );
+    require_root(
+        &mut errors,
+        "public_testnet_peer_manifest.launch_package_bundle_root",
+        &public_testnet_peer_manifest.launch_package_bundle_root,
+        &launch_package_bundle.launch_package_bundle_root,
+    );
+    require_root(
+        &mut errors,
+        "public_testnet_peer_manifest.launch_package_root",
+        &public_testnet_peer_manifest.launch_package_root,
+        &launch_package_bundle.launch_package_root,
+    );
+    require_root(
+        &mut errors,
+        "public_testnet_peer_manifest.validator_set_root",
+        &public_testnet_peer_manifest.validator_set_root,
+        &launch_package_bundle.validator_set_root,
+    );
+    require_root(
+        &mut errors,
+        "public_testnet_peer_manifest.genesis_root",
+        &public_testnet_peer_manifest.genesis_root,
+        &genesis.genesis_root,
+    );
+    if !runtime_surface.public_testnet_peer_manifest_present {
+        errors.push(
+            "runtime_surface.public_testnet_peer_manifest_present must be true for launch certificate"
+                .to_string(),
+        );
+    }
+    match runtime_surface.public_testnet_peer_manifest_root.as_ref() {
+        Some(root) => require_root(
+            &mut errors,
+            "runtime_surface.public_testnet_peer_manifest_root",
+            root,
+            &public_testnet_peer_manifest.public_testnet_peer_manifest_root,
+        ),
+        None => errors.push(
+            "runtime_surface.public_testnet_peer_manifest_root is required for launch certificate"
+                .to_string(),
+        ),
+    }
+    match runtime_surface
+        .public_testnet_peer_manifest_launch_package_bundle_root
+        .as_ref()
+    {
+        Some(root) => require_root(
+            &mut errors,
+            "runtime_surface.public_testnet_peer_manifest_launch_package_bundle_root",
+            root,
+            &launch_package_bundle.launch_package_bundle_root,
+        ),
+        None => errors.push(
+            "runtime_surface.public_testnet_peer_manifest_launch_package_bundle_root is required for launch certificate"
+                .to_string(),
+        ),
+    }
+    match runtime_surface.public_testnet_peer_manifest_sync_peer_quorum {
+        Some(quorum) if quorum == public_testnet_peer_manifest.sync_peer_quorum => {}
+        Some(quorum) => errors.push(format!(
+            "runtime_surface.public_testnet_peer_manifest_sync_peer_quorum expected {} but got {quorum}",
+            public_testnet_peer_manifest.sync_peer_quorum
+        )),
+        None => errors.push(
+            "runtime_surface.public_testnet_peer_manifest_sync_peer_quorum is required for launch certificate"
+                .to_string(),
+        ),
+    }
     if !errors.is_empty() {
         return Err(AttestationError::Invalid(errors));
     }
 
     Ok(LaunchCertificateReports {
         launch_package_bundle,
+        public_testnet_peer_manifest,
         validator_activation,
         validator_join,
         operator_join_confirmation,
@@ -11839,6 +12278,12 @@ fn public_testnet_launch_certificate(
             .launch_package_bundle_root
             .clone(),
         launch_package_root: reports.launch_package_bundle.launch_package_root.clone(),
+        public_testnet_peer_manifest_root: reports
+            .public_testnet_peer_manifest
+            .public_testnet_peer_manifest_root
+            .clone(),
+        peer_manifest_sync_peer_quorum: reports.public_testnet_peer_manifest.sync_peer_quorum,
+        peer_manifest_peer_count: reports.public_testnet_peer_manifest.peer_count,
         fee_policy_root: reports.runtime_surface.fee_policy_root.clone(),
         validator_activation_root: reports
             .validator_activation
@@ -11885,6 +12330,9 @@ fn public_testnet_launch_certificate_root(certificate: &PublicTestnetLaunchCerti
         "runtime_version": certificate.runtime_version,
         "launch_package_bundle_root": certificate.launch_package_bundle_root,
         "launch_package_root": certificate.launch_package_root,
+        "public_testnet_peer_manifest_root": certificate.public_testnet_peer_manifest_root,
+        "peer_manifest_sync_peer_quorum": certificate.peer_manifest_sync_peer_quorum,
+        "peer_manifest_peer_count": certificate.peer_manifest_peer_count,
         "fee_policy_root": certificate.fee_policy_root,
         "validator_activation_root": certificate.validator_activation_root,
         "validator_join_root": certificate.validator_join_root,
@@ -11915,6 +12363,9 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "deployment_attestation_root": report.deployment_attestation_root,
         "launch_package_bundle_root": report.launch_package_bundle_root,
         "launch_package_root": report.launch_package_root,
+        "public_testnet_peer_manifest_root": report.public_testnet_peer_manifest_root,
+        "peer_manifest_sync_peer_quorum": report.peer_manifest_sync_peer_quorum,
+        "peer_manifest_peer_count": report.peer_manifest_peer_count,
         "fee_policy_root": report.fee_policy_root,
         "validator_activation_root": report.validator_activation_root,
         "validator_join_root": report.validator_join_root,
@@ -16083,6 +16534,29 @@ mod public_launch {
             &genesis,
         )
         .unwrap();
+        let peer_manifest = build_public_testnet_peer_manifest_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let peer_manifest_report = verify_public_testnet_peer_manifest_jsons(
+            &peer_manifest,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
         let activation = build_validator_activation_json_pretty(
             &bundle,
             &deployment,
@@ -16134,8 +16608,9 @@ mod public_launch {
         )
         .unwrap();
         let (live_rehearsal_report, runtime_surface_evidence) =
-            prove_live_rpc_devnet_rehearsal_with_jsons_and_evidence(
+            prove_live_rpc_devnet_rehearsal_with_peer_manifest_jsons_and_evidence(
                 &bundle,
+                &peer_manifest,
                 &deployment,
                 &public_status,
                 &public_probe,
@@ -16150,6 +16625,7 @@ mod public_launch {
         let certificate = build_public_testnet_launch_certificate_json_pretty(
             &observer_confirmation,
             &runtime_surface,
+            &peer_manifest,
             &join_confirmation,
             &join,
             &activation,
@@ -16168,6 +16644,7 @@ mod public_launch {
             &certificate,
             &observer_confirmation,
             &runtime_surface,
+            &peer_manifest,
             &join_confirmation,
             &join,
             &activation,
@@ -16185,6 +16662,18 @@ mod public_launch {
         assert!(report.public_testnet_launch_certificate_ready);
         assert_eq!(report.level, "public-testnet-launch-candidate-certified");
         assert_eq!(report.public_testnet_launch_certificate_root.len(), 64);
+        assert_eq!(
+            report.public_testnet_peer_manifest_root,
+            peer_manifest_report.public_testnet_peer_manifest_root
+        );
+        assert_eq!(
+            report.peer_manifest_sync_peer_quorum,
+            peer_manifest_report.sync_peer_quorum
+        );
+        assert_eq!(
+            report.peer_manifest_peer_count,
+            peer_manifest_report.peer_count
+        );
         assert_eq!(report.runtime_surface_root.len(), 64);
         assert_eq!(report.validator_count, 2);
         assert_eq!(report.operator_count, 2);
@@ -16196,6 +16685,7 @@ mod public_launch {
             &certificate,
             &observer_confirmation,
             &runtime_surface,
+            &peer_manifest,
             &live_rehearsal,
             &runtime_surface,
             &join_confirmation,
@@ -16238,6 +16728,7 @@ mod public_launch {
         let external_certificate = build_public_testnet_launch_certificate_json_pretty(
             &observer_confirmation,
             &external_runtime_surface,
+            &peer_manifest,
             &join_confirmation,
             &join,
             &activation,
@@ -16255,6 +16746,7 @@ mod public_launch {
             &external_certificate,
             &observer_confirmation,
             &external_runtime_surface,
+            &peer_manifest,
             &live_rehearsal,
             &runtime_surface,
             &join_confirmation,
@@ -16280,11 +16772,24 @@ mod public_launch {
         );
         assert_eq!(readiness.public_launch_readiness_root.len(), 64);
         assert_eq!(
+            readiness.public_testnet_peer_manifest_root,
+            peer_manifest_report.public_testnet_peer_manifest_root
+        );
+        assert_eq!(
+            readiness.peer_manifest_sync_peer_quorum,
+            peer_manifest_report.sync_peer_quorum
+        );
+        assert_eq!(
+            readiness.peer_manifest_peer_count,
+            peer_manifest_report.peer_count
+        );
+        assert_eq!(
             readiness.public_testnet_launch_certificate_root,
             verify_public_testnet_launch_certificate_jsons(
                 &external_certificate,
                 &observer_confirmation,
                 &external_runtime_surface,
+                &peer_manifest,
                 &join_confirmation,
                 &join,
                 &activation,
@@ -16313,6 +16818,71 @@ mod public_launch {
                 .runtime_surface_root
         );
 
+        let mut tampered_peer_manifest =
+            serde_json::from_str::<PublicTestnetPeerManifest>(&peer_manifest).unwrap();
+        tampered_peer_manifest.root = hex_64("tampered-public-testnet-peer-manifest");
+        let tampered_peer_manifest = serde_json::to_string_pretty(&tampered_peer_manifest).unwrap();
+        let tampered_peer_manifest_error = verify_public_testnet_launch_certificate_jsons(
+            &external_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &tampered_peer_manifest,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match tampered_peer_manifest_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| error
+                .starts_with("root does not match expected public testnet peer manifest root"))),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
+        let mut wrong_peer_manifest_rehearsal =
+            serde_json::from_str::<LiveRpcDevnetRehearsalReport>(&live_rehearsal).unwrap();
+        wrong_peer_manifest_rehearsal.public_testnet_peer_manifest_root =
+            hex_64("wrong-live-rpc-devnet-peer-manifest-root");
+        wrong_peer_manifest_rehearsal.rehearsal_root =
+            live_rpc_devnet_rehearsal_root(&wrong_peer_manifest_rehearsal);
+        let wrong_peer_manifest_rehearsal =
+            serde_json::to_string_pretty(&wrong_peer_manifest_rehearsal).unwrap();
+        let wrong_peer_manifest_ready_error = verify_public_testnet_launch_readiness_jsons(
+            &external_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &peer_manifest,
+            &wrong_peer_manifest_rehearsal,
+            &runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match wrong_peer_manifest_ready_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error.starts_with(
+                    "live_rpc_devnet_rehearsal.public_testnet_peer_manifest_root does not match",
+                )
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
         let mut forged_rehearsal_surface_root =
             serde_json::from_str::<LiveRpcDevnetRehearsalReport>(&live_rehearsal).unwrap();
         forged_rehearsal_surface_root.runtime_surface_root =
@@ -16325,6 +16895,7 @@ mod public_launch {
             &external_certificate,
             &observer_confirmation,
             &external_runtime_surface,
+            &peer_manifest,
             &forged_rehearsal_surface_root,
             &runtime_surface,
             &join_confirmation,
@@ -16357,6 +16928,7 @@ mod public_launch {
             &external_certificate,
             &observer_confirmation,
             &external_runtime_surface,
+            &peer_manifest,
             &wrong_rehearsal,
             &runtime_surface,
             &join_confirmation,
@@ -16420,6 +16992,7 @@ mod public_launch {
             &external_certificate,
             &observer_confirmation,
             &wrong_endpoint_runtime_surface,
+            &peer_manifest,
             &live_rehearsal,
             &runtime_surface,
             &join_confirmation,
@@ -16456,6 +17029,7 @@ mod public_launch {
         let mismatched_certificate = build_public_testnet_launch_certificate_json_pretty(
             &observer_confirmation,
             &mismatched_runtime_surface,
+            &peer_manifest,
             &join_confirmation,
             &join,
             &activation,
@@ -16473,6 +17047,7 @@ mod public_launch {
             &mismatched_certificate,
             &observer_confirmation,
             &mismatched_runtime_surface,
+            &peer_manifest,
             &live_rehearsal,
             &runtime_surface,
             &join_confirmation,
@@ -16508,6 +17083,17 @@ mod public_launch {
             build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
         let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
         let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let peer_manifest = build_public_testnet_peer_manifest_json_pretty(
+            &bundle,
             &deployment,
             &public_status,
             &public_probe,
@@ -16567,21 +17153,24 @@ mod public_launch {
             &genesis,
         )
         .unwrap();
-        let runtime_surface = build_live_rpc_devnet_runtime_surface_evidence_json_pretty(
-            &bundle,
-            &deployment,
-            &public_status,
-            &public_probe,
-            &validators,
-            &handoff,
-            &acceptance,
-            &genesis,
-        )
-        .unwrap();
+        let runtime_surface =
+            build_live_rpc_devnet_runtime_surface_evidence_with_peer_manifest_json_pretty(
+                &bundle,
+                &peer_manifest,
+                &deployment,
+                &public_status,
+                &public_probe,
+                &validators,
+                &handoff,
+                &acceptance,
+                &genesis,
+            )
+            .unwrap();
         let certificate = serde_json::from_str::<Value>(
             &build_public_testnet_launch_certificate_json_pretty(
                 &observer_confirmation,
                 &runtime_surface,
+                &peer_manifest,
                 &join_confirmation,
                 &join,
                 &activation,
@@ -16610,6 +17199,7 @@ mod public_launch {
             &wrong_validator_count.to_string(),
             &observer_confirmation,
             &runtime_surface,
+            &peer_manifest,
             &join_confirmation,
             &join,
             &activation,
@@ -16647,6 +17237,7 @@ mod public_launch {
             &wrong_fee_policy.to_string(),
             &observer_confirmation,
             &runtime_surface,
+            &peer_manifest,
             &join_confirmation,
             &join,
             &activation,
@@ -16686,6 +17277,7 @@ mod public_launch {
             &wrong_runtime_surface.to_string(),
             &observer_confirmation,
             &runtime_surface,
+            &peer_manifest,
             &join_confirmation,
             &join,
             &activation,

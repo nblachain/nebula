@@ -294,6 +294,7 @@ fn prove_live_rpc_devnet_with_launch_artifacts_binds_rehearsal_to_bundle() {
     let acceptance = dir.join("acceptance.json");
     let genesis = dir.join("genesis.json");
     let bundle = dir.join("bundle.json");
+    let peer_manifest = dir.join("peer-manifest.json");
 
     write_nebula_output(&args(&["--sample-public-status"]), &public_status);
     write_nebula_output(&args(&["--sample-public-probe"]), &public_probe);
@@ -352,12 +353,60 @@ fn prove_live_rpc_devnet_with_launch_artifacts_binds_rehearsal_to_bundle() {
         ],
         &bundle,
     );
+    write_nebula_output(
+        &[
+            "--build-public-testnet-peer-manifest".to_string(),
+            "--launch-package-bundle".to_string(),
+            path_arg(&bundle),
+            "--deployment-attestation".to_string(),
+            path_arg(&attestation),
+            "--public-status".to_string(),
+            path_arg(&public_status),
+            "--public-probe".to_string(),
+            path_arg(&public_probe),
+            "--validator-set".to_string(),
+            path_arg(&validators),
+            "--operator-handoff".to_string(),
+            path_arg(&handoff),
+            "--operator-acceptance".to_string(),
+            path_arg(&acceptance),
+            "--genesis-manifest".to_string(),
+            path_arg(&genesis),
+        ],
+        &peer_manifest,
+    );
 
     let runtime_surface = dir.join("live-rpc-devnet-runtime-surface.json");
+    let missing_peer_manifest = run_nebula_failure_strings(&[
+        "--prove-live-rpc-devnet".to_string(),
+        "--launch-package-bundle".to_string(),
+        path_arg(&bundle),
+        "--deployment-attestation".to_string(),
+        path_arg(&attestation),
+        "--public-status".to_string(),
+        path_arg(&public_status),
+        "--public-probe".to_string(),
+        path_arg(&public_probe),
+        "--validator-set".to_string(),
+        path_arg(&validators),
+        "--operator-handoff".to_string(),
+        path_arg(&handoff),
+        "--operator-acceptance".to_string(),
+        path_arg(&acceptance),
+        "--genesis-manifest".to_string(),
+        path_arg(&genesis),
+    ]);
+    assert!(
+        missing_peer_manifest.contains("missing --public-testnet-peer-manifest <path>"),
+        "{missing_peer_manifest}"
+    );
+
     let stdout = run_nebula_strings(&[
         "--prove-live-rpc-devnet".to_string(),
         "--launch-package-bundle".to_string(),
         path_arg(&bundle),
+        "--public-testnet-peer-manifest".to_string(),
+        path_arg(&peer_manifest),
         "--deployment-attestation".to_string(),
         path_arg(&attestation),
         "--public-status".to_string(),
@@ -383,6 +432,9 @@ fn prove_live_rpc_devnet_with_launch_artifacts_binds_rehearsal_to_bundle() {
     let bundle_manifest: Value =
         serde_json::from_str(&fs::read_to_string(&bundle).expect("read bundle manifest"))
             .expect("bundle manifest json");
+    let peer_manifest_json: Value =
+        serde_json::from_str(&fs::read_to_string(&peer_manifest).expect("read peer manifest"))
+            .expect("peer manifest json");
 
     assert_eq!(report["live_rpc_devnet_rehearsed"], true);
     assert_eq!(
@@ -393,6 +445,10 @@ fn prove_live_rpc_devnet_with_launch_artifacts_binds_rehearsal_to_bundle() {
         report["launch_package_bundle_root"],
         bundle_manifest["root"]
     );
+    assert_eq!(
+        report["public_testnet_peer_manifest_root"],
+        peer_manifest_json["root"]
+    );
     assert_eq!(runtime_surface_evidence["capture_mode"], "loopback-devnet");
     assert_eq!(
         runtime_surface_evidence["root"],
@@ -402,7 +458,12 @@ fn prove_live_rpc_devnet_with_launch_artifacts_binds_rehearsal_to_bundle() {
         runtime_surface_evidence["status"]["launch_package_bundle_root"],
         bundle_manifest["root"]
     );
+    assert_eq!(
+        runtime_surface_evidence["status"]["public_testnet_peer_manifest_root"],
+        peer_manifest_json["root"]
+    );
     assert_hex64(&report, "launch_package_bundle_root");
+    assert_hex64(&report, "public_testnet_peer_manifest_root");
     assert_hex64(&report, "runtime_surface_root");
     assert_hex64(&report, "rehearsal_root");
 
