@@ -639,6 +639,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "rollback_drill_max_age_ms": ROLLBACK_DRILL_MAX_AGE_MS,
                 "preflight_runbook_evidence_domains_disjoint": true,
                 "receipts_complete_before_deployment_generation": true,
+                "rollback_drill_before_deployment_generation": true,
                 "deployment_witness_root_verified": true,
                 "public_https_endpoint_required": true,
                 "public_endpoint_authority_required": true,
@@ -1526,7 +1527,12 @@ pub fn verify_deployment_attestation_json(
         attestation.generated_at_unix_ms,
     );
     verify_network_witnesses(&mut errors, &attestation);
-    verify_rollback_evidence(&mut errors, &attestation.rollback_evidence, now);
+    verify_rollback_evidence(
+        &mut errors,
+        &attestation.rollback_evidence,
+        now,
+        attestation.generated_at_unix_ms,
+    );
 
     if !errors.is_empty() {
         return Err(AttestationError::Invalid(errors));
@@ -2706,6 +2712,7 @@ fn verify_rollback_evidence(
     errors: &mut Vec<String>,
     rollback_evidence: &RollbackEvidence,
     now: u128,
+    generated_at_unix_ms: u128,
 ) {
     require_hex_root(
         errors,
@@ -2720,6 +2727,12 @@ fn verify_rollback_evidence(
     }
     if rollback_evidence.last_drill_unix_ms < now.saturating_sub(ROLLBACK_DRILL_MAX_AGE_MS) {
         errors.push("rollback_evidence.last_drill_unix_ms is older than seven days".to_string());
+    }
+    if rollback_evidence.last_drill_unix_ms > generated_at_unix_ms {
+        errors.push(
+            "rollback_evidence.last_drill_unix_ms must be at or before generated_at_unix_ms"
+                .to_string(),
+        );
     }
     require_hex_root(
         errors,
@@ -3616,6 +3629,28 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "rollback_evidence.last_drill_unix_ms is older than seven days"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_rollback_drill_after_generation_time() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        let generated_at = value["generated_at_unix_ms"]
+            .as_u64()
+            .expect("sample generated_at fits u64");
+        value["rollback_evidence"]["last_drill_unix_ms"] = json!(generated_at + 1);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "rollback_evidence.last_drill_unix_ms must be at or before generated_at_unix_ms"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
