@@ -208,13 +208,17 @@ jobs:
           public_status="$(mktemp)"
           public_probe="$(mktemp)"
           validators="$(mktemp)"
+          handoff="$(mktemp)"
+          acceptance="$(mktemp)"
           genesis="$(mktemp)"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > "$attestation"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > "$public_status"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-probe > "$public_probe"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-validator-set > "$validators"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-operator-handoff --deployment-attestation "$attestation" --validator-set "$validators" > "$handoff"
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-operator-acceptance --operator-handoff "$handoff" --deployment-attestation "$attestation" --validator-set "$validators" > "$acceptance"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation "$attestation" --validator-set "$validators" > "$genesis"
-          output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --genesis-manifest "$genesis" --json)"
+          output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
           NEBULA_LAUNCH_PACKAGE_JSON="$output" python3 - <<'PY'
           import json
           import os
@@ -230,6 +234,7 @@ jobs:
           assert len(payload["launch_bundle_root"]) == 64
           assert len(payload["fee_policy_root"]) == 64
           assert len(payload["validator_set_root"]) == 64
+          assert len(payload["operator_handoff_root"]) == 64
           assert len(payload["genesis_root"]) == 64
           assert payload["matched_validator_count"] == payload["validator_count"]
           assert payload["deployment_operator_count"] >= 2
