@@ -827,6 +827,58 @@ pub struct PublicProbeReport {
     pub fee_policy_root: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeSurfaceEvidence {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub endpoint_url: String,
+    pub captured_at_unix_ms: u128,
+    pub health: Value,
+    pub status: Value,
+    pub snapshot: Value,
+    pub ops: Value,
+    pub backup: Value,
+    pub rpc_status: Value,
+    pub rpc_ops_status: Value,
+    pub rpc_backup_manifest: Value,
+    pub metrics_text: String,
+    pub root: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeSurfaceEvidenceBuildInput {
+    pub endpoint_url: String,
+    pub captured_at_unix_ms: u128,
+    pub health_json: String,
+    pub status_json: String,
+    pub snapshot_json: String,
+    pub ops_json: String,
+    pub backup_json: String,
+    pub rpc_status_json: String,
+    pub rpc_ops_status_json: String,
+    pub rpc_backup_manifest_json: String,
+    pub metrics_text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeSurfaceEvidenceReport {
+    pub runtime_surface_ready: bool,
+    pub level: &'static str,
+    pub runtime_surface_root: String,
+    pub endpoint_url: String,
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub latest_height: u64,
+    pub latest_hash: String,
+    pub snapshot_root: String,
+    pub state_root: String,
+    pub ops_root: String,
+    pub backup_root: String,
+    pub public_ops_ready: bool,
+    pub blocking_gaps: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReceiptReport {
     pub receipt_ready: bool,
@@ -1774,6 +1826,215 @@ pub fn verify_public_probe_json(input: &str) -> Result<PublicProbeReport, Attest
         endpoint_url: probe.url,
         launch_bundle_root: probe.body.launch_bundle_root,
         fee_policy_root: probe.body.fee_policy_root,
+    })
+}
+
+pub fn build_runtime_surface_evidence_json_pretty(
+    input: RuntimeSurfaceEvidenceBuildInput,
+) -> Result<String, AttestationError> {
+    let status = parse_json_value(&input.status_json, "status")?;
+    let chain_id = json_string_field(&status, "status.chain_id")?;
+    let runtime_version = json_string_field(&status, "status.runtime_version")?;
+    let mut evidence = RuntimeSurfaceEvidence {
+        chain_id,
+        runtime_version,
+        endpoint_url: input.endpoint_url,
+        captured_at_unix_ms: input.captured_at_unix_ms,
+        health: parse_json_value(&input.health_json, "health")?,
+        status,
+        snapshot: parse_json_value(&input.snapshot_json, "snapshot")?,
+        ops: parse_json_value(&input.ops_json, "ops")?,
+        backup: parse_json_value(&input.backup_json, "backup")?,
+        rpc_status: parse_json_value(&input.rpc_status_json, "rpc_status")?,
+        rpc_ops_status: parse_json_value(&input.rpc_ops_status_json, "rpc_ops_status")?,
+        rpc_backup_manifest: parse_json_value(
+            &input.rpc_backup_manifest_json,
+            "rpc_backup_manifest",
+        )?,
+        metrics_text: input.metrics_text,
+        root: String::new(),
+    };
+    evidence.root = runtime_surface_evidence_root(&evidence);
+    let output = serde_json::to_string_pretty(&evidence)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    verify_runtime_surface_evidence_json(&output)?;
+    Ok(output)
+}
+
+pub fn verify_runtime_surface_evidence_json(
+    input: &str,
+) -> Result<RuntimeSurfaceEvidenceReport, AttestationError> {
+    let input = input.trim_start_matches('\u{feff}');
+    let evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(input)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    verify_runtime_surface_evidence(&evidence)
+}
+
+fn verify_runtime_surface_evidence(
+    evidence: &RuntimeSurfaceEvidence,
+) -> Result<RuntimeSurfaceEvidenceReport, AttestationError> {
+    let mut errors = Vec::new();
+    let now = unix_ms();
+    require_https_endpoint(
+        &mut errors,
+        "runtime_surface.endpoint_url",
+        &evidence.endpoint_url,
+    );
+    require_eq(
+        &mut errors,
+        "runtime_surface.chain_id",
+        &evidence.chain_id,
+        CHAIN_ID,
+    );
+    require_eq(
+        &mut errors,
+        "runtime_surface.runtime_version",
+        &evidence.runtime_version,
+        VERSION,
+    );
+    if evidence.captured_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
+        errors.push(
+            "runtime_surface.captured_at_unix_ms is more than five minutes in the future"
+                .to_string(),
+        );
+    }
+    if evidence.captured_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("runtime_surface.captured_at_unix_ms is older than 24 hours".to_string());
+    }
+    require_root(
+        &mut errors,
+        "runtime_surface.root",
+        &evidence.root,
+        &runtime_surface_evidence_root(evidence),
+    );
+
+    let rpc_status = rpc_result_or_value(&mut errors, "rpc_status", &evidence.rpc_status);
+    let rpc_ops = rpc_result_or_value(&mut errors, "rpc_ops_status", &evidence.rpc_ops_status);
+    let rpc_backup = rpc_result_or_value(
+        &mut errors,
+        "rpc_backup_manifest",
+        &evidence.rpc_backup_manifest,
+    );
+
+    require_value_eq(
+        &mut errors,
+        "rpc_status.result",
+        rpc_status,
+        &evidence.status,
+    );
+    require_durable_field_set_eq(
+        &mut errors,
+        "rpc_ops_status.result",
+        rpc_ops,
+        "ops",
+        &evidence.ops,
+        RUNTIME_OPS_DURABLE_FIELDS,
+    );
+    require_durable_field_set_eq(
+        &mut errors,
+        "rpc_backup_manifest.result",
+        rpc_backup,
+        "backup",
+        &evidence.backup,
+        RUNTIME_BACKUP_DURABLE_FIELDS,
+    );
+
+    let snapshot = parse_surface_value::<runtime::RuntimeSnapshot>(
+        &mut errors,
+        "snapshot",
+        &evidence.snapshot,
+    );
+    let ops = parse_surface_value::<runtime::RuntimeOpsStatus>(&mut errors, "ops", &evidence.ops);
+    let backup = parse_surface_value::<runtime::RuntimeBackupManifest>(
+        &mut errors,
+        "backup",
+        &evidence.backup,
+    );
+
+    if let Some(snapshot) = &snapshot {
+        if let Err(error) = runtime::validate_runtime_snapshot(snapshot) {
+            errors.push(format!("snapshot validation failed: {error}"));
+        }
+        require_root(
+            &mut errors,
+            "snapshot.root",
+            &snapshot.root,
+            &runtime::runtime_snapshot_root(snapshot),
+        );
+    }
+    if let Some(ops) = &ops {
+        require_root(
+            &mut errors,
+            "ops.ops_root",
+            &ops.ops_root,
+            &runtime::runtime_ops_status_root(ops),
+        );
+    }
+    if let Some(backup) = &backup {
+        require_root(
+            &mut errors,
+            "backup.backup_root",
+            &backup.backup_root,
+            &runtime::runtime_backup_manifest_root(backup),
+        );
+    }
+
+    require_health_status_agreement(&mut errors, &evidence.health, &evidence.status);
+    require_ops_backup_snapshot_agreement(
+        &mut errors,
+        &evidence.health,
+        &evidence.status,
+        &evidence.snapshot,
+        &evidence.ops,
+        &evidence.backup,
+    );
+
+    if let Some(snapshot) = &snapshot {
+        require_metrics_agreement(
+            &mut errors,
+            &evidence.metrics_text,
+            &evidence.status,
+            snapshot,
+        );
+    }
+
+    let health_ready = json_bool(&evidence.health, "public_ops_ready").unwrap_or(false);
+    let ops_ready = json_bool(&evidence.ops, "public_ops_ready").unwrap_or(false);
+    if !health_ready {
+        errors
+            .push("health.public_ops_ready must be true for runtime surface evidence".to_string());
+    }
+    if !ops_ready {
+        errors.push("ops.public_ops_ready must be true for runtime surface evidence".to_string());
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    let snapshot = snapshot.expect("snapshot was parsed when no errors were recorded");
+    let latest = snapshot
+        .blocks
+        .last()
+        .expect("validated snapshot always has a latest block");
+    let ops = ops.expect("ops was parsed when no errors were recorded");
+    let backup = backup.expect("backup was parsed when no errors were recorded");
+
+    Ok(RuntimeSurfaceEvidenceReport {
+        runtime_surface_ready: true,
+        level: "runtime-surface-attested",
+        runtime_surface_root: evidence.root.clone(),
+        endpoint_url: evidence.endpoint_url.clone(),
+        chain_id: evidence.chain_id.clone(),
+        runtime_version: evidence.runtime_version.clone(),
+        latest_height: latest.height,
+        latest_hash: latest.block_hash.clone(),
+        snapshot_root: snapshot.root,
+        state_root: snapshot.state_root,
+        ops_root: ops.ops_root,
+        backup_root: backup.backup_root,
+        public_ops_ready: true,
+        blocking_gaps: ops.blocking_gaps,
     })
 }
 
@@ -4543,6 +4804,486 @@ fn parse_public_probe_json(input: &str, label: &str) -> Result<PublicProbe, Atte
 fn parse_receipt_json(input: &str, label: &str) -> Result<Receipt, AttestationError> {
     serde_json::from_str::<Receipt>(input.trim_start_matches('\u{feff}'))
         .map_err(|error| AttestationError::MalformedJson(format!("{label}: {error}")))
+}
+
+const RUNTIME_OPS_DURABLE_FIELDS: &[&str] = &[
+    "service",
+    "chain_id",
+    "runtime_version",
+    "node_role",
+    "latest_height",
+    "latest_hash",
+    "block_target_ms",
+    "sub_second_blocks",
+    "block_production_enabled",
+    "snapshot_version",
+    "snapshot_root",
+    "state_root",
+    "current_state_root",
+    "storage_snapshot_path",
+    "storage_snapshot_present",
+    "storage_snapshot_root",
+    "storage_snapshot_height",
+    "storage_snapshot_matches_runtime",
+    "sync_peer_count",
+    "sync_successful_peer_count",
+    "sync_failed_peer_count",
+    "sync_attempt_count",
+    "sync_success_count",
+    "sync_failure_count",
+    "sync_stale_snapshot_count",
+    "sync_fork_rejection_count",
+    "sync_import_count",
+    "sync_last_success_unix_ms",
+    "sync_last_import_height",
+    "sync_peer_telemetry",
+    "rpc_max_request_bytes",
+    "rpc_max_requests_per_minute",
+    "admin_rpc_enabled",
+    "max_mempool_transactions",
+    "mempool_size",
+    "mempool_capacity_remaining",
+    "mempool_full_rejection_count",
+    "mempool_admission_rejection_count",
+    "sequencer_public_key_hex",
+    "sequencer_key_rotation_count",
+    "sequencer_latest_rotation_activation_height",
+    "sequencer_key_history_root",
+    "accountability_report_count",
+    "accountability_root",
+    "sequencer_accountability_clean",
+    "bridge_policy_root",
+    "bridge_live_value_enabled",
+    "faucet_nbla_nebulai",
+    "faucet_nxmr_units",
+    "bridge_only_nxmr",
+    "bridge_deposited_nxmr_units",
+    "account_nxmr_units",
+    "withdrawal_reserved_nxmr_units",
+    "nxmr_fee_units",
+    "nxmr_custody_required_units",
+    "nxmr_custody_surplus_units",
+    "nxmr_custody_deficit_units",
+    "bridge_custody_reconciled",
+    "public_ops_ready",
+    "blocking_gaps",
+];
+
+const RUNTIME_BACKUP_DURABLE_FIELDS: &[&str] = &[
+    "manifest_version",
+    "chain_id",
+    "runtime_version",
+    "latest_height",
+    "latest_hash",
+    "snapshot_version",
+    "snapshot_root",
+    "state_root",
+    "current_state_root",
+    "snapshot_path",
+    "snapshot_persisted",
+    "storage_snapshot_root",
+    "storage_snapshot_matches_runtime",
+    "sequencer_public_key_hex",
+    "sequencer_key_rotation_count",
+    "sequencer_latest_rotation_activation_height",
+    "sequencer_key_history_root",
+    "accountability_report_count",
+    "accountability_root",
+    "sequencer_accountability_clean",
+    "bridge_policy_root",
+    "sync_peer_count",
+    "sync_successful_peer_count",
+    "sync_failed_peer_count",
+    "sync_attempt_count",
+    "sync_success_count",
+    "sync_failure_count",
+    "sync_stale_snapshot_count",
+    "sync_fork_rejection_count",
+    "sync_import_count",
+    "sync_last_success_unix_ms",
+    "sync_last_import_height",
+    "sync_peer_telemetry",
+    "rpc_max_request_bytes",
+    "rpc_max_requests_per_minute",
+    "admin_rpc_enabled",
+    "max_mempool_transactions",
+    "mempool_size",
+    "mempool_capacity_remaining",
+    "mempool_full_rejection_count",
+    "mempool_admission_rejection_count",
+    "faucet_nbla_nebulai",
+    "faucet_nxmr_units",
+    "bridge_only_nxmr",
+    "bridge_deposited_nxmr_units",
+    "account_nxmr_units",
+    "withdrawal_reserved_nxmr_units",
+    "nxmr_fee_units",
+    "nxmr_custody_required_units",
+    "nxmr_custody_surplus_units",
+    "nxmr_custody_deficit_units",
+    "bridge_custody_reconciled",
+];
+
+fn parse_json_value(input: &str, label: &str) -> Result<Value, AttestationError> {
+    serde_json::from_str::<Value>(input.trim_start_matches('\u{feff}'))
+        .map_err(|error| AttestationError::MalformedJson(format!("{label}: {error}")))
+}
+
+fn json_string_field(value: &Value, label: &str) -> Result<String, AttestationError> {
+    let field = label.rsplit('.').next().unwrap_or(label);
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| AttestationError::Invalid(vec![format!("{label} must be a string")]))
+}
+
+fn runtime_surface_evidence_root(evidence: &RuntimeSurfaceEvidence) -> String {
+    stable_root(&json!({
+        "runtime_surface_domain": "nebula-runtime-surface-evidence-v1",
+        "chain_id": evidence.chain_id,
+        "runtime_version": evidence.runtime_version,
+        "endpoint_url": evidence.endpoint_url,
+        "captured_at_unix_ms": evidence.captured_at_unix_ms,
+        "health": evidence.health,
+        "status": evidence.status,
+        "snapshot": evidence.snapshot,
+        "ops": evidence.ops,
+        "backup": evidence.backup,
+        "rpc_status": evidence.rpc_status,
+        "rpc_ops_status": evidence.rpc_ops_status,
+        "rpc_backup_manifest": evidence.rpc_backup_manifest,
+        "metrics_text": evidence.metrics_text,
+    }))
+}
+
+fn rpc_result_or_value<'a>(errors: &mut Vec<String>, label: &str, value: &'a Value) -> &'a Value {
+    if value.get("error").is_some() {
+        errors.push(format!("{label} contains a JSON-RPC error"));
+    }
+    value.get("result").unwrap_or(value)
+}
+
+fn require_value_eq(errors: &mut Vec<String>, label: &str, actual: &Value, expected: &Value) {
+    if actual != expected {
+        errors.push(format!("{label} does not match expected captured value"));
+    }
+}
+
+fn require_durable_field_set_eq(
+    errors: &mut Vec<String>,
+    left_label: &str,
+    left: &Value,
+    right_label: &str,
+    right: &Value,
+    fields: &[&str],
+) {
+    for field in fields {
+        let actual = left.get(*field).unwrap_or(&Value::Null);
+        let expected = right.get(*field).unwrap_or(&Value::Null);
+        if actual != expected {
+            errors.push(format!(
+                "{left_label}.{field} does not match {right_label}.{field}"
+            ));
+        }
+    }
+}
+
+fn parse_surface_value<T: serde::de::DeserializeOwned>(
+    errors: &mut Vec<String>,
+    label: &str,
+    value: &Value,
+) -> Option<T> {
+    match serde_json::from_value::<T>(value.clone()) {
+        Ok(parsed) => Some(parsed),
+        Err(error) => {
+            errors.push(format!("{label} failed typed decode: {error}"));
+            None
+        }
+    }
+}
+
+fn json_bool(value: &Value, field: &str) -> Option<bool> {
+    value.get(field).and_then(Value::as_bool)
+}
+
+fn require_health_status_agreement(errors: &mut Vec<String>, health: &Value, status: &Value) {
+    for field in [
+        "chain_id",
+        "runtime_version",
+        "node_role",
+        "latest_height",
+        "latest_hash",
+        "latest_state_root",
+        "current_state_root",
+        "block_target_ms",
+        "sub_second_blocks",
+        "block_production_enabled",
+        "sequencer_public_key_hex",
+        "sequencer_key_history_root",
+        "accountability_root",
+        "bridge_policy_root",
+        "sync_peer_count",
+        "sync_successful_peer_count",
+        "sync_attempt_count",
+        "sync_success_count",
+        "sync_failure_count",
+        "sync_import_count",
+        "max_mempool_transactions",
+        "mempool_size",
+        "mempool_capacity_remaining",
+        "mempool_full_rejection_count",
+        "mempool_admission_rejection_count",
+        "faucet_nxmr_units",
+        "bridge_only_nxmr",
+        "bridge_custody_reconciled",
+        "nxmr_custody_deficit_units",
+        "bridge_deposit_count",
+        "withdrawal_request_count",
+        "finalized_withdrawal_count",
+    ] {
+        let actual = health.get(field).unwrap_or(&Value::Null);
+        let expected = status.get(field).unwrap_or(&Value::Null);
+        if actual != expected {
+            errors.push(format!("health.{field} does not match status.{field}"));
+        }
+    }
+    if health.get("ok") != Some(&Value::Bool(true)) {
+        errors.push("health.ok must be true".to_string());
+    }
+    require_hex_root_from_value(errors, "health.ops_root", health.get("ops_root"));
+    require_hex_root_from_value(errors, "health.backup_root", health.get("backup_root"));
+}
+
+fn require_ops_backup_snapshot_agreement(
+    errors: &mut Vec<String>,
+    health: &Value,
+    status: &Value,
+    snapshot: &Value,
+    ops: &Value,
+    backup: &Value,
+) {
+    let latest_block = snapshot
+        .get("blocks")
+        .and_then(Value::as_array)
+        .and_then(|blocks| blocks.last());
+    require_value_eq(
+        errors,
+        "snapshot.config.chain_id",
+        snapshot.pointer("/config/chain_id").unwrap_or(&Value::Null),
+        status.get("chain_id").unwrap_or(&Value::Null),
+    );
+    require_value_eq(
+        errors,
+        "snapshot.config.runtime_version",
+        snapshot
+            .pointer("/config/runtime_version")
+            .unwrap_or(&Value::Null),
+        status.get("runtime_version").unwrap_or(&Value::Null),
+    );
+    if let Some(latest_block) = latest_block {
+        require_value_eq(
+            errors,
+            "status.latest_height",
+            status.get("latest_height").unwrap_or(&Value::Null),
+            latest_block.get("height").unwrap_or(&Value::Null),
+        );
+        require_value_eq(
+            errors,
+            "status.latest_hash",
+            status.get("latest_hash").unwrap_or(&Value::Null),
+            latest_block.get("block_hash").unwrap_or(&Value::Null),
+        );
+        require_value_eq(
+            errors,
+            "status.latest_state_root",
+            status.get("latest_state_root").unwrap_or(&Value::Null),
+            latest_block.get("state_root").unwrap_or(&Value::Null),
+        );
+    } else {
+        errors.push("snapshot.blocks must contain a latest block".to_string());
+    }
+    require_value_eq(
+        errors,
+        "status.current_state_root",
+        status.get("current_state_root").unwrap_or(&Value::Null),
+        snapshot.get("state_root").unwrap_or(&Value::Null),
+    );
+    require_value_eq(
+        errors,
+        "health.snapshot_root",
+        health.get("snapshot_root").unwrap_or(&Value::Null),
+        snapshot.get("root").unwrap_or(&Value::Null),
+    );
+    require_value_eq(
+        errors,
+        "ops.snapshot_root",
+        ops.get("snapshot_root").unwrap_or(&Value::Null),
+        snapshot.get("root").unwrap_or(&Value::Null),
+    );
+    require_value_eq(
+        errors,
+        "backup.snapshot_root",
+        backup.get("snapshot_root").unwrap_or(&Value::Null),
+        snapshot.get("root").unwrap_or(&Value::Null),
+    );
+    for field in ["latest_height", "latest_hash", "current_state_root"] {
+        require_value_eq(
+            errors,
+            &format!("ops.{field}"),
+            ops.get(field).unwrap_or(&Value::Null),
+            status.get(field).unwrap_or(&Value::Null),
+        );
+        require_value_eq(
+            errors,
+            &format!("backup.{field}"),
+            backup.get(field).unwrap_or(&Value::Null),
+            status.get(field).unwrap_or(&Value::Null),
+        );
+    }
+    for field in [
+        "storage_snapshot_matches_runtime",
+        "sync_peer_count",
+        "sync_successful_peer_count",
+        "rpc_max_request_bytes",
+        "rpc_max_requests_per_minute",
+        "admin_rpc_enabled",
+        "mempool_capacity_remaining",
+        "bridge_policy_root",
+        "bridge_custody_reconciled",
+    ] {
+        let backup_field = field;
+        require_value_eq(
+            errors,
+            &format!("health.{field}"),
+            health.get(field).unwrap_or(&Value::Null),
+            ops.get(field).unwrap_or(&Value::Null),
+        );
+        require_value_eq(
+            errors,
+            &format!("backup.{backup_field}"),
+            backup.get(backup_field).unwrap_or(&Value::Null),
+            ops.get(field).unwrap_or(&Value::Null),
+        );
+    }
+    require_value_eq(
+        errors,
+        "health.public_ops_ready",
+        health.get("public_ops_ready").unwrap_or(&Value::Null),
+        ops.get("public_ops_ready").unwrap_or(&Value::Null),
+    );
+    require_value_eq(
+        errors,
+        "health.public_ops_blocking_gaps",
+        health
+            .get("public_ops_blocking_gaps")
+            .unwrap_or(&Value::Null),
+        ops.get("blocking_gaps").unwrap_or(&Value::Null),
+    );
+}
+
+fn require_metrics_agreement(
+    errors: &mut Vec<String>,
+    metrics_text: &str,
+    status: &Value,
+    snapshot: &runtime::RuntimeSnapshot,
+) {
+    let latest_height = snapshot.latest_height();
+    require_metric_value(errors, metrics_text, "nebula_latest_height", latest_height);
+    require_metric_value(
+        errors,
+        metrics_text,
+        "nebula_sub_second_blocks",
+        u8::from(json_bool(status, "sub_second_blocks").unwrap_or(false)),
+    );
+    require_metric_from_json(
+        errors,
+        metrics_text,
+        "nebula_sync_successful_peer_count",
+        status,
+        "sync_successful_peer_count",
+    );
+    require_metric_from_json(
+        errors,
+        metrics_text,
+        "nebula_sync_attempt_count",
+        status,
+        "sync_attempt_count",
+    );
+    require_metric_from_json(
+        errors,
+        metrics_text,
+        "nebula_mempool_capacity_remaining",
+        status,
+        "mempool_capacity_remaining",
+    );
+    require_metric_from_json(
+        errors,
+        metrics_text,
+        "nebula_rpc_max_request_bytes",
+        status,
+        "rpc_max_request_bytes",
+    );
+    require_metric_value(errors, metrics_text, "nebula_bridge_custody_reconciled", 1);
+    require_metric_value(
+        errors,
+        metrics_text,
+        "nebula_storage_snapshot_matches_runtime",
+        1,
+    );
+    require_metric_value(errors, metrics_text, "nebula_public_ops_ready", 1);
+    require_metric_value(
+        errors,
+        metrics_text,
+        "nebula_public_ops_blocking_gap_count",
+        0,
+    );
+}
+
+fn require_metric_from_json(
+    errors: &mut Vec<String>,
+    metrics_text: &str,
+    metric_name: &str,
+    json: &Value,
+    field: &str,
+) {
+    match json.get(field) {
+        Some(value) => require_metric_value(errors, metrics_text, metric_name, value),
+        None => errors.push(format!("{field} is missing from status JSON")),
+    }
+}
+
+fn require_metric_value<T: ToString>(
+    errors: &mut Vec<String>,
+    metrics_text: &str,
+    metric_name: &str,
+    expected: T,
+) {
+    let expected = expected.to_string();
+    match metric_value(metrics_text, metric_name) {
+        Some(actual) if actual == expected => {}
+        Some(actual) => errors.push(format!(
+            "metric {metric_name} expected {expected} but got {actual}"
+        )),
+        None => errors.push(format!("metric {metric_name} is missing")),
+    }
+}
+
+fn metric_value<'a>(metrics_text: &'a str, metric_name: &str) -> Option<&'a str> {
+    metrics_text.lines().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        match (parts.next(), parts.next()) {
+            (Some(name), Some(value)) if name == metric_name => Some(value),
+            _ => None,
+        }
+    })
+}
+
+fn require_hex_root_from_value(errors: &mut Vec<String>, label: &str, value: Option<&Value>) {
+    match value.and_then(Value::as_str) {
+        Some(root) => require_hex_root(errors, label, root),
+        None => errors.push(format!("{label} must be a 64-character hex root")),
+    }
 }
 
 fn sample_public_status_manifest(

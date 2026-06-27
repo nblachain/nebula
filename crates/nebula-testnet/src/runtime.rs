@@ -29,7 +29,7 @@ pub const MIN_WITHDRAWAL_OPERATOR_QUORUM: usize = 2;
 pub const BRIDGE_CUSTODY_POLICY_ID: &str = "nebula-monero-bridge-custody-testnet-v1";
 pub const VALIDATOR_REWARD_ACCOUNT_PREFIX: &str = "validator:";
 pub const RUNTIME_SNAPSHOT_FILE: &str = "nebula-runtime-snapshot.json";
-pub const RUNTIME_SNAPSHOT_VERSION: u32 = 8;
+pub const RUNTIME_SNAPSHOT_VERSION: u32 = 9;
 pub const DEFAULT_PEER_SYNC_MS: u64 = 100;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
 pub const DEFAULT_MAX_REQUESTS_PER_MINUTE: u32 = 600;
@@ -352,7 +352,7 @@ pub struct FaucetReport {
     pub account_state: RuntimeAccount,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeStatus {
     pub chain_id: String,
     pub runtime_version: String,
@@ -414,7 +414,7 @@ pub struct RuntimeBridgePolicy {
     pub live_value_enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeOpsStatus {
     pub service: String,
     pub generated_at_unix_ms: u128,
@@ -481,7 +481,7 @@ pub struct RuntimeOpsStatus {
     pub ops_root: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeBackupManifest {
     pub manifest_version: u32,
     pub generated_at_unix_ms: u128,
@@ -638,7 +638,7 @@ struct RuntimeSyncPeerSet {
     sync_peer_urls: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RuntimeSyncPeerTelemetry {
     pub url: String,
     pub last_attempt_unix_ms: Option<u128>,
@@ -1232,6 +1232,89 @@ impl RuntimeRpcState {
         };
         manifest.backup_root = backup_manifest_root(&manifest);
         Ok(manifest)
+    }
+
+    fn health_json(&self) -> Result<Value, String> {
+        let status = self.status_json()?;
+        let ops_status = self.ops_status()?;
+        let backup_manifest = self.backup_manifest()?;
+        Ok(json!({
+            "ok": true,
+            "service": "nebula-testnet-rpc",
+            "chain_id": status["chain_id"],
+            "runtime_version": status["runtime_version"],
+            "node_role": status["node_role"],
+            "latest_height": status["latest_height"],
+            "latest_hash": status["latest_hash"],
+            "latest_state_root": status["latest_state_root"],
+            "current_state_root": status["current_state_root"],
+            "block_target_ms": status["block_target_ms"],
+            "sub_second_blocks": status["sub_second_blocks"],
+            "block_production_enabled": status["block_production_enabled"],
+            "snapshot_version": ops_status.snapshot_version,
+            "snapshot_root": ops_status.snapshot_root,
+            "state_root": ops_status.state_root,
+            "latest_block_age_ms": ops_status.latest_block_age_ms,
+            "public_ops_ready": ops_status.public_ops_ready,
+            "public_ops_blocking_gaps": ops_status.blocking_gaps,
+            "ops_root": ops_status.ops_root,
+            "backup_root": backup_manifest.backup_root,
+            "snapshot_persisted": backup_manifest.snapshot_persisted,
+            "storage_snapshot_path": backup_manifest.snapshot_path,
+            "storage_snapshot_root": backup_manifest.storage_snapshot_root,
+            "storage_snapshot_matches_runtime": backup_manifest.storage_snapshot_matches_runtime,
+            "rpc_limits": self.rpc_limits,
+            "rpc_max_request_bytes": status["rpc_max_request_bytes"],
+            "rpc_max_requests_per_minute": status["rpc_max_requests_per_minute"],
+            "admin_rpc_enabled": self.admin_token.is_some(),
+            "bootstrap_peer_urls": self.sync_peers.bootstrap_peer_urls,
+            "sync_peer_urls": self.sync_peers.sync_peer_urls,
+            "sync_peer_count": self.sync_peers.sync_peer_urls.len(),
+            "sync_successful_peer_count": status["sync_successful_peer_count"],
+            "sync_failed_peer_count": status["sync_failed_peer_count"],
+            "sync_attempt_count": status["sync_attempt_count"],
+            "sync_success_count": status["sync_success_count"],
+            "sync_failure_count": status["sync_failure_count"],
+            "sync_stale_snapshot_count": status["sync_stale_snapshot_count"],
+            "sync_fork_rejection_count": status["sync_fork_rejection_count"],
+            "sync_import_count": status["sync_import_count"],
+            "sync_last_success_unix_ms": status["sync_last_success_unix_ms"],
+            "sync_last_import_height": status["sync_last_import_height"],
+            "sync_peer_telemetry": status["sync_peer_telemetry"],
+            "max_mempool_transactions": status["max_mempool_transactions"],
+            "mempool_size": status["mempool_size"],
+            "mempool_capacity_remaining": status["mempool_capacity_remaining"],
+            "mempool_full_rejection_count": status["mempool_full_rejection_count"],
+            "mempool_admission_rejection_count": status["mempool_admission_rejection_count"],
+            "sequencer_public_key_hex": status["sequencer_public_key_hex"],
+            "sequencer_key_rotation_count": status["sequencer_key_rotation_count"],
+            "sequencer_latest_rotation_activation_height": status["sequencer_latest_rotation_activation_height"],
+            "sequencer_key_history_root": status["sequencer_key_history_root"],
+            "accountability_report_count": status["accountability_report_count"],
+            "accountability_root": status["accountability_root"],
+            "sequencer_accountability_clean": status["sequencer_accountability_clean"],
+            "bridge_policy": bridge_policy(),
+            "bridge_policy_root": status["bridge_policy_root"],
+            "bridge_min_deposit_confirmations": status["bridge_min_deposit_confirmations"],
+            "bridge_deposit_observer_quorum": status["bridge_deposit_observer_quorum"],
+            "bridge_withdrawal_operator_quorum": status["bridge_withdrawal_operator_quorum"],
+            "bridge_live_value_enabled": status["bridge_live_value_enabled"],
+            "faucet_nbla_nebulai": status["faucet_nbla_nebulai"],
+            "faucet_nxmr_units": status["faucet_nxmr_units"],
+            "bridge_only_nxmr": status["bridge_only_nxmr"],
+            "bridge_deposited_nxmr_units": status["bridge_deposited_nxmr_units"],
+            "account_nxmr_units": status["account_nxmr_units"],
+            "withdrawal_reserved_nxmr_units": status["withdrawal_reserved_nxmr_units"],
+            "nxmr_fee_units": status["nxmr_fee_units"],
+            "nxmr_custody_required_units": status["nxmr_custody_required_units"],
+            "nxmr_custody_surplus_units": status["nxmr_custody_surplus_units"],
+            "nxmr_custody_deficit_units": status["nxmr_custody_deficit_units"],
+            "bridge_custody_reconciled": status["bridge_custody_reconciled"],
+            "bridge_deposit_count": status["bridge_deposit_count"],
+            "withdrawal_request_count": status["withdrawal_request_count"],
+            "finalized_withdrawal_count": status["finalized_withdrawal_count"],
+            "bridge_replay_cache_count": status["bridge_replay_cache_count"],
+        }))
     }
 
     fn metrics_text(&self) -> Result<String, String> {
@@ -2977,66 +3060,10 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
     let path = request_parts.next().unwrap_or("/");
 
     match (method, path) {
-        ("GET", "/health") => {
-            let status = state.status_json().map_err(std::io::Error::other)?;
-            write_json_response(
-                &mut stream,
-                200,
-                &json!({
-                    "ok": true,
-                    "service": "nebula-testnet-rpc",
-                    "rpc_limits": state.rpc_limits,
-                    "admin_rpc_enabled": state.admin_token.is_some(),
-                    "bootstrap_peer_urls": state.sync_peers.bootstrap_peer_urls,
-                    "sync_peer_urls": state.sync_peers.sync_peer_urls,
-                    "sync_peer_count": state.sync_peers.sync_peer_urls.len(),
-                    "sync_successful_peer_count": status["sync_successful_peer_count"],
-                    "sync_failed_peer_count": status["sync_failed_peer_count"],
-                    "sync_attempt_count": status["sync_attempt_count"],
-                    "sync_success_count": status["sync_success_count"],
-                    "sync_failure_count": status["sync_failure_count"],
-                    "sync_stale_snapshot_count": status["sync_stale_snapshot_count"],
-                    "sync_fork_rejection_count": status["sync_fork_rejection_count"],
-                    "sync_import_count": status["sync_import_count"],
-                    "sync_last_success_unix_ms": status["sync_last_success_unix_ms"],
-                    "sync_last_import_height": status["sync_last_import_height"],
-                    "sync_peer_telemetry": status["sync_peer_telemetry"],
-                    "max_mempool_transactions": status["max_mempool_transactions"],
-                    "mempool_size": status["mempool_size"],
-                    "mempool_capacity_remaining": status["mempool_capacity_remaining"],
-                    "mempool_full_rejection_count": status["mempool_full_rejection_count"],
-                    "mempool_admission_rejection_count": status["mempool_admission_rejection_count"],
-                    "sequencer_public_key_hex": status["sequencer_public_key_hex"],
-                    "sequencer_key_rotation_count": status["sequencer_key_rotation_count"],
-                    "sequencer_latest_rotation_activation_height": status["sequencer_latest_rotation_activation_height"],
-                    "sequencer_key_history_root": status["sequencer_key_history_root"],
-                    "accountability_report_count": status["accountability_report_count"],
-                    "accountability_root": status["accountability_root"],
-                    "sequencer_accountability_clean": status["sequencer_accountability_clean"],
-                    "bridge_policy": bridge_policy(),
-                    "bridge_policy_root": status["bridge_policy_root"],
-                    "bridge_min_deposit_confirmations": status["bridge_min_deposit_confirmations"],
-                    "bridge_deposit_observer_quorum": status["bridge_deposit_observer_quorum"],
-                    "bridge_withdrawal_operator_quorum": status["bridge_withdrawal_operator_quorum"],
-                    "bridge_live_value_enabled": status["bridge_live_value_enabled"],
-                    "faucet_nbla_nebulai": status["faucet_nbla_nebulai"],
-                    "faucet_nxmr_units": status["faucet_nxmr_units"],
-                    "bridge_only_nxmr": status["bridge_only_nxmr"],
-                    "bridge_deposited_nxmr_units": status["bridge_deposited_nxmr_units"],
-                    "account_nxmr_units": status["account_nxmr_units"],
-                    "withdrawal_reserved_nxmr_units": status["withdrawal_reserved_nxmr_units"],
-                    "nxmr_fee_units": status["nxmr_fee_units"],
-                    "nxmr_custody_required_units": status["nxmr_custody_required_units"],
-                    "nxmr_custody_surplus_units": status["nxmr_custody_surplus_units"],
-                    "nxmr_custody_deficit_units": status["nxmr_custody_deficit_units"],
-                    "bridge_custody_reconciled": status["bridge_custody_reconciled"],
-                    "bridge_deposit_count": status["bridge_deposit_count"],
-                    "withdrawal_request_count": status["withdrawal_request_count"],
-                    "finalized_withdrawal_count": status["finalized_withdrawal_count"],
-                    "bridge_replay_cache_count": status["bridge_replay_cache_count"],
-                }),
-            )?;
-        }
+        ("GET", "/health") => match state.health_json() {
+            Ok(health) => write_json_response(&mut stream, 200, &health)?,
+            Err(error) => write_json_response(&mut stream, 500, &json!({"error": error}))?,
+        },
         ("GET", "/status") => match state.status_json() {
             Ok(status) => write_json_response(&mut stream, 200, &status)?,
             Err(error) => write_json_response(&mut stream, 500, &json!({"error": error}))?,
@@ -4259,6 +4286,22 @@ fn transaction_root(transactions: &[RuntimeTransaction], rejected_tx_ids: &[Stri
     }))
 }
 
+pub fn validate_runtime_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
+    validate_snapshot(snapshot)
+}
+
+pub fn runtime_snapshot_root(snapshot: &RuntimeSnapshot) -> String {
+    snapshot_root(snapshot)
+}
+
+pub fn runtime_ops_status_root(report: &RuntimeOpsStatus) -> String {
+    ops_status_root(report)
+}
+
+pub fn runtime_backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
+    backup_manifest_root(manifest)
+}
+
 fn ops_status_root(report: &RuntimeOpsStatus) -> String {
     stable_runtime_root(&json!({
         "ops_status_domain": "nebula-runtime-ops-status-v1",
@@ -4507,7 +4550,6 @@ fn snapshot_root(snapshot: &RuntimeSnapshot) -> String {
     stable_runtime_root(&json!({
         "snapshot_domain": "nebula-runtime-snapshot-v1",
         "snapshot_version": snapshot.snapshot_version,
-        "exported_at_unix_ms": snapshot.exported_at_unix_ms,
         "config": snapshot.config,
         "state_root": snapshot.state_root,
         "accounts": snapshot.accounts,
@@ -5043,6 +5085,202 @@ mod tests {
         assert_eq!(rpc_backup["bridge_custody_reconciled"], true);
         assert_eq!(rpc_backup["nxmr_custody_deficit_units"], 0);
         assert_eq!(rpc_backup["storage_snapshot_matches_runtime"], true);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn runtime_health_surface_binds_chain_roots_and_ops_evidence() {
+        let dir = std::env::temp_dir().join(format!("nebula-runtime-health-test-{}", unix_ms()));
+        let storage = RuntimeStorage::from_data_dir(&dir);
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        runtime.faucet("alice").unwrap();
+        runtime.produce_block();
+        let snapshot = runtime.export_snapshot();
+        storage.save_snapshot(&snapshot).unwrap();
+        let mut state = test_rpc_state_with_limits(
+            runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+        state.storage = Some(storage);
+
+        let health = state.health_json().unwrap();
+        let status = state.status_json().unwrap();
+        let ops = state.ops_status().unwrap();
+        let backup = state.backup_manifest().unwrap();
+
+        assert_eq!(health["ok"], true);
+        assert_eq!(health["chain_id"], status["chain_id"]);
+        assert_eq!(health["runtime_version"], status["runtime_version"]);
+        assert_eq!(health["node_role"], status["node_role"]);
+        assert_eq!(health["latest_height"], status["latest_height"]);
+        assert_eq!(health["latest_hash"], status["latest_hash"]);
+        assert_eq!(health["latest_state_root"], status["latest_state_root"]);
+        assert_eq!(health["current_state_root"], status["current_state_root"]);
+        assert_eq!(health["snapshot_version"], ops.snapshot_version);
+        assert_eq!(health["snapshot_root"], ops.snapshot_root);
+        assert_eq!(health["state_root"], ops.state_root);
+        assert_eq!(health["public_ops_ready"], true);
+        assert_eq!(health["snapshot_persisted"], true);
+        assert_eq!(health["storage_snapshot_matches_runtime"], true);
+        assert_eq!(health["sync_peer_count"], status["sync_peer_count"]);
+        assert_eq!(health["bridge_policy_root"], status["bridge_policy_root"]);
+        assert_eq!(
+            health["sequencer_public_key_hex"],
+            status["sequencer_public_key_hex"]
+        );
+        assert_eq!(health["backup_root"].as_str().unwrap().len(), 64);
+        assert_eq!(health["ops_root"].as_str().unwrap().len(), 64);
+        assert_eq!(health["snapshot_root"], backup.snapshot_root);
+        assert!(health["public_ops_blocking_gaps"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn runtime_surface_evidence_accepts_matching_captured_surfaces() {
+        let dir =
+            std::env::temp_dir().join(format!("nebula-runtime-surface-evidence-{}", unix_ms()));
+        let storage = RuntimeStorage::from_data_dir(&dir);
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        runtime.faucet("alice").unwrap();
+        runtime.produce_block();
+        let snapshot = runtime.export_snapshot();
+        storage.save_snapshot(&snapshot).unwrap();
+        let mut state = test_rpc_state_with_limits(
+            runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+        state.storage = Some(storage);
+
+        let health = state.health_json().unwrap();
+        let status = state.status_json().unwrap();
+        let snapshot = state
+            .runtime
+            .lock()
+            .expect("runtime mutex")
+            .export_snapshot();
+        let ops = state.ops_status().unwrap();
+        let backup = state.backup_manifest().unwrap();
+        let metrics_text = state.metrics_text().unwrap();
+        let evidence = crate::build_runtime_surface_evidence_json_pretty(
+            crate::RuntimeSurfaceEvidenceBuildInput {
+                endpoint_url: "https://public.testnet.nebula.example/status".to_string(),
+                captured_at_unix_ms: unix_ms(),
+                health_json: health.to_string(),
+                status_json: status.to_string(),
+                snapshot_json: serde_json::to_string(&snapshot).unwrap(),
+                ops_json: serde_json::to_string(&ops).unwrap(),
+                backup_json: serde_json::to_string(&backup).unwrap(),
+                rpc_status_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_status",
+                    "result": status,
+                })
+                .to_string(),
+                rpc_ops_status_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_opsStatus",
+                    "result": state.ops_status().unwrap(),
+                })
+                .to_string(),
+                rpc_backup_manifest_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_backupManifest",
+                    "result": state.backup_manifest().unwrap(),
+                })
+                .to_string(),
+                metrics_text,
+            },
+        )
+        .unwrap();
+
+        let report = crate::verify_runtime_surface_evidence_json(&evidence).unwrap();
+        assert!(report.runtime_surface_ready);
+        assert_eq!(report.level, "runtime-surface-attested");
+        assert_eq!(report.latest_height, 1);
+        assert_eq!(report.snapshot_root.len(), 64);
+        assert_eq!(report.ops_root.len(), 64);
+        assert_eq!(report.backup_root.len(), 64);
+        assert!(report.blocking_gaps.is_empty());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn runtime_surface_evidence_rejects_status_snapshot_mismatch() {
+        let dir = std::env::temp_dir().join(format!(
+            "nebula-runtime-surface-evidence-mismatch-{}",
+            unix_ms()
+        ));
+        let storage = RuntimeStorage::from_data_dir(&dir);
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        runtime.faucet("alice").unwrap();
+        runtime.produce_block();
+        let snapshot = runtime.export_snapshot();
+        storage.save_snapshot(&snapshot).unwrap();
+        let mut state = test_rpc_state_with_limits(
+            runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+        state.storage = Some(storage);
+
+        let health = state.health_json().unwrap();
+        let mut status = state.status_json().unwrap();
+        status["latest_height"] = json!(99);
+        let snapshot = state
+            .runtime
+            .lock()
+            .expect("runtime mutex")
+            .export_snapshot();
+        let ops = state.ops_status().unwrap();
+        let backup = state.backup_manifest().unwrap();
+        let error = crate::build_runtime_surface_evidence_json_pretty(
+            crate::RuntimeSurfaceEvidenceBuildInput {
+                endpoint_url: "https://public.testnet.nebula.example/status".to_string(),
+                captured_at_unix_ms: unix_ms(),
+                health_json: health.to_string(),
+                status_json: status.to_string(),
+                snapshot_json: serde_json::to_string(&snapshot).unwrap(),
+                ops_json: serde_json::to_string(&ops).unwrap(),
+                backup_json: serde_json::to_string(&backup).unwrap(),
+                rpc_status_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_status",
+                    "result": status,
+                })
+                .to_string(),
+                rpc_ops_status_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_opsStatus",
+                    "result": state.ops_status().unwrap(),
+                })
+                .to_string(),
+                rpc_backup_manifest_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_backupManifest",
+                    "result": state.backup_manifest().unwrap(),
+                })
+                .to_string(),
+                metrics_text: state.metrics_text().unwrap(),
+            },
+        )
+        .unwrap_err();
+
+        match error {
+            crate::AttestationError::Invalid(errors) => assert!(errors
+                .iter()
+                .any(|error| error.contains("status.latest_height"))),
+            crate::AttestationError::MalformedJson(error) => {
+                panic!("unexpected malformed JSON: {error}")
+            }
+        }
 
         let _ = fs::remove_dir_all(dir);
     }

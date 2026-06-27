@@ -116,6 +116,10 @@ The public launch sequence for this crate is:
    path and presence, sync peer count, mempool cap/remaining capacity/full
    and admission rejection counts, RPC request-size and rate-limit policy,
    bridge policy root, backup manifest root, and public ops readiness gauges.
+   Build and verify runtime-surface evidence from captured `/health`,
+   `/status`, `/snapshot`, `/ops`, `/backup`, `nebula_status`,
+   `nebula_opsStatus`, `nebula_backupManifest`, and `/metrics` files before
+   observers accept the endpoint.
    Stale blocks, missing persisted snapshots, mismatched backup roots, missing
    bridge policy roots, full mempools, unexpected admission-rejection spikes, or
    unexpected sync/RPC limit values keep the public endpoint launch-blocked.
@@ -208,8 +212,12 @@ freshness, latest height/hash, state root, snapshot root, persisted snapshot
 path and presence, configured sync peer count, mempool cap/remaining capacity,
 full/admission rejection counts, RPC max-request/rate-limit policy, admin RPC
 state, bridge policy root, bridge custody reconciliation, and backup manifest
-root. The metrics scrape must expose matching block freshness, mempool pressure,
-RPC limit, peer count, bridge counter, storage snapshot, accountability, bridge
+root. `--build-runtime-surface-evidence` binds those captured files, JSON-RPC
+mirror responses, and `/metrics` text into one root; the verifier rejects stale
+captures, split `/status` versus JSON-RPC views, invalid snapshot roots,
+mismatched ops/backup roots, missing public ops readiness, and metrics drift.
+The metrics scrape must expose matching block freshness, mempool pressure, RPC
+limit, peer count, bridge counter, storage snapshot, accountability, bridge
 custody, and public ops readiness gauges.
 Backup manifests must bind the node role, validator ID, latest chain head,
 state/snapshot roots, persisted snapshot location, sync peer coverage, mempool
@@ -223,7 +231,9 @@ snapshot as bootstrap evidence.
 The default dev sequencer key is only for throwaway local rehearsals. Public
 rehearsals should pass `--sequencer-public-key <hex>` to all nodes and pass the
 matching `--sequencer-secret-key <hex>` only to the sequencer. Snapshots export
-the public sequencer key and block signatures, never the secret key.
+the public sequencer key and block signatures, never the secret key. Snapshot
+roots are stable content roots across equivalent exports; `exported_at_unix_ms`
+records capture provenance but is not part of the comparable root.
 
 Sequencer key rotation and accountability are rehearsed over
 `nebula_rotateSequencerKey` and `nebula_reportEquivocation`. Public operators

@@ -137,6 +137,41 @@ fn metrics_endpoint_exposes_public_rpc_operational_gauges() {
 }
 
 #[test]
+fn health_endpoint_exposes_chain_root_ops_and_backup_evidence() {
+    let rpc_addr = start_rpc_server(Some(ADMIN_TOKEN));
+
+    let health = http_json(&rpc_addr, "GET", "/health", None).expect("health endpoint responds");
+    let status = rpc_result(&rpc_call(&rpc_addr, "nebula_status", json!({}))).clone();
+
+    assert_eq!(health["ok"], true);
+    assert_eq!(health["service"], "nebula-testnet-rpc");
+    assert_eq!(health["chain_id"], status["chain_id"]);
+    assert_eq!(health["runtime_version"], status["runtime_version"]);
+    assert_eq!(health["node_role"], status["node_role"]);
+    assert_eq!(health["block_target_ms"], status["block_target_ms"]);
+    assert_eq!(health["sub_second_blocks"], true);
+    assert_eq!(
+        health["sequencer_public_key_hex"],
+        status["sequencer_public_key_hex"]
+    );
+    assert_eq!(health["bridge_policy_root"], status["bridge_policy_root"]);
+    assert_eq!(health["sync_successful_peer_count"], 0);
+    assert_eq!(health["sync_attempt_count"], 0);
+    assert_eq!(health["admin_rpc_enabled"], true);
+    assert_eq!(health["latest_hash"].as_str().unwrap().len(), 64);
+    assert_eq!(health["latest_state_root"].as_str().unwrap().len(), 64);
+    assert_eq!(health["current_state_root"].as_str().unwrap().len(), 64);
+    assert_eq!(health["snapshot_root"].as_str().unwrap().len(), 64);
+    assert_eq!(health["state_root"].as_str().unwrap().len(), 64);
+    assert_eq!(health["ops_root"].as_str().unwrap().len(), 64);
+    assert_eq!(health["backup_root"].as_str().unwrap().len(), 64);
+    assert!(health["public_ops_ready"].is_boolean());
+    assert!(health["snapshot_persisted"].is_boolean());
+    assert!(health["storage_snapshot_matches_runtime"].is_boolean());
+    assert!(health["public_ops_blocking_gaps"].is_array());
+}
+
+#[test]
 fn accountability_evidence_closes_admin_producer_mutations_but_remains_visible() {
     let rpc_addr = start_rpc_server(Some(ADMIN_TOKEN));
 

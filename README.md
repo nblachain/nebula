@@ -150,13 +150,16 @@ evidence is absent or stale.
     state root, snapshot root, sequencer public key, and configured follower sync
     peers plus per-peer sync telemetry. Every snapshot block must commit to the producer public key and verify
     its Ed25519 signature before a follower treats the peer as ready; exported
-    snapshots must never include the sequencer secret key. Imported snapshots
+    snapshots must never include the sequencer secret key. Snapshot roots must
+    be stable content roots across equivalent exports; `exported_at_unix_ms`
+    records capture provenance but is not part of the comparable root. Imported snapshots
     must bind the current state root to the latest signed block and reconcile
     bridge-deposited nXMR against account balances, withdrawal burns, and nXMR
     fees. Public RPC nodes must reject invalid signed spend attempts before mempool admission, reject
     transactions beyond the configured mempool cap, reject oversized requests,
     and throttle per-client request bursts before launch observers treat the
-    endpoint as ready.
+    endpoint as ready. Operators must capture those live surfaces and verify a
+    runtime-surface evidence artifact before advertising the endpoint.
 13. Gate bridge custody before treating `nXMR` as public-testnet gas. The
     `nebula_bridgePolicy` method must expose the policy root and testnet
     custody constants. Deposits submitted through `nebula_observeBridgeDeposit`
@@ -184,7 +187,11 @@ evidence is absent or stale.
     counts, mempool cap/remaining capacity/full and admission rejection counts,
     RPC request-size and rate-limit policy, admin RPC state, bridge policy root,
     bridge custody reconciliation, backup
-    manifest root, and public ops readiness gauges. Operators must treat
+    manifest root, and public ops readiness gauges. `nebula-testnet
+    --build-runtime-surface-evidence` must bind captured `/health`, `/status`,
+    `/snapshot`, `/ops`, `/backup`, `nebula_status`, `nebula_opsStatus`,
+    `nebula_backupManifest`, and `/metrics` into one verified root before
+    public observers accept the endpoint. Operators must treat
     stale blocks, missing
     persisted snapshots, mismatched backup roots, missing bridge policy roots,
     nXMR custody deficits, full mempools, followers with no successful sync peer
@@ -325,7 +332,11 @@ height/hash, state root, snapshot root, persisted snapshot path and presence,
 configured sync peer count, mempool cap/remaining capacity/full and admission
 rejection counts, RPC max-request/rate-limit policy, admin RPC state, bridge
 policy root, bridge custody reconciliation, and backup manifest root. The
-`/metrics` scrape must expose the same block freshness, mempool pressure, RPC
+runtime-surface evidence builder turns those captured files plus JSON-RPC mirror
+responses and `/metrics` text into a single root; the verifier rejects stale
+captures, split `/status` versus JSON-RPC views, invalid snapshot roots,
+mismatched ops/backup roots, missing public ops readiness, and metrics drift.
+The `/metrics` scrape must expose the same block freshness, mempool pressure, RPC
 limit, peer count, bridge counter, storage snapshot, accountability, bridge
 custody, and public ops readiness gauges. A valid backup manifest must
 bind the node role, validator ID, latest chain head, state/snapshot roots,
@@ -652,12 +663,13 @@ The active GitHub Actions workflow is Nebula-owned:
 4. Run the Nebula test suite.
 5. Assert the current readiness contract.
 6. Generate and verify public status and probe samples.
-7. Generate and verify preflight and runbook receipt samples.
-8. Generate and verify a deployment attestation sample.
-9. Generate and verify a validator-set manifest sample.
-10. Build and verify a genesis manifest from the verified samples.
-11. Verify the launch package is internally coherent.
-12. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
+7. Capture and verify runtime-surface evidence from live RPC surfaces.
+8. Generate and verify preflight and runbook receipt samples.
+9. Generate and verify a deployment attestation sample.
+10. Generate and verify a validator-set manifest sample.
+11. Build and verify a genesis manifest from the verified samples.
+12. Verify the launch package is internally coherent.
+13. Assert `README.md` and `docs/NEBULA_LAYER2.md` are identical.
 
 Legacy upstream CI for daemon, wallet, Guix, depends, Docker daemon images, and
 source archives has been removed.
