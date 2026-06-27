@@ -1,11 +1,21 @@
 use serde_json::Value;
-use std::process::Command;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_nebula-testnet")
 }
 
 fn run_nebula(args: &[&str]) -> String {
+    let args = args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+    run_nebula_strings(&args)
+}
+
+fn run_nebula_strings(args: &[String]) -> String {
     let output = Command::new(binary())
         .args(args)
         .output()
@@ -19,6 +29,31 @@ fn run_nebula(args: &[&str]) -> String {
     );
 
     String::from_utf8(output.stdout).expect("stdout should be utf8")
+}
+
+fn write_nebula_output(args: &[String], path: &Path) {
+    fs::write(path, run_nebula_strings(args)).expect("write nebula-testnet output");
+}
+
+fn temp_rehearsal_dir() -> PathBuf {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time after epoch")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "nebula-live-rpc-cli-test-{}-{now}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).expect("create temp rehearsal dir");
+    dir
+}
+
+fn path_arg(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn args(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| value.to_string()).collect()
 }
 
 fn assert_hex64(value: &Value, field: &str) {
@@ -114,6 +149,116 @@ fn prove_live_rpc_devnet_json_reports_runtime_rehearsal_contract() {
     assert_eq!(report["nxmr_custody_deficit_units"], 0);
     assert_hex64(&report, "runtime_surface_root");
     assert_hex64(&report, "rehearsal_root");
+}
+
+#[test]
+fn prove_live_rpc_devnet_with_launch_artifacts_binds_rehearsal_to_bundle() {
+    let dir = temp_rehearsal_dir();
+    let public_status = dir.join("public-status.json");
+    let public_probe = dir.join("public-probe.json");
+    let attestation = dir.join("attestation.json");
+    let validators = dir.join("validators.json");
+    let handoff = dir.join("handoff.json");
+    let acceptance = dir.join("acceptance.json");
+    let genesis = dir.join("genesis.json");
+    let bundle = dir.join("bundle.json");
+
+    write_nebula_output(&args(&["--sample-public-status"]), &public_status);
+    write_nebula_output(&args(&["--sample-public-probe"]), &public_probe);
+    write_nebula_output(&args(&["--sample-deployment-attestation"]), &attestation);
+    write_nebula_output(&args(&["--sample-validator-set"]), &validators);
+
+    write_nebula_output(
+        &[
+            "--build-operator-handoff".to_string(),
+            "--deployment-attestation".to_string(),
+            path_arg(&attestation),
+            "--validator-set".to_string(),
+            path_arg(&validators),
+        ],
+        &handoff,
+    );
+    write_nebula_output(
+        &[
+            "--build-operator-acceptance".to_string(),
+            "--operator-handoff".to_string(),
+            path_arg(&handoff),
+            "--deployment-attestation".to_string(),
+            path_arg(&attestation),
+            "--validator-set".to_string(),
+            path_arg(&validators),
+        ],
+        &acceptance,
+    );
+    write_nebula_output(
+        &[
+            "--build-genesis-manifest".to_string(),
+            "--deployment-attestation".to_string(),
+            path_arg(&attestation),
+            "--validator-set".to_string(),
+            path_arg(&validators),
+        ],
+        &genesis,
+    );
+    write_nebula_output(
+        &[
+            "--build-launch-package-bundle".to_string(),
+            "--deployment-attestation".to_string(),
+            path_arg(&attestation),
+            "--public-status".to_string(),
+            path_arg(&public_status),
+            "--public-probe".to_string(),
+            path_arg(&public_probe),
+            "--validator-set".to_string(),
+            path_arg(&validators),
+            "--operator-handoff".to_string(),
+            path_arg(&handoff),
+            "--operator-acceptance".to_string(),
+            path_arg(&acceptance),
+            "--genesis-manifest".to_string(),
+            path_arg(&genesis),
+        ],
+        &bundle,
+    );
+
+    let stdout = run_nebula_strings(&[
+        "--prove-live-rpc-devnet".to_string(),
+        "--launch-package-bundle".to_string(),
+        path_arg(&bundle),
+        "--deployment-attestation".to_string(),
+        path_arg(&attestation),
+        "--public-status".to_string(),
+        path_arg(&public_status),
+        "--public-probe".to_string(),
+        path_arg(&public_probe),
+        "--validator-set".to_string(),
+        path_arg(&validators),
+        "--operator-handoff".to_string(),
+        path_arg(&handoff),
+        "--operator-acceptance".to_string(),
+        path_arg(&acceptance),
+        "--genesis-manifest".to_string(),
+        path_arg(&genesis),
+        "--json".to_string(),
+    ]);
+    let report: Value = serde_json::from_str(&stdout).expect("live rpc devnet report json");
+    let bundle_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(&bundle).expect("read bundle manifest"))
+            .expect("bundle manifest json");
+
+    assert_eq!(report["live_rpc_devnet_rehearsed"], true);
+    assert_eq!(
+        report["endpoint_url"],
+        "https://testnet.nebula.example/status"
+    );
+    assert_eq!(
+        report["launch_package_bundle_root"],
+        bundle_manifest["root"]
+    );
+    assert_hex64(&report, "launch_package_bundle_root");
+    assert_hex64(&report, "rehearsal_root");
+
+    fs::remove_dir_all(&dir).expect("remove temp rehearsal dir");
 }
 
 #[test]

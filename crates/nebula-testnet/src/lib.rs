@@ -768,6 +768,7 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub public_probe_root: String,
     pub runtime_surface_root: String,
     pub runtime_surface_capture_mode: String,
+    pub live_rpc_devnet_rehearsal_root: String,
     pub validator_set_root: String,
     pub genesis_root: String,
     pub endpoint_url: String,
@@ -811,10 +812,10 @@ pub struct LocalPublicTestnetRehearsalReport {
     pub rehearsal_root: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LiveRpcDevnetRehearsalReport {
     pub live_rpc_devnet_rehearsed: bool,
-    pub level: &'static str,
+    pub level: String,
     pub chain_id: String,
     pub runtime_version: String,
     pub public_launch_ready: bool,
@@ -2022,6 +2023,44 @@ pub fn prove_live_rpc_devnet_rehearsal() -> Result<LiveRpcDevnetRehearsalReport,
 }
 
 #[allow(clippy::too_many_arguments)]
+pub fn prove_live_rpc_devnet_rehearsal_with_jsons(
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<LiveRpcDevnetRehearsalReport, AttestationError> {
+    let sequencer_binding = build_runtime_launch_binding_from_jsons(
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+        launch_package_bundle_json,
+        "validator-a",
+    )?;
+    let follower_binding = build_runtime_launch_binding_from_jsons(
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+        launch_package_bundle_json,
+        "validator-b",
+    )?;
+    let (report, _evidence) =
+        prove_live_rpc_devnet_rehearsal_with_bindings(sequencer_binding, follower_binding)?;
+    Ok(report)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn build_live_rpc_devnet_runtime_surface_evidence_json_pretty(
     launch_package_bundle_json: &str,
     deployment_attestation_json: &str,
@@ -2415,7 +2454,7 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
     let produced_block_count = live_value_u64(status, "latest_height")?;
     let mut report = LiveRpcDevnetRehearsalReport {
         live_rpc_devnet_rehearsed: true,
-        level: "live-rpc-devnet-rehearsal-ready",
+        level: "live-rpc-devnet-rehearsal-ready".to_string(),
         chain_id: CHAIN_ID.to_string(),
         runtime_version: VERSION.to_string(),
         public_launch_ready: readiness.public_launch_readiness.public_launch_ready,
@@ -5847,6 +5886,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
     public_testnet_launch_certificate_json: &str,
     public_observer_confirmation_json: &str,
     runtime_surface_evidence_json: &str,
+    live_rpc_devnet_rehearsal_json: &str,
     operator_join_confirmation_json: &str,
     validator_join_receipt_json: &str,
     validator_activation_json: &str,
@@ -5876,6 +5916,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         genesis_manifest_json,
     )?;
     let runtime_surface = verify_runtime_surface_evidence_json(runtime_surface_evidence_json)?;
+    let live_rehearsal = verify_live_rpc_devnet_rehearsal_json(live_rpc_devnet_rehearsal_json)?;
     let runtime_surface_evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(
         runtime_surface_evidence_json.trim_start_matches('\u{feff}'),
     )
@@ -5898,6 +5939,18 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         "deployment.endpoint_url",
         &certificate.endpoint_url,
         &deployment.endpoint_url,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.endpoint_url",
+        &live_rehearsal.endpoint_url,
+        &certificate.endpoint_url,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.launch_package_bundle_root",
+        &live_rehearsal.launch_package_bundle_root,
+        &certificate.launch_package_bundle_root,
     );
     require_eq(
         &mut errors,
@@ -5961,6 +6014,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         public_probe_root: certificate.public_probe_root,
         runtime_surface_root: certificate.runtime_surface_root,
         runtime_surface_capture_mode: runtime_surface.capture_mode,
+        live_rpc_devnet_rehearsal_root: live_rehearsal.rehearsal_root,
         validator_set_root: certificate.validator_set_root,
         genesis_root: certificate.genesis_root,
         endpoint_url: certificate.endpoint_url,
@@ -5972,6 +6026,141 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         generated_at_unix_ms: unix_ms(),
     };
     report.public_launch_readiness_root = public_testnet_launch_readiness_root(&report);
+
+    Ok(report)
+}
+
+pub fn verify_live_rpc_devnet_rehearsal_json(
+    input: &str,
+) -> Result<LiveRpcDevnetRehearsalReport, AttestationError> {
+    let report =
+        serde_json::from_str::<LiveRpcDevnetRehearsalReport>(input.trim_start_matches('\u{feff}'))
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let mut errors = Vec::new();
+    let expected_root = live_rpc_devnet_rehearsal_root(&report);
+
+    if !report.live_rpc_devnet_rehearsed {
+        errors.push("live_rpc_devnet_rehearsed must be true".to_string());
+    }
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.level",
+        &report.level,
+        "live-rpc-devnet-rehearsal-ready",
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.chain_id",
+        &report.chain_id,
+        CHAIN_ID,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.runtime_version",
+        &report.runtime_version,
+        VERSION,
+    );
+    if report.public_launch_ready {
+        errors.push("live_rpc_devnet_rehearsal.public_launch_ready must be false".to_string());
+    }
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.public_launch_blocker",
+        &report.public_launch_blocker,
+        PUBLIC_LAUNCH_BLOCKER,
+    );
+    if report.block_millis >= 1_000 || !report.sub_second_blocks {
+        errors.push("live_rpc_devnet_rehearsal must prove sub-second blocks".to_string());
+    }
+    if report.produced_block_count < 2 {
+        errors
+            .push("live_rpc_devnet_rehearsal.produced_block_count must be at least 2".to_string());
+    }
+    if report.latest_height != report.produced_block_count {
+        errors.push(format!(
+            "live_rpc_devnet_rehearsal.latest_height expected {} but got {}",
+            report.produced_block_count, report.latest_height
+        ));
+    }
+    if !report.runtime_surface_ready {
+        errors.push("live_rpc_devnet_rehearsal.runtime_surface_ready must be true".to_string());
+    }
+    require_hex_root(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.runtime_surface_root",
+        &report.runtime_surface_root,
+    );
+    if !report.sync_quorum_met {
+        errors.push("live_rpc_devnet_rehearsal.sync_quorum_met must be true".to_string());
+    }
+    if report.sync_successful_peer_count < 1 {
+        errors.push(
+            "live_rpc_devnet_rehearsal.sync_successful_peer_count must be at least 1".to_string(),
+        );
+    }
+    if report.sync_import_count < 1 {
+        errors.push("live_rpc_devnet_rehearsal.sync_import_count must be at least 1".to_string());
+    }
+    if report.sync_last_import_height != report.latest_height {
+        errors.push(format!(
+            "live_rpc_devnet_rehearsal.sync_last_import_height expected {} but got {}",
+            report.latest_height, report.sync_last_import_height
+        ));
+    }
+    if report.sync_quorum_height != report.latest_height {
+        errors.push(format!(
+            "live_rpc_devnet_rehearsal.sync_quorum_height expected {} but got {}",
+            report.latest_height, report.sync_quorum_height
+        ));
+    }
+    if report.bridge_deposit_count != 1 {
+        errors.push(format!(
+            "live_rpc_devnet_rehearsal.bridge_deposit_count expected 1 but got {}",
+            report.bridge_deposit_count
+        ));
+    }
+    if report.withdrawal_request_count != 1 {
+        errors.push(format!(
+            "live_rpc_devnet_rehearsal.withdrawal_request_count expected 1 but got {}",
+            report.withdrawal_request_count
+        ));
+    }
+    if report.finalized_withdrawal_count != 1 {
+        errors.push(format!(
+            "live_rpc_devnet_rehearsal.finalized_withdrawal_count expected 1 but got {}",
+            report.finalized_withdrawal_count
+        ));
+    }
+    if !report.bridge_custody_reconciled || report.nxmr_custody_deficit_units != 0 {
+        errors.push("live_rpc_devnet_rehearsal must prove reconciled nXMR custody".to_string());
+    }
+    if report.total_nxmr_fees_units != 1_000
+        || report.buyback_pool_nebulai != 1_000
+        || report.validator_reward_nebulai != 1_010
+    {
+        errors.push("live_rpc_devnet_rehearsal must prove NBLA and nXMR gas economics".to_string());
+    }
+    if report.sequencer_key_rotation_count != 1 {
+        errors.push(format!(
+            "live_rpc_devnet_rehearsal.sequencer_key_rotation_count expected 1 but got {}",
+            report.sequencer_key_rotation_count
+        ));
+    }
+    require_hex_root(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.launch_package_bundle_root",
+        &report.launch_package_bundle_root,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_rehearsal.rehearsal_root",
+        &report.rehearsal_root,
+        &expected_root,
+    );
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
 
     Ok(report)
 }
@@ -10867,6 +11056,7 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "public_probe_root": report.public_probe_root,
         "runtime_surface_root": report.runtime_surface_root,
         "runtime_surface_capture_mode": report.runtime_surface_capture_mode,
+        "live_rpc_devnet_rehearsal_root": report.live_rpc_devnet_rehearsal_root,
         "validator_set_root": report.validator_set_root,
         "genesis_root": report.genesis_root,
         "endpoint_url": report.endpoint_url,
@@ -14766,10 +14956,26 @@ mod public_launch {
         assert_eq!(report.region_count, 2);
         assert_eq!(report.endpoint_url, "https://testnet.nebula.example/status");
 
+        let live_rehearsal = serde_json::to_string_pretty(
+            &prove_live_rpc_devnet_rehearsal_with_jsons(
+                &bundle,
+                &deployment,
+                &public_status,
+                &public_probe,
+                &validators,
+                &handoff,
+                &acceptance,
+                &genesis,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
         let loopback_ready_error = verify_public_testnet_launch_readiness_jsons(
             &certificate,
             &observer_confirmation,
             &runtime_surface,
+            &live_rehearsal,
             &join_confirmation,
             &join,
             &activation,
@@ -14827,6 +15033,7 @@ mod public_launch {
             &external_certificate,
             &observer_confirmation,
             &external_runtime_surface,
+            &live_rehearsal,
             &join_confirmation,
             &join,
             &activation,
@@ -14870,6 +15077,43 @@ mod public_launch {
             .unwrap()
             .public_testnet_launch_certificate_root
         );
+        assert_eq!(
+            readiness.live_rpc_devnet_rehearsal_root,
+            serde_json::from_str::<LiveRpcDevnetRehearsalReport>(&live_rehearsal)
+                .unwrap()
+                .rehearsal_root
+        );
+
+        let mut wrong_rehearsal =
+            serde_json::from_str::<LiveRpcDevnetRehearsalReport>(&live_rehearsal).unwrap();
+        wrong_rehearsal.launch_package_bundle_root =
+            hex_64("wrong-live-rpc-devnet-launch-package-bundle");
+        wrong_rehearsal.rehearsal_root = live_rpc_devnet_rehearsal_root(&wrong_rehearsal);
+        let wrong_rehearsal = serde_json::to_string_pretty(&wrong_rehearsal).unwrap();
+        let wrong_rehearsal_ready_error = verify_public_testnet_launch_readiness_jsons(
+            &external_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &wrong_rehearsal,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match wrong_rehearsal_ready_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error.starts_with("live_rpc_devnet_rehearsal.launch_package_bundle_root expected ")
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
 
         let no_economics_runtime_surface =
             runtime_surface_with_economics_counters(&external_runtime_surface, 0, 0, 0).unwrap();
@@ -14893,6 +15137,7 @@ mod public_launch {
             &no_economics_certificate,
             &observer_confirmation,
             &no_economics_runtime_surface,
+            &live_rehearsal,
             &join_confirmation,
             &join,
             &activation,
@@ -14937,6 +15182,7 @@ mod public_launch {
             &mispriced_nxmr_certificate,
             &observer_confirmation,
             &mispriced_nxmr_runtime_surface,
+            &live_rehearsal,
             &join_confirmation,
             &join,
             &activation,
@@ -14965,6 +15211,7 @@ mod public_launch {
             &external_certificate,
             &observer_confirmation,
             &wrong_endpoint_runtime_surface,
+            &live_rehearsal,
             &join_confirmation,
             &join,
             &activation,
@@ -15016,6 +15263,7 @@ mod public_launch {
             &mismatched_certificate,
             &observer_confirmation,
             &mismatched_runtime_surface,
+            &live_rehearsal,
             &join_confirmation,
             &join,
             &activation,
