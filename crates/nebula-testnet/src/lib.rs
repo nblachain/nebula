@@ -614,6 +614,8 @@ pub fn readiness_report() -> NebulaReadiness {
                 "validator_region_whitespace_free": true,
                 "operator_contact_required": true,
                 "operator_contact_address_required": true,
+                "operator_contact_single_mailto_required": true,
+                "operator_contact_query_fragment_forbidden": true,
                 "hex_consensus_key_required": true,
                 "hex_network_key_required": true,
                 "consensus_network_key_domains_disjoint": true,
@@ -3081,6 +3083,12 @@ fn require_operator_contact(errors: &mut Vec<String>, label: &str, contact: &str
                 "{label} must include an email address after mailto:"
             ));
         }
+        if address.contains('?') || address.contains('#') {
+            errors.push(format!("{label} must not include query or fragment"));
+        }
+        if address.contains(',') || address.contains(';') || address.matches('@').count() != 1 {
+            errors.push(format!("{label} must include exactly one mailto address"));
+        }
         return;
     }
     if contact.starts_with("https://") {
@@ -4445,6 +4453,44 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "validators[0].operator_contact must include a host after https://"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_operator_contact_with_mailto_query() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["operator_contact"] =
+            json!("mailto:operator-a@testnet.nebula.example?subject=admission");
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "validators[0].operator_contact must not include query or fragment"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_operator_contact_with_multiple_mailto_addresses() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["operator_contact"] =
+            json!("mailto:operator-a@testnet.nebula.example,backup-a@testnet.nebula.example");
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "validators[0].operator_contact must include exactly one mailto address"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

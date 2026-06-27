@@ -240,9 +240,10 @@ consensus keys, network keys, reward accounts, and P2P endpoints must be unique.
 Genesis power must be positive, no single validator may hold more than `5000`
 basis points of total genesis power, commission must be at or below `10000`
 basis points, operator contacts must use `mailto:` or `https://`, `mailto:`
-contacts must include an email address, `https://` contacts must include a host
-and no userinfo/query/fragment components, P2P endpoints must use
-`tcp://host:port` with no userinfo/query/fragment components,
+contacts must include exactly one email address with no query/fragment
+components, `https://` contacts must include a host and no
+userinfo/query/fragment components, P2P endpoints must use `tcp://host:port`
+with no userinfo/query/fragment components,
 reward accounts must use the `nbla-reward-{operator_id}` form, and rewards must
 be denominated in `nebulai`. Each validator admission signature root must bind
 the validator identity, operator contact, keys, reward account, commission,
