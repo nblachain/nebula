@@ -666,6 +666,20 @@ Withdrawals must prove:
 - withdrawal replay protection prevented the same `withdrawal_id`,
   `finalization_proof_root`, or Monero payout transaction from finalizing twice
 
+Operator bridge desks can produce those launch-bound payloads without custom
+scripts. Each observer signs the unsigned deposit JSON with
+`--sign-bridge-observer-evidence --bridge-deposit <path> --observer-id <id>
+--observer-secret-key <hex>`, then the admin desk combines the quorum with
+`--assemble-bridge-deposit --bridge-deposit <path> --observer-evidence
+<path>...`. Each operator signs an `operator_pending` withdrawal with
+`--sign-withdrawal-operator-approval --withdrawal <path>
+--finalized-monero-tx-id <hex> --finalization-proof-root <hex> --operator-id
+<id> --operator-secret-key <hex>`, then the admin desk builds
+`nebula_finalizeWithdrawal` params with `--assemble-finalize-withdrawal
+--withdrawal <path> --finalized-monero-tx-id <hex> --finalization-proof-root
+<hex> --operator-approval <path>...`. The assemblers recompute payload roots,
+evidence roots, and Ed25519 signatures before emitting RPC-ready JSON.
+
 Public launch observers should treat the bridge as launch-blocked unless
 `/health`, `/status`, and `nebula_status` expose or agree with
 `bridge_policy_root`, `bridge_min_deposit_confirmations`,

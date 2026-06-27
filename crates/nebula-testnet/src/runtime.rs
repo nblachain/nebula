@@ -5294,11 +5294,15 @@ fn decode_fixed_hex(value: &str, name: &str, bytes_len: usize) -> Result<Vec<u8>
 }
 
 fn signing_key_from_hex(secret_key_hex: &str) -> Result<SigningKey, String> {
-    let bytes = decode_fixed_hex(secret_key_hex, "sequencer_secret_key_hex", 32)?;
+    signing_key_from_hex_named(secret_key_hex, "sequencer_secret_key_hex")
+}
+
+fn signing_key_from_hex_named(secret_key_hex: &str, name: &str) -> Result<SigningKey, String> {
+    let bytes = decode_fixed_hex(secret_key_hex, name, 32)?;
     let bytes: [u8; 32] = bytes
         .as_slice()
         .try_into()
-        .map_err(|_| "sequencer_secret_key_hex must decode to 32 bytes".to_string())?;
+        .map_err(|_| format!("{name} must decode to 32 bytes"))?;
     Ok(SigningKey::from_bytes(&bytes))
 }
 
@@ -5316,9 +5320,30 @@ fn verifying_key_from_hex_named(public_key_hex: &str, name: &str) -> Result<Veri
         .map_err(|error| format!("{name} is not an Ed25519 key: {error}"))
 }
 
-fn public_key_hex_for_secret(secret_key_hex: &str) -> Result<String, String> {
-    let signing_key = signing_key_from_hex(secret_key_hex)?;
+pub fn public_key_hex_for_secret(secret_key_hex: &str) -> Result<String, String> {
+    let signing_key = signing_key_from_hex_named(secret_key_hex, "secret_key_hex")?;
     Ok(hex::encode(signing_key.verifying_key().to_bytes()))
+}
+
+pub fn sign_runtime_root(secret_key_hex: &str, root: &str) -> Result<String, String> {
+    validate_fixed_hex(root, "signing_root", 64)?;
+    let signing_key = signing_key_from_hex_named(secret_key_hex, "secret_key_hex")?;
+    let signature: Signature = signing_key.sign(root.as_bytes());
+    Ok(hex::encode(signature.to_bytes()))
+}
+
+pub fn verify_runtime_root_signature(
+    public_key_hex: &str,
+    root: &str,
+    signature_hex: &str,
+) -> Result<(), String> {
+    verify_ed25519_signature(
+        public_key_hex,
+        "public_key_hex",
+        root,
+        signature_hex,
+        "signature",
+    )
 }
 
 pub fn default_dev_sequencer_public_key_hex() -> String {

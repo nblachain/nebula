@@ -240,6 +240,12 @@ withdrawal `operator_pending` until `nebula_finalizeWithdrawal` supplies
 `finalized_monero_tx_id`, `finalization_proof_root`, and
 distinct `operator_approval_ids` plus matching `operator_approval_roots` and
 signed `operator_approvals` from the launch-attested operator keys.
+Operators can generate those payloads with the bundled CLI:
+`--sign-bridge-observer-evidence` creates one observer signature object,
+`--assemble-bridge-deposit` combines the observer quorum into a deposit JSON,
+`--sign-withdrawal-operator-approval` creates one operator approval, and
+`--assemble-finalize-withdrawal` builds RPC-ready `nebula_finalizeWithdrawal`
+params after recomputing payload roots, evidence roots, and Ed25519 signatures.
 Public testnet operators should require `/health`, `/status`, and
 `nebula_status` to report or agree with the bridge policy root, confirmation
 floor, observer quorum, withdrawal operator quorum, identity-quorum

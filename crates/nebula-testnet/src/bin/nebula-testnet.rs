@@ -1,3 +1,5 @@
+use serde::de::DeserializeOwned;
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::process;
@@ -46,6 +48,16 @@ fn main() {
     let wants_build_runtime_surface_evidence = args
         .iter()
         .any(|arg| arg == "--build-runtime-surface-evidence");
+    let wants_sign_bridge_observer_evidence = args
+        .iter()
+        .any(|arg| arg == "--sign-bridge-observer-evidence");
+    let wants_assemble_bridge_deposit = args.iter().any(|arg| arg == "--assemble-bridge-deposit");
+    let wants_sign_withdrawal_operator_approval = args
+        .iter()
+        .any(|arg| arg == "--sign-withdrawal-operator-approval");
+    let wants_assemble_finalize_withdrawal = args
+        .iter()
+        .any(|arg| arg == "--assemble-finalize-withdrawal");
     let wants_build_deployment_attestation = args
         .iter()
         .any(|arg| arg == "--build-deployment-attestation");
@@ -63,6 +75,14 @@ fn main() {
         build_public_probe(&args, wants_json);
     } else if wants_build_runtime_surface_evidence {
         build_runtime_surface_evidence(&args, wants_json);
+    } else if wants_sign_bridge_observer_evidence {
+        sign_bridge_observer_evidence(&args, wants_json);
+    } else if wants_assemble_bridge_deposit {
+        assemble_bridge_deposit(&args, wants_json);
+    } else if wants_sign_withdrawal_operator_approval {
+        sign_withdrawal_operator_approval(&args, wants_json);
+    } else if wants_assemble_finalize_withdrawal {
+        assemble_finalize_withdrawal(&args, wants_json);
     } else if wants_build_deployment_attestation {
         build_deployment_attestation(&args, wants_json);
     } else if wants_sample_attestation {
@@ -435,6 +455,55 @@ fn read_required_runtime_surface_input(args: &[String], name: &str, wants_json: 
     }
 }
 
+fn read_required_bridge_json<T>(args: &[String], name: &str, wants_json: bool) -> T
+where
+    T: DeserializeOwned,
+{
+    let Some(path) = arg_value(args, name) else {
+        print_bridge_evidence_error(wants_json, &[format!("missing {name} <path>")]);
+        process::exit(1);
+    };
+    let input = match read_text_file(path) {
+        Ok(input) => input,
+        Err(error) => {
+            print_bridge_evidence_error(wants_json, &[error]);
+            process::exit(1);
+        }
+    };
+    serde_json::from_str::<T>(input.trim_start_matches('\u{feff}')).unwrap_or_else(|error| {
+        print_bridge_evidence_error(wants_json, &[format!("invalid {name} JSON: {error}")]);
+        process::exit(1);
+    })
+}
+
+fn read_bridge_json_file<T>(path: &str, wants_json: bool) -> T
+where
+    T: DeserializeOwned,
+{
+    let input = match read_text_file(path) {
+        Ok(input) => input,
+        Err(error) => {
+            print_bridge_evidence_error(wants_json, &[error]);
+            process::exit(1);
+        }
+    };
+    serde_json::from_str::<T>(input.trim_start_matches('\u{feff}')).unwrap_or_else(|error| {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!("invalid bridge evidence JSON: {error}")],
+        );
+        process::exit(1);
+    })
+}
+
+fn required_bridge_arg(args: &[String], name: &str, wants_json: bool) -> String {
+    let Some(value) = arg_value(args, name) else {
+        print_bridge_evidence_error(wants_json, &[format!("missing {name} <value>")]);
+        process::exit(1);
+    };
+    value.to_string()
+}
+
 fn read_launch_package_inputs(args: &[String], wants_json: bool) -> LaunchPackageInputs {
     LaunchPackageInputs {
         deployment_input: read_required_launch_package_input(
@@ -578,6 +647,479 @@ fn build_runtime_surface_evidence(args: &[String], wants_json: bool) {
         }
         Err(nebula_testnet::AttestationError::Invalid(errors)) => {
             print_runtime_surface_evidence_error(wants_json, &errors);
+            process::exit(1);
+        }
+    }
+}
+
+fn sign_bridge_observer_evidence(args: &[String], wants_json: bool) {
+    let deposit = read_required_bridge_json::<nebula_testnet::runtime::RuntimeBridgeDeposit>(
+        args,
+        "--bridge-deposit",
+        wants_json,
+    );
+    if deposit.observed_at_unix_ms == 0 {
+        print_bridge_evidence_error(
+            wants_json,
+            &[
+                "bridge deposit observed_at_unix_ms must be set before observer signing"
+                    .to_string(),
+            ],
+        );
+        process::exit(1);
+    }
+    let observer_id = required_bridge_arg(args, "--observer-id", wants_json);
+    if !deposit
+        .observer_ids
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(&observer_id))
+    {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!(
+                "--observer-id {observer_id} must appear in bridge deposit observer_ids"
+            )],
+        );
+        process::exit(1);
+    }
+    let observer_secret_key = required_bridge_arg(args, "--observer-secret-key", wants_json);
+    let observer_public_key_hex =
+        match nebula_testnet::runtime::public_key_hex_for_secret(&observer_secret_key) {
+            Ok(public_key) => public_key,
+            Err(error) => {
+                print_bridge_evidence_error(wants_json, &[error]);
+                process::exit(1);
+            }
+        };
+    let payload_root = nebula_testnet::runtime::bridge_observer_deposit_payload_root(&deposit);
+    let signature =
+        match nebula_testnet::runtime::sign_runtime_root(&observer_secret_key, &payload_root) {
+            Ok(signature) => signature,
+            Err(error) => {
+                print_bridge_evidence_error(wants_json, &[error]);
+                process::exit(1);
+            }
+        };
+    let mut evidence = nebula_testnet::runtime::RuntimeBridgeObserverEvidence {
+        observer_id,
+        observer_public_key_hex,
+        payload_root,
+        signature,
+        signed_at_unix_ms: parse_u128_arg(args, "--signed-at-unix-ms", current_unix_ms()),
+        evidence_root: String::new(),
+    };
+    evidence.evidence_root = nebula_testnet::runtime::bridge_observer_evidence_root(&evidence);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&evidence).expect("observer evidence serializes")
+    );
+}
+
+fn assemble_bridge_deposit(args: &[String], wants_json: bool) {
+    let mut deposit = read_required_bridge_json::<nebula_testnet::runtime::RuntimeBridgeDeposit>(
+        args,
+        "--bridge-deposit",
+        wants_json,
+    );
+    let evidence_paths = arg_values(args, "--observer-evidence");
+    if evidence_paths.is_empty() {
+        print_bridge_evidence_error(
+            wants_json,
+            &["missing --observer-evidence <path>; repeat once per observer signer".to_string()],
+        );
+        process::exit(1);
+    }
+    let mut observer_evidence = evidence_paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let evidence = read_bridge_json_file::<
+                nebula_testnet::runtime::RuntimeBridgeObserverEvidence,
+            >(path, wants_json);
+            validate_observer_evidence_for_deposit(&deposit, &evidence, index, path, wants_json);
+            evidence
+        })
+        .collect::<Vec<_>>();
+    sort_observer_evidence_for_deposit(&deposit, &mut observer_evidence, wants_json);
+    deposit.observer_signature_roots = observer_evidence
+        .iter()
+        .map(|evidence| evidence.evidence_root.clone())
+        .collect();
+    deposit.observer_evidence = observer_evidence;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&deposit).expect("bridge deposit serializes")
+    );
+}
+
+fn sign_withdrawal_operator_approval(args: &[String], wants_json: bool) {
+    let withdrawal = read_required_bridge_json::<nebula_testnet::runtime::RuntimeWithdrawalRequest>(
+        args,
+        "--withdrawal",
+        wants_json,
+    );
+    if withdrawal.status != "operator_pending" {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!(
+                "withdrawal {} must be operator_pending before operator approval signing",
+                withdrawal.withdrawal_id
+            )],
+        );
+        process::exit(1);
+    }
+    let finalized_monero_tx_id = required_bridge_arg(args, "--finalized-monero-tx-id", wants_json);
+    let finalization_proof_root =
+        required_bridge_arg(args, "--finalization-proof-root", wants_json);
+    validate_hex_arg(
+        &finalized_monero_tx_id,
+        "--finalized-monero-tx-id",
+        64,
+        wants_json,
+    );
+    validate_hex_arg(
+        &finalization_proof_root,
+        "--finalization-proof-root",
+        64,
+        wants_json,
+    );
+    let operator_id = required_bridge_arg(args, "--operator-id", wants_json);
+    let operator_secret_key = required_bridge_arg(args, "--operator-secret-key", wants_json);
+    let operator_public_key_hex =
+        match nebula_testnet::runtime::public_key_hex_for_secret(&operator_secret_key) {
+            Ok(public_key) => public_key,
+            Err(error) => {
+                print_bridge_evidence_error(wants_json, &[error]);
+                process::exit(1);
+            }
+        };
+    let payload_root = nebula_testnet::runtime::withdrawal_operator_finalization_payload_root(
+        &withdrawal,
+        &finalized_monero_tx_id,
+        &finalization_proof_root,
+    );
+    let signature =
+        match nebula_testnet::runtime::sign_runtime_root(&operator_secret_key, &payload_root) {
+            Ok(signature) => signature,
+            Err(error) => {
+                print_bridge_evidence_error(wants_json, &[error]);
+                process::exit(1);
+            }
+        };
+    let mut approval = nebula_testnet::runtime::RuntimeWithdrawalOperatorApproval {
+        operator_id,
+        operator_public_key_hex,
+        payload_root,
+        signature,
+        signed_at_unix_ms: parse_u128_arg(args, "--signed-at-unix-ms", current_unix_ms()),
+        approval_root: String::new(),
+    };
+    approval.approval_root = nebula_testnet::runtime::withdrawal_operator_approval_root(&approval);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&approval).expect("operator approval serializes")
+    );
+}
+
+fn assemble_finalize_withdrawal(args: &[String], wants_json: bool) {
+    let withdrawal = read_required_bridge_json::<nebula_testnet::runtime::RuntimeWithdrawalRequest>(
+        args,
+        "--withdrawal",
+        wants_json,
+    );
+    let finalized_monero_tx_id = required_bridge_arg(args, "--finalized-monero-tx-id", wants_json);
+    let finalization_proof_root =
+        required_bridge_arg(args, "--finalization-proof-root", wants_json);
+    validate_hex_arg(
+        &finalized_monero_tx_id,
+        "--finalized-monero-tx-id",
+        64,
+        wants_json,
+    );
+    validate_hex_arg(
+        &finalization_proof_root,
+        "--finalization-proof-root",
+        64,
+        wants_json,
+    );
+    let approval_paths = arg_values(args, "--operator-approval");
+    if approval_paths.is_empty() {
+        print_bridge_evidence_error(
+            wants_json,
+            &["missing --operator-approval <path>; repeat once per operator signer".to_string()],
+        );
+        process::exit(1);
+    }
+    let approvals = approval_paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let approval = read_bridge_json_file::<
+                nebula_testnet::runtime::RuntimeWithdrawalOperatorApproval,
+            >(path, wants_json);
+            validate_operator_approval_for_withdrawal(
+                &withdrawal,
+                &finalized_monero_tx_id,
+                &finalization_proof_root,
+                &approval,
+                index,
+                path,
+                wants_json,
+            );
+            approval
+        })
+        .collect::<Vec<_>>();
+    validate_operator_approval_set(&approvals, wants_json);
+    let mut params = serde_json::json!({
+        "withdrawal_id": withdrawal.withdrawal_id,
+        "finalized_monero_tx_id": finalized_monero_tx_id,
+        "finalization_proof_root": finalization_proof_root,
+        "operator_approval_ids": approvals
+            .iter()
+            .map(|approval| approval.operator_id.clone())
+            .collect::<Vec<_>>(),
+        "operator_approval_roots": approvals
+            .iter()
+            .map(|approval| approval.approval_root.clone())
+            .collect::<Vec<_>>(),
+        "operator_approvals": approvals,
+    });
+    if let Some(admin_token) = arg_value(args, "--admin-token") {
+        params["admin_token"] = serde_json::Value::String(admin_token.to_string());
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&params).expect("finalize params serialize")
+    );
+}
+
+fn validate_hex_arg(value: &str, name: &str, len: usize, wants_json: bool) {
+    if value.len() != len || !value.chars().all(|character| character.is_ascii_hexdigit()) {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!("{name} must be {len} hex characters")],
+        );
+        process::exit(1);
+    }
+}
+
+fn validate_observer_evidence_for_deposit(
+    deposit: &nebula_testnet::runtime::RuntimeBridgeDeposit,
+    evidence: &nebula_testnet::runtime::RuntimeBridgeObserverEvidence,
+    index: usize,
+    path: &str,
+    wants_json: bool,
+) {
+    let expected_payload_root =
+        nebula_testnet::runtime::bridge_observer_deposit_payload_root(deposit);
+    if evidence.payload_root != expected_payload_root {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!(
+                "--observer-evidence[{index}] {path} payload_root does not match --bridge-deposit"
+            )],
+        );
+        process::exit(1);
+    }
+    let expected_evidence_root = nebula_testnet::runtime::bridge_observer_evidence_root(evidence);
+    if evidence.evidence_root != expected_evidence_root {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!(
+                "--observer-evidence[{index}] {path} evidence_root does not match evidence contents"
+            )],
+        );
+        process::exit(1);
+    }
+    if let Err(error) = nebula_testnet::runtime::verify_runtime_root_signature(
+        &evidence.observer_public_key_hex,
+        &evidence.payload_root,
+        &evidence.signature,
+    ) {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!(
+                "--observer-evidence[{index}] {path} signature rejected: {error}"
+            )],
+        );
+        process::exit(1);
+    }
+    if !deposit
+        .observer_ids
+        .iter()
+        .any(|observer_id| observer_id.eq_ignore_ascii_case(&evidence.observer_id))
+    {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!(
+                "--observer-evidence[{index}] {} observer_id is not in bridge deposit observer_ids",
+                evidence.observer_id
+            )],
+        );
+        process::exit(1);
+    }
+}
+
+fn sort_observer_evidence_for_deposit(
+    deposit: &nebula_testnet::runtime::RuntimeBridgeDeposit,
+    observer_evidence: &mut [nebula_testnet::runtime::RuntimeBridgeObserverEvidence],
+    wants_json: bool,
+) {
+    if observer_evidence.len() != deposit.observer_ids.len() {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!(
+                "observer evidence count {} must match bridge deposit observer_ids count {}",
+                observer_evidence.len(),
+                deposit.observer_ids.len()
+            )],
+        );
+        process::exit(1);
+    }
+
+    let mut seen_ids = BTreeSet::new();
+    let mut seen_keys = BTreeSet::new();
+    let mut seen_roots = BTreeSet::new();
+    for evidence in observer_evidence.iter() {
+        if !seen_ids.insert(evidence.observer_id.to_ascii_lowercase()) {
+            print_bridge_evidence_error(
+                wants_json,
+                &[format!(
+                    "duplicate observer evidence for observer_id {}",
+                    evidence.observer_id
+                )],
+            );
+            process::exit(1);
+        }
+        if !seen_keys.insert(evidence.observer_public_key_hex.to_ascii_lowercase()) {
+            print_bridge_evidence_error(
+                wants_json,
+                &[format!(
+                    "duplicate observer evidence public key for observer_id {}",
+                    evidence.observer_id
+                )],
+            );
+            process::exit(1);
+        }
+        if !seen_roots.insert(evidence.evidence_root.to_ascii_lowercase()) {
+            print_bridge_evidence_error(
+                wants_json,
+                &[format!(
+                    "duplicate observer evidence root for observer_id {}",
+                    evidence.observer_id
+                )],
+            );
+            process::exit(1);
+        }
+    }
+
+    for observer_id in &deposit.observer_ids {
+        if !seen_ids.contains(&observer_id.to_ascii_lowercase()) {
+            print_bridge_evidence_error(
+                wants_json,
+                &[format!(
+                    "missing observer evidence for observer_id {observer_id}"
+                )],
+            );
+            process::exit(1);
+        }
+    }
+
+    observer_evidence.sort_by_key(|evidence| {
+        deposit
+            .observer_ids
+            .iter()
+            .position(|observer_id| observer_id.eq_ignore_ascii_case(&evidence.observer_id))
+            .unwrap_or(usize::MAX)
+    });
+}
+
+fn validate_operator_approval_for_withdrawal(
+    withdrawal: &nebula_testnet::runtime::RuntimeWithdrawalRequest,
+    finalized_monero_tx_id: &str,
+    finalization_proof_root: &str,
+    approval: &nebula_testnet::runtime::RuntimeWithdrawalOperatorApproval,
+    index: usize,
+    path: &str,
+    wants_json: bool,
+) {
+    let expected_payload_root =
+        nebula_testnet::runtime::withdrawal_operator_finalization_payload_root(
+            withdrawal,
+            finalized_monero_tx_id,
+            finalization_proof_root,
+        );
+    if approval.payload_root != expected_payload_root {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!(
+                "--operator-approval[{index}] {path} payload_root does not match withdrawal finalization"
+            )],
+        );
+        process::exit(1);
+    }
+    let expected_approval_root =
+        nebula_testnet::runtime::withdrawal_operator_approval_root(approval);
+    if approval.approval_root != expected_approval_root {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!(
+                "--operator-approval[{index}] {path} approval_root does not match approval contents"
+            )],
+        );
+        process::exit(1);
+    }
+    if let Err(error) = nebula_testnet::runtime::verify_runtime_root_signature(
+        &approval.operator_public_key_hex,
+        &approval.payload_root,
+        &approval.signature,
+    ) {
+        print_bridge_evidence_error(
+            wants_json,
+            &[format!(
+                "--operator-approval[{index}] {path} signature rejected: {error}"
+            )],
+        );
+        process::exit(1);
+    }
+}
+
+fn validate_operator_approval_set(
+    approvals: &[nebula_testnet::runtime::RuntimeWithdrawalOperatorApproval],
+    wants_json: bool,
+) {
+    let mut seen_ids = BTreeSet::new();
+    let mut seen_keys = BTreeSet::new();
+    let mut seen_roots = BTreeSet::new();
+    for approval in approvals {
+        if !seen_ids.insert(approval.operator_id.to_ascii_lowercase()) {
+            print_bridge_evidence_error(
+                wants_json,
+                &[format!(
+                    "duplicate operator approval for operator_id {}",
+                    approval.operator_id
+                )],
+            );
+            process::exit(1);
+        }
+        if !seen_keys.insert(approval.operator_public_key_hex.to_ascii_lowercase()) {
+            print_bridge_evidence_error(
+                wants_json,
+                &[format!(
+                    "duplicate operator approval public key for operator_id {}",
+                    approval.operator_id
+                )],
+            );
+            process::exit(1);
+        }
+        if !seen_roots.insert(approval.approval_root.to_ascii_lowercase()) {
+            print_bridge_evidence_error(
+                wants_json,
+                &[format!(
+                    "duplicate operator approval root for operator_id {}",
+                    approval.operator_id
+                )],
+            );
             process::exit(1);
         }
     }
@@ -2010,6 +2552,24 @@ fn print_receipt_report(report: &nebula_testnet::ReceiptReport, wants_json: bool
     }
 }
 
+fn print_bridge_evidence_error(wants_json: bool, errors: &[String]) {
+    if wants_json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "bridge_evidence_ready": false,
+                "level": "bridge-evidence-rejected",
+                "errors": errors,
+            })
+        );
+    } else {
+        eprintln!("Bridge evidence rejected:");
+        for error in errors {
+            eprintln!("- {error}");
+        }
+    }
+}
+
 fn print_receipt_error(wants_json: bool, errors: &[String]) {
     if wants_json {
         println!(
@@ -2211,6 +2771,10 @@ fn print_public_testnet_launch_certificate_error(wants_json: bool, errors: &[Str
 fn print_help() {
     println!(
         "nebula-testnet\n\nUSAGE:\n    nebula-testnet [--mainnet-readiness] [--json]\n    nebula-testnet --run-rpc [--sequencer|--follower] [--rpc-bind <addr:port>] [--admin-rpc-bind <addr:port>] [--block-ms <ms>] [--validator-id <id>] [--sequencer-public-key <hex>] [--sequencer-secret-key <hex>] [--admin-token <token>] [--data-dir <path>] [--bootstrap-rpc <url>] [--sync-rpc <url>]... [--sync-peer-quorum <count>] [--max-mempool-transactions <count>] [--max-request-bytes <bytes>] [--max-requests-per-minute <count>]\n    nebula-testnet --build-public-status --endpoint-url <url> [--artifact-sha3-256 <hex>] [--cargo-lock-sha3-256 <hex>]\n    nebula-testnet --build-public-probe --endpoint-url <url> [--artifact-sha3-256 <hex>] [--cargo-lock-sha3-256 <hex>]\n    nebula-testnet --build-runtime-surface-evidence --endpoint-url <url> --health <path> --status <path> --snapshot <path> --ops <path> --backup <path> --rpc-status <path> --rpc-ops-status <path> --rpc-backup-manifest <path> --metrics <path> [--captured-at-unix-ms <ms>]\n    nebula-testnet --verify-runtime-surface-evidence <path> [--json]\n    nebula-testnet --build-deployment-attestation --public-status <path> --public-probe <path> --preflight-receipt <path> --runbook-receipt <path> --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms>... --bootstrap-node <node_id,operator_id,region,endpoint>... --operator <operator_id,region,public_key>... --observer <observer_id,region,public_key>... --rollback-plan-sha3-256 <hex> --rollback-recovery-root <hex> [--rollback-last-drill-unix-ms <ms>] [--generated-at-unix-ms <ms>] [--expires-at-unix-ms <ms>] [--artifact-sha3-256 <hex>] [--cargo-lock-sha3-256 <hex>]\n    nebula-testnet --sample-public-status\n    nebula-testnet --verify-public-status <path> [--json]\n    nebula-testnet --sample-public-probe\n    nebula-testnet --verify-public-probe <path> [--json]\n    nebula-testnet --sample-preflight-receipt\n    nebula-testnet --verify-preflight-receipt <path> [--json]\n    nebula-testnet --sample-runbook-receipt\n    nebula-testnet --verify-runbook-receipt <path> [--json]\n    nebula-testnet --sample-deployment-attestation\n    nebula-testnet --verify-deployment-attestation <path> [--json]\n    nebula-testnet --sample-validator-set\n    nebula-testnet --verify-validator-set <path> [--json]\n    nebula-testnet --sample-operator-handoff\n    nebula-testnet --build-operator-handoff --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-operator-handoff <path> --deployment-attestation <path> --validator-set <path> [--json]\n    nebula-testnet --sample-operator-acceptance\n    nebula-testnet --build-operator-acceptance --operator-handoff <path> --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-operator-acceptance <path> --operator-handoff <path> --deployment-attestation <path> --validator-set <path> [--json]\n    nebula-testnet --sample-genesis-manifest\n    nebula-testnet --build-genesis-manifest --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-genesis-manifest <path> [--json]\n    nebula-testnet --verify-launch-package --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n    nebula-testnet --build-launch-package-bundle --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>\n    nebula-testnet --verify-launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n    nebula-testnet --build-validator-activation --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>\n    nebula-testnet --verify-validator-activation <path> --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]
+    nebula-testnet --sign-bridge-observer-evidence --bridge-deposit <path> --observer-id <id> --observer-secret-key <hex> [--signed-at-unix-ms <ms>]
+    nebula-testnet --assemble-bridge-deposit --bridge-deposit <path> --observer-evidence <path>...
+    nebula-testnet --sign-withdrawal-operator-approval --withdrawal <path> --finalized-monero-tx-id <hex> --finalization-proof-root <hex> --operator-id <id> --operator-secret-key <hex> [--signed-at-unix-ms <ms>]
+    nebula-testnet --assemble-finalize-withdrawal --withdrawal <path> --finalized-monero-tx-id <hex> --finalization-proof-root <hex> --operator-approval <path>... [--admin-token <token>]
     nebula-testnet --build-validator-join --validator-activation <path> --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>
     nebula-testnet --verify-validator-join <path> --validator-activation <path> --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]
     nebula-testnet --build-operator-join-confirmation --validator-join <path> --validator-activation <path> --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>
@@ -2232,7 +2796,8 @@ RPC BRIDGE POLICY:
     Policy discovery uses nebula_bridgePolicy. Deposits use
     nebula_observeBridgeDeposit with monero_tx_id, account, amount_nxmr_units,
     confirmations, observer_id, proof_root, custody_proof_root,
-    relayer_set_root, observer_signature_roots, and observed_at_unix_ms.
+    relayer_set_root, observer_signature_roots, signed observer_evidence, and
+    observed_at_unix_ms.
     Public testnet policy requires the Monero confirmation floor, custody
     proof, relayer/observer evidence, and replay protection before crediting
     nXMR. The faucet must keep faucet_nxmr_units at zero; bridge_only_nxmr,
@@ -2241,8 +2806,15 @@ RPC BRIDGE POLICY:
     Withdrawals use nebula_requestWithdrawal with account, monero_address,
     amount_nxmr_units, nonce, and signature, then remain operator_pending until
     nebula_finalizeWithdrawal binds withdrawal_id, finalized_monero_tx_id,
-    finalization_proof_root, and operator_approval_roots. /health, /status,
-    and nebula_status expose bridge policy readiness.
+    finalization_proof_root, operator_approval_roots, and signed
+    operator_approvals. /health, /status, and nebula_status expose bridge
+    policy readiness.
+
+BRIDGE EVIDENCE TOOLING:
+    Run --sign-bridge-observer-evidence on each observer signer, then
+    --assemble-bridge-deposit before submitting nebula_observeBridgeDeposit.
+    Run --sign-withdrawal-operator-approval on each operator signer, then
+    --assemble-finalize-withdrawal to build nebula_finalizeWithdrawal params.
 
 RPC OPERATOR OPS, BACKUP, AND METRICS:
     Operator ops discovery uses /ops and nebula_opsStatus. Backup discovery
