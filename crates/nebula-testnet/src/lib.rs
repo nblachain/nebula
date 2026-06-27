@@ -440,6 +440,7 @@ pub struct LaunchPackageReport {
     pub operator_roster_root: String,
     pub reward_ledger_root: String,
     pub validator_deployment_binding_root: String,
+    pub operator_handoff_root: String,
     pub genesis_root: String,
     pub matched_validator_count: usize,
     pub matched_reward_account_count: usize,
@@ -455,6 +456,51 @@ pub struct LaunchPackageReport {
     pub native_fee_token: String,
     pub native_base_unit: String,
     pub bridged_fee_token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorHandoffManifest {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub launch_bundle_root: String,
+    pub validator_set_root: String,
+    pub validator_set_epoch: u64,
+    pub validator_deployment_binding_root: String,
+    pub entries: Vec<OperatorHandoffEntry>,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorHandoffEntry {
+    pub operator_id: String,
+    pub validator_id: String,
+    pub node_id: String,
+    pub region: String,
+    pub operator_contact: String,
+    pub bootstrap_endpoint: String,
+    pub p2p_endpoint: String,
+    pub reward_account: String,
+    pub consensus_public_key: String,
+    pub network_public_key: String,
+    pub genesis_power: u64,
+    pub signed_admission_root: String,
+    pub bootstrap_attestation_root: String,
+    pub handoff_root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OperatorHandoffReport {
+    pub operator_handoff_ready: bool,
+    pub level: &'static str,
+    pub operator_handoff_root: String,
+    pub entry_count: usize,
+    pub operator_count: usize,
+    pub region_count: usize,
+    pub launch_bundle_root: String,
+    pub validator_set_root: String,
+    pub validator_deployment_binding_root: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -700,6 +746,18 @@ pub fn readiness_report() -> NebulaReadiness {
                 "max_single_validator_genesis_power_bps": MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS,
                 "max_single_operator_genesis_power_bps": MAX_SINGLE_OPERATOR_GENESIS_POWER_BPS,
             })),
+            "operator_handoff": stable_root(&json!({
+                "launch_bundle_root_required": true,
+                "validator_set_root_required": true,
+                "validator_deployment_binding_root_required": true,
+                "one_handoff_entry_per_admitted_validator": true,
+                "operator_contact_reported": true,
+                "bootstrap_endpoint_reported": true,
+                "p2p_endpoint_reported": true,
+                "reward_account_reported": true,
+                "signed_admission_root_reported": true,
+                "entry_roots_required": true,
+            })),
             "genesis_manifest": stable_root(&json!({
                 "deployment_attestation_root_required": true,
                 "validator_set_root_required": true,
@@ -781,6 +839,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "validator_set_verified": true,
                 "genesis_manifest_verified": true,
                 "validator_deployment_binding_root_reported": true,
+                "operator_handoff_root_reported": true,
                 "public_status_binds_deployment_attestation": true,
                 "public_probe_binds_deployment_attestation": true,
                 "validator_set_binds_deployment_operators": true,
@@ -1302,6 +1361,157 @@ pub fn sample_genesis_manifest_json_pretty() -> String {
     .expect("sample genesis manifest builds")
 }
 
+fn verified_deployment_attestation_manifest(
+    deployment_attestation_json: &str,
+) -> Result<DeploymentAttestation, AttestationError> {
+    verify_deployment_attestation_json(deployment_attestation_json)?;
+    serde_json::from_str::<DeploymentAttestation>(
+        deployment_attestation_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+fn verified_validator_set_manifest(
+    validator_set_json: &str,
+) -> Result<ValidatorSetManifest, AttestationError> {
+    verify_validator_set_json(validator_set_json)?;
+    serde_json::from_str::<ValidatorSetManifest>(validator_set_json.trim_start_matches('\u{feff}'))
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+pub fn sample_operator_handoff_json_pretty() -> String {
+    build_operator_handoff_json_pretty(
+        &sample_deployment_attestation_json_pretty(),
+        &sample_validator_set_json_pretty(),
+    )
+    .expect("sample operator handoff builds")
+}
+
+pub fn build_operator_handoff_json_pretty(
+    deployment_attestation_json: &str,
+    validator_set_json: &str,
+) -> Result<String, AttestationError> {
+    let deployment_attestation =
+        verified_deployment_attestation_manifest(deployment_attestation_json)?;
+    let validator_set_manifest = verified_validator_set_manifest(validator_set_json)?;
+    let mut binding_errors = Vec::new();
+    verify_validator_deployment_binding(
+        &mut binding_errors,
+        &validator_set_manifest,
+        &deployment_attestation,
+    );
+    if !binding_errors.is_empty() {
+        return Err(AttestationError::Invalid(binding_errors));
+    }
+
+    let manifest = operator_handoff_manifest(&deployment_attestation, &validator_set_manifest);
+    serde_json::to_string_pretty(&manifest)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+pub fn verify_operator_handoff_jsons(
+    operator_handoff_json: &str,
+    deployment_attestation_json: &str,
+    validator_set_json: &str,
+) -> Result<OperatorHandoffReport, AttestationError> {
+    let manifest = serde_json::from_str::<OperatorHandoffManifest>(
+        operator_handoff_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let deployment_attestation =
+        verified_deployment_attestation_manifest(deployment_attestation_json)?;
+    let validator_set_manifest = verified_validator_set_manifest(validator_set_json)?;
+    let mut errors = Vec::new();
+
+    verify_validator_deployment_binding(
+        &mut errors,
+        &validator_set_manifest,
+        &deployment_attestation,
+    );
+    let expected = operator_handoff_manifest(&deployment_attestation, &validator_set_manifest);
+    require_eq(
+        &mut errors,
+        "chain_id",
+        &manifest.chain_id,
+        &expected.chain_id,
+    );
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &manifest.runtime_version,
+        &expected.runtime_version,
+    );
+    require_eq(
+        &mut errors,
+        "launch_bundle_root",
+        &manifest.launch_bundle_root,
+        &expected.launch_bundle_root,
+    );
+    require_eq(
+        &mut errors,
+        "validator_set_root",
+        &manifest.validator_set_root,
+        &expected.validator_set_root,
+    );
+    if manifest.validator_set_epoch != expected.validator_set_epoch {
+        errors.push(format!(
+            "validator_set_epoch expected {} but got {}",
+            expected.validator_set_epoch, manifest.validator_set_epoch
+        ));
+    }
+    require_eq(
+        &mut errors,
+        "validator_deployment_binding_root",
+        &manifest.validator_deployment_binding_root,
+        &expected.validator_deployment_binding_root,
+    );
+    if manifest.entries != expected.entries {
+        errors.push(
+            "operator handoff entries do not match verified deployment and validator set"
+                .to_string(),
+        );
+    }
+    require_root(
+        &mut errors,
+        "root",
+        &manifest.root,
+        &operator_handoff_manifest_root(&manifest),
+    );
+    if manifest.root != expected.root {
+        errors.push(format!(
+            "operator handoff root does not match expected root {}",
+            expected.root
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    let operators = manifest
+        .entries
+        .iter()
+        .map(|entry| entry.operator_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let regions = manifest
+        .entries
+        .iter()
+        .map(|entry| entry.region.as_str())
+        .collect::<BTreeSet<_>>();
+
+    Ok(OperatorHandoffReport {
+        operator_handoff_ready: true,
+        level: "operator-handoff-attested",
+        operator_handoff_root: manifest.root,
+        entry_count: manifest.entries.len(),
+        operator_count: operators.len(),
+        region_count: regions.len(),
+        launch_bundle_root: manifest.launch_bundle_root,
+        validator_set_root: manifest.validator_set_root,
+        validator_deployment_binding_root: manifest.validator_deployment_binding_root,
+    })
+}
+
 pub fn build_genesis_manifest_json_pretty(
     deployment_attestation_json: &str,
     validator_set_json: &str,
@@ -1652,6 +1862,8 @@ pub fn verify_launch_package_jsons(
         .expect("economics root is a string");
     let expected_validator_deployment_binding_root =
         validator_deployment_binding_root(&deployment_attestation, &validator_set_manifest);
+    let expected_operator_handoff_root =
+        operator_handoff_manifest(&deployment_attestation, &validator_set_manifest).root;
 
     verify_public_status_manifest(
         &mut errors,
@@ -1841,6 +2053,7 @@ pub fn verify_launch_package_jsons(
         operator_roster_root: genesis_report.operator_roster_root,
         reward_ledger_root: genesis_report.reward_ledger_root,
         validator_deployment_binding_root: expected_validator_deployment_binding_root,
+        operator_handoff_root: expected_operator_handoff_root,
         genesis_root: genesis_report.genesis_root,
         matched_validator_count: validator_set_manifest.validators.len(),
         matched_reward_account_count: validator_set_report.reward_account_count,
@@ -3961,6 +4174,118 @@ fn validator_deployment_binding_root(
     }))
 }
 
+fn operator_handoff_manifest(
+    attestation: &DeploymentAttestation,
+    manifest: &ValidatorSetManifest,
+) -> OperatorHandoffManifest {
+    let bootstrap_nodes_by_id = attestation
+        .bootstrap_nodes
+        .iter()
+        .map(|node| (node.node_id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let validator_deployment_binding_root =
+        validator_deployment_binding_root(attestation, manifest);
+    let mut entries = manifest
+        .validators
+        .iter()
+        .map(|validator| {
+            let bootstrap_node = bootstrap_nodes_by_id.get(validator.node_id.as_str());
+            let mut entry = OperatorHandoffEntry {
+                operator_id: validator.operator_id.clone(),
+                validator_id: validator.validator_id.clone(),
+                node_id: validator.node_id.clone(),
+                region: validator.region.clone(),
+                operator_contact: validator.operator_contact.clone(),
+                bootstrap_endpoint: bootstrap_node
+                    .map(|node| node.endpoint.clone())
+                    .unwrap_or_default(),
+                p2p_endpoint: validator.p2p_endpoint.clone(),
+                reward_account: validator.reward_account.clone(),
+                consensus_public_key: validator.consensus_public_key.clone(),
+                network_public_key: validator.network_public_key.clone(),
+                genesis_power: validator.genesis_power,
+                signed_admission_root: validator.signed_admission_root.clone(),
+                bootstrap_attestation_root: bootstrap_node
+                    .map(|node| node.attestation_root.clone())
+                    .unwrap_or_default(),
+                handoff_root: String::new(),
+            };
+            entry.handoff_root = operator_handoff_entry_root(
+                &entry,
+                &attestation.launch_bundle.root,
+                &manifest.root,
+                &validator_deployment_binding_root,
+            );
+            entry
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        (
+            left.operator_id.as_str(),
+            left.validator_id.as_str(),
+            left.node_id.as_str(),
+        )
+            .cmp(&(
+                right.operator_id.as_str(),
+                right.validator_id.as_str(),
+                right.node_id.as_str(),
+            ))
+    });
+
+    let mut handoff = OperatorHandoffManifest {
+        chain_id: attestation.chain_id.clone(),
+        runtime_version: attestation.runtime_version.clone(),
+        launch_bundle_root: attestation.launch_bundle.root.clone(),
+        validator_set_root: manifest.root.clone(),
+        validator_set_epoch: manifest.epoch,
+        validator_deployment_binding_root,
+        entries,
+        root: String::new(),
+    };
+    handoff.root = operator_handoff_manifest_root(&handoff);
+    handoff
+}
+
+fn operator_handoff_entry_root(
+    entry: &OperatorHandoffEntry,
+    launch_bundle_root: &str,
+    validator_set_root: &str,
+    validator_deployment_binding_root: &str,
+) -> String {
+    stable_root(&json!({
+        "handoff_entry_domain": "nebula-operator-handoff-entry-v1",
+        "launch_bundle_root": launch_bundle_root,
+        "validator_set_root": validator_set_root,
+        "validator_deployment_binding_root": validator_deployment_binding_root,
+        "operator_id": entry.operator_id,
+        "validator_id": entry.validator_id,
+        "node_id": entry.node_id,
+        "region": entry.region,
+        "operator_contact": entry.operator_contact,
+        "bootstrap_endpoint": entry.bootstrap_endpoint,
+        "p2p_endpoint": entry.p2p_endpoint,
+        "reward_account": entry.reward_account,
+        "consensus_public_key": entry.consensus_public_key,
+        "network_public_key": entry.network_public_key,
+        "genesis_power": entry.genesis_power,
+        "signed_admission_root": entry.signed_admission_root,
+        "bootstrap_attestation_root": entry.bootstrap_attestation_root,
+    }))
+}
+
+fn operator_handoff_manifest_root(manifest: &OperatorHandoffManifest) -> String {
+    stable_root(&json!({
+        "handoff_domain": "nebula-operator-handoff-v1",
+        "chain_id": manifest.chain_id,
+        "runtime_version": manifest.runtime_version,
+        "launch_bundle_root": manifest.launch_bundle_root,
+        "validator_set_root": manifest.validator_set_root,
+        "validator_set_epoch": manifest.validator_set_epoch,
+        "validator_deployment_binding_root": manifest.validator_deployment_binding_root,
+        "entries": manifest.entries,
+    }))
+}
+
 fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
     stable_root(&json!({
         "chain_id": manifest.chain_id,
@@ -5951,6 +6276,47 @@ mod public_launch {
     }
 
     #[test]
+    fn operator_handoff_builds_from_verified_inputs() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+
+        let report = verify_operator_handoff_jsons(&handoff, &deployment, &validators).unwrap();
+
+        assert!(report.operator_handoff_ready);
+        assert_eq!(report.level, "operator-handoff-attested");
+        assert_eq!(report.operator_handoff_root.len(), 64);
+        assert_eq!(report.validator_deployment_binding_root.len(), 64);
+        assert_eq!(report.entry_count, 2);
+        assert_eq!(report.operator_count, 2);
+        assert_eq!(report.region_count, 2);
+    }
+
+    #[test]
+    fn operator_handoff_rejects_tampered_entries() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let mut handoff = serde_json::from_str::<Value>(
+            &build_operator_handoff_json_pretty(&deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        handoff["entries"][0]["p2p_endpoint"] =
+            json!("tcp://different-bootstrap.testnet.nebula.example:26656");
+
+        let error = verify_operator_handoff_jsons(&handoff.to_string(), &deployment, &validators)
+            .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "operator handoff entries do not match verified deployment and validator set"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
     fn genesis_manifest_builds_from_verified_inputs() {
         let genesis = build_genesis_manifest_json_pretty(
             &sample_deployment_attestation_json_pretty(),
@@ -6159,6 +6525,7 @@ mod public_launch {
         assert_eq!(report.operator_roster_root.len(), 64);
         assert_eq!(report.reward_ledger_root.len(), 64);
         assert_eq!(report.validator_deployment_binding_root.len(), 64);
+        assert_eq!(report.operator_handoff_root.len(), 64);
         assert_eq!(report.genesis_root.len(), 64);
         assert_eq!(report.matched_validator_count, 2);
         assert_eq!(report.matched_reward_account_count, 2);

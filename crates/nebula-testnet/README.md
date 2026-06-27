@@ -23,6 +23,8 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-deployment-attestation /tmp/nebula-attestation.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-validator-set > /tmp/nebula-validator-set.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-set /tmp/nebula-validator-set.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-operator-handoff --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json > /tmp/nebula-operator-handoff.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-operator-handoff /tmp/nebula-operator-handoff.json --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json > /tmp/nebula-genesis.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-genesis-manifest /tmp/nebula-genesis.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --genesis-manifest /tmp/nebula-genesis.json --json
@@ -121,6 +123,15 @@ validator IDs, node IDs, regions, contact endpoints, P2P endpoints, and
 commission settings. It also reports a deterministic reward-ledger root and
 reward-account count derived from the admitted validator reward accounts.
 
+The operator handoff manifest is generated from a verified deployment
+attestation and validator-set manifest. It gives each admitted operator a
+deterministic entry covering operator ID, validator ID, node ID, region,
+operator contact, bootstrap endpoint, P2P endpoint, reward account, consensus
+and network keys, genesis power, signed admission root, and bootstrap
+attestation root. Each entry has its own handoff root, and the manifest root
+binds the launch-bundle root, validator-set root, validator-deployment-binding
+root, and all entries.
+
 The genesis manifest builder binds verified deployment evidence and validator
 admission into the root artifact used to start a public testnet at activation
 height `1` with validator-set epoch `0`. Genesis deployment, validator-set,
@@ -143,8 +154,9 @@ observer-confirmation root, bootstrap-roster root, operator-roster root,
 matched reward-account count, reward-ledger root, rollback-readiness root,
 deployment-validity root, operational-evidence root, and the genesis fee token
 identities. It also reports the deployment-quorum root and
-validator-deployment-binding root and rejects validator consensus/network keys
-that reuse deployment witness keys, admitted validators that do not map to
+validator-deployment-binding root and operator-handoff root and rejects
+validator consensus/network keys that reuse deployment witness keys, admitted
+validators that do not map to
 attested deployment operators and bootstrap nodes, validator P2P hosts that do
 not match their attested bootstrap endpoint host, plus deployment operators or
 bootstrap nodes that are not represented by an admitted validator.

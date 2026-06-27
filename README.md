@@ -58,6 +58,8 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-deployment-attestation /tmp/nebula-attestation.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-validator-set > /tmp/nebula-validator-set.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-set /tmp/nebula-validator-set.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-operator-handoff --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json > /tmp/nebula-operator-handoff.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-operator-handoff /tmp/nebula-operator-handoff.json --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json > /tmp/nebula-genesis.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-genesis-manifest /tmp/nebula-genesis.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --genesis-manifest /tmp/nebula-genesis.json --json
@@ -326,6 +328,25 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-set /tmp/nebula-validator-set.json --json
 ```
 
+## Operator Handoff Gate
+
+The operator handoff manifest is generated from a verified deployment
+attestation and validator-set manifest. It gives each admitted operator a
+deterministic entry covering operator ID, validator ID, node ID, region,
+operator contact, bootstrap endpoint, P2P endpoint, reward account, consensus
+and network keys, genesis power, signed admission root, and bootstrap
+attestation root. Each entry has its own handoff root, and the manifest root
+binds the launch-bundle root, validator-set root, validator-deployment-binding
+root, and all entries. This gives external validators a compact file to compare
+against their node configuration before the genesis package is accepted.
+
+Operators can build and verify the handoff manifest with:
+
+```bash
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-operator-handoff --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json > /tmp/nebula-operator-handoff.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-operator-handoff /tmp/nebula-operator-handoff.json --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json --json
+```
+
 ## Genesis Manifest Gate
 
 The final local launch artifact is a genesis manifest. It can only be built from
@@ -376,8 +397,8 @@ verified from the attestation, the public-surface root, the operator-approval
 root, the observer-confirmation root, the bootstrap-roster root, the
 rollback-readiness root, the operational-evidence root, the deployment-validity
 root, the deployment-quorum root, the validator-deployment-binding root, the
-operator-roster root, the matched reward-account count, the reward-ledger root,
-and the genesis fee token identities.
+operator-handoff root, the operator-roster root, the matched reward-account
+count, the reward-ledger root, and the genesis fee token identities.
 
 Operators can verify the full package with:
 
