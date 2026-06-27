@@ -80,7 +80,8 @@ The public launch suite covers:
   validation
 - unique bootstrap node, operator, observer, endpoint, witness-key,
   bootstrap-region, operator-region, and observer-region validation
-- 64-character hex witness and validator public-key material validation
+- 64-character hex and role-separated witness/validator public-key material
+  validation
 - unique TLS certificate and public-key pin validation
 - deployment freshness windows for generated attestations, preflight/runbook
   receipts, expiry, TLS pins, and rollback drills
@@ -160,6 +161,7 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - public status/probe and bootstrap endpoints that do not include a host
 - operator and observer witness roots that do not match the deployment surface
 - operator and observer public keys that are not 64-character hex values
+- observer public keys that reuse an operator public key
 - bootstrap node attestation roots that do not bind the deployment witness root
 - operator, observer, and validator admission signature roots that do not bind
   the signed payload

@@ -652,6 +652,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "unique_observer_ids_required": true,
                 "unique_observer_keys_required": true,
                 "hex_observer_keys_required": true,
+                "operator_observer_key_domains_disjoint": true,
                 "operator_region_spread_required": true,
                 "observer_region_spread_required": true,
                 "operator_signature_roots_verified": true,
@@ -2305,6 +2306,11 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("observers[{index}].signature.public_key"),
             &observer.signature.public_key,
         );
+        if operator_keys.contains(&observer.signature.public_key) {
+            errors.push(format!(
+                "observers[{index}].signature.public_key must not reuse an operator public_key"
+            ));
+        }
         insert_unique(
             errors,
             &mut observer_keys,
@@ -3645,6 +3651,27 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| { error == "observers[1].signature.public_key must be unique" }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_observer_key_reused_as_operator_key() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["observers"][0]["signature"]["public_key"] =
+            value["operators"][0]["public_key"].clone();
+        refresh_observer_signature_root(&mut value, 0);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "observers[0].signature.public_key must not reuse an operator public_key"
+                }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
