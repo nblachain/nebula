@@ -376,7 +376,7 @@ operators, observers, and rollback evidence:
 ```bash
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-public-status --endpoint-url https://testnet.nebula.example/status > /tmp/nebula-public-status.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-public-probe --endpoint-url https://testnet.nebula.example/status > /tmp/nebula-public-probe.json
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-deployment-attestation --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --preflight-receipt /tmp/nebula-preflight.json --runbook-receipt /tmp/nebula-runbook.json --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms> --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms> --bootstrap-node <node_id,operator_id,region,endpoint> --bootstrap-node <node_id,operator_id,region,endpoint> --operator <operator_id,region,public_key> --operator <operator_id,region,public_key> --observer <observer_id,region,public_key> --observer <observer_id,region,public_key> --rollback-plan-sha3-256 <hex> --rollback-recovery-root <hex> > /tmp/nebula-attestation.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-deployment-attestation --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --preflight-receipt /tmp/nebula-preflight.json --runbook-receipt /tmp/nebula-runbook.json --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms> --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms> --bootstrap-node <node_id,operator_id,region,endpoint> --bootstrap-node <node_id,operator_id,region,endpoint> --operator <operator_id,region,public_key> --operator <operator_id,region,public_key> --observer <observer_id,region,public_key,secret_key_hex> --observer <observer_id,region,public_key,secret_key_hex> --rollback-plan-sha3-256 <hex> --rollback-recovery-root <hex> > /tmp/nebula-attestation.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-deployment-attestation /tmp/nebula-attestation.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --capture-public-runtime-surface --deployment-attestation /tmp/nebula-attestation.json --endpoint-url https://testnet.nebula.example/status > /tmp/nebula-external-runtime-surface.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-runtime-surface-evidence /tmp/nebula-external-runtime-surface.json --json
@@ -443,7 +443,11 @@ sample-only standalone verifiers.
 Deployment evidence binds bootstrap nodes, operators, and observers to one
 shared witness root for the launch bundle, public status, HTTPS endpoint/TLS
 pins, policy claim, and public probe. Operator and observer signature roots must
-bind their signer identity and that witness root. The launch bundle must use
+bind their signer identity and that witness root. Observer attestations also
+carry `signature_hex`, which must verify against the observer Ed25519 public
+key. `--build-deployment-attestation` accepts an optional fourth
+`--observer` row field, `secret_key_hex`, to sign real observer attestations
+after the witness root is computed. The launch bundle must use
 `nebula-public-testnet-bundle-1`, and package artifact roots must not reuse
 Cargo.lock roots. Launch bundle, public status, policy claim, and public probe
 roots must be disjoint. Bootstrap node IDs,
@@ -540,7 +544,8 @@ The operator acceptance manifest is generated from a verified handoff manifest,
 deployment attestation, and validator-set manifest. It records one fresh
 acceptance entry per handoff entry, binds the accepted handoff root, operator
 public key, validator ID, node ID, and launch-bundle root, and verifies the
-operator acceptance signature root.
+operator acceptance signature root plus `signature_hex` against the attested
+operator Ed25519 public key.
 
 The genesis manifest builder binds verified deployment evidence and validator
 admission into the root artifact used to start a public testnet at activation
@@ -582,21 +587,31 @@ the deterministic launch-package root, and the bundle root.
 The validator activation builder records one activated entry per admitted
 validator after bundle verification. Each entry binds the validator identity,
 P2P endpoint, validator keys, reward account, launch-package bundle root, and
-operator acceptance root before the set is treated as ready to join.
+operator acceptance root, then verifies `signature_hex` against the validator
+consensus Ed25519 key before the set is treated as ready to join.
 
 The validator join builder records one join entry per activated validator. Each
 entry proves the validator observed the chain at or after activation height and
-with the required peer count before the set is treated as joined.
+with the required peer count, then verifies `signature_hex` against the
+validator consensus Ed25519 key before the set is treated as joined.
 
 The operator join confirmation builder records one confirmation entry per joined
 validator. Each entry binds the validator join root, validator activation root,
 launch-package bundle root, operator acceptance root, and operator confirmation
-signature root before the joined set is treated as operator-confirmed.
+signature root, then verifies `signature_hex` against the attested operator
+Ed25519 key before the joined set is treated as operator-confirmed.
 
 The public observer confirmation builder records one confirmation entry per
 deployment observer after operator-confirmed validator join. Each entry binds the
 public endpoint, public status root, public probe root, operator join
-confirmation root, observer region, and observer signature root.
+confirmation root, observer region, and observer signature root, then verifies
+`signature_hex` against the deployment observer Ed25519 key.
+Launch-stage build commands auto-sign only deterministic sample keys used by
+local rehearsals. Production operator acceptance, validator activation,
+validator join, operator join confirmation, and public observer confirmation
+artifacts must be signed by the relevant key holder, set `verified: true`,
+include `signature_hex`, and recompute the enclosing manifest root before
+verification.
 
 The public testnet launch certificate builder binds every verified launch
 artifact root and the validator, operator, observer, and region counts into one

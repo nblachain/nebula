@@ -1,6 +1,6 @@
 #![recursion_limit = "512"]
 
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha3::{Digest, Sha3_256};
@@ -288,6 +288,7 @@ pub struct SignatureVerification {
     pub algorithm: String,
     pub public_key: String,
     pub signature_sha3_256: String,
+    pub signature_hex: String,
     pub verified: bool,
 }
 
@@ -1063,6 +1064,7 @@ pub struct ObserverBuildInput {
     pub observer_id: String,
     pub region: String,
     pub public_key: String,
+    pub secret_key_hex: Option<String>,
 }
 
 struct PublicSurfaceSample {
@@ -1656,11 +1658,13 @@ pub fn prove_local_public_testnet_rehearsal(
                     observer_id: "observer-us-east-1".to_string(),
                     region: "us-east".to_string(),
                     public_key: sample_ed25519_public_key_hex(0xb1),
+                    secret_key_hex: None,
                 },
                 ObserverBuildInput {
                     observer_id: "observer-eu-west-1".to_string(),
                     region: "eu-west".to_string(),
                     public_key: sample_ed25519_public_key_hex(0xb2),
+                    secret_key_hex: None,
                 },
             ],
             rollback_plan_sha3_256: hex_64("rollback-plan"),
@@ -2599,7 +2603,8 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
                         algorithm: "ed25519-testnet-attestation".to_string(),
                         public_key: sample_ed25519_public_key_hex(0xb1),
                         signature_sha3_256: String::new(),
-                        verified: true,
+                        signature_hex: String::new(),
+                        verified: false,
                     },
                 },
                 ObserverAttestation {
@@ -2611,13 +2616,15 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
                         algorithm: "ed25519-testnet-attestation".to_string(),
                         public_key: sample_ed25519_public_key_hex(0xb2),
                         signature_sha3_256: String::new(),
-                        verified: true,
+                        signature_hex: String::new(),
+                        verified: false,
                     },
                 },
             ];
             for observer in &mut observers {
                 observer.signature.signature_sha3_256 =
                     observer_signature_root(observer, &witness_evidence_root);
+                complete_sample_signature(&mut observer.signature);
             }
             observers
         },
@@ -2765,27 +2772,42 @@ pub fn build_deployment_attestation_json_pretty(
             operator
         })
         .collect::<Vec<_>>();
-    let observers = input
-        .observers
-        .into_iter()
-        .map(|observer| {
-            let mut observer = ObserverAttestation {
-                observer_id: observer.observer_id,
-                region: observer.region,
-                observed_endpoint: public_endpoint.url.clone(),
-                observed_evidence_root: witness_evidence_root.clone(),
-                signature: SignatureVerification {
-                    algorithm: "ed25519-testnet-attestation".to_string(),
-                    public_key: observer.public_key,
-                    signature_sha3_256: String::new(),
-                    verified: true,
-                },
-            };
-            observer.signature.signature_sha3_256 =
-                observer_signature_root(&observer, &witness_evidence_root);
-            observer
-        })
-        .collect::<Vec<_>>();
+    let mut observers = Vec::new();
+    for observer in input.observers {
+        let observer_secret_key_hex = observer.secret_key_hex;
+        let mut observer = ObserverAttestation {
+            observer_id: observer.observer_id,
+            region: observer.region,
+            observed_endpoint: public_endpoint.url.clone(),
+            observed_evidence_root: witness_evidence_root.clone(),
+            signature: SignatureVerification {
+                algorithm: "ed25519-testnet-attestation".to_string(),
+                public_key: observer.public_key,
+                signature_sha3_256: String::new(),
+                signature_hex: String::new(),
+                verified: false,
+            },
+        };
+        observer.signature.signature_sha3_256 =
+            observer_signature_root(&observer, &witness_evidence_root);
+        if let Some(secret_key_hex) = observer_secret_key_hex {
+            let derived_public_key = public_key_hex_for_secret_key(&secret_key_hex)
+                .map_err(|error| AttestationError::Invalid(vec![error]))?;
+            if !derived_public_key.eq_ignore_ascii_case(&observer.signature.public_key) {
+                return Err(AttestationError::Invalid(vec![format!(
+                    "observer {} secret_key_hex does not match public_key",
+                    observer.observer_id
+                )]));
+            }
+            observer.signature.signature_hex =
+                sign_root_with_secret_key(&secret_key_hex, &observer.signature.signature_sha3_256)
+                    .map_err(|error| AttestationError::Invalid(vec![error]))?;
+            observer.signature.verified = true;
+        } else {
+            complete_sample_signature(&mut observer.signature);
+        }
+        observers.push(observer);
+    }
     let attestation = DeploymentAttestation {
         chain_id: CHAIN_ID.to_string(),
         runtime_version: VERSION.to_string(),
@@ -3239,8 +3261,8 @@ pub fn sample_validator_set_json_pretty() -> String {
             node_id: "bootstrap-us-east-1".to_string(),
             region: "us-east".to_string(),
             operator_contact: "mailto:operator-a@testnet.nebula.example".to_string(),
-            consensus_public_key: hex_64("consensus-key-a"),
-            network_public_key: hex_64("network-key-a"),
+            consensus_public_key: sample_ed25519_public_key_hex(0xc1),
+            network_public_key: sample_ed25519_public_key_hex(0xd1),
             p2p_endpoint: "tcp://bootstrap-a.testnet.nebula.example:26656".to_string(),
             reward_account: "nbla-reward-operator-a".to_string(),
             commission_bps: 500,
@@ -3253,8 +3275,8 @@ pub fn sample_validator_set_json_pretty() -> String {
             node_id: "bootstrap-eu-west-1".to_string(),
             region: "eu-west".to_string(),
             operator_contact: "mailto:operator-b@testnet.nebula.example".to_string(),
-            consensus_public_key: hex_64("consensus-key-b"),
-            network_public_key: hex_64("network-key-b"),
+            consensus_public_key: sample_ed25519_public_key_hex(0xc2),
+            network_public_key: sample_ed25519_public_key_hex(0xd2),
             p2p_endpoint: "tcp://bootstrap-b.testnet.nebula.example:26656".to_string(),
             reward_account: "nbla-reward-operator-b".to_string(),
             commission_bps: 500,
@@ -3620,11 +3642,21 @@ pub fn verify_operator_acceptance_jsons(
         verified_deployment_attestation_manifest(deployment_attestation_json)?;
     let mut errors = Vec::new();
     let now = unix_ms();
-    let expected = operator_acceptance_manifest(
+    let mut expected = operator_acceptance_manifest(
         &handoff,
         &deployment_attestation,
         manifest.accepted_at_unix_ms,
     );
+    for expected_entry in &mut expected.entries {
+        if let Some(entry) = manifest.entries.iter().find(|entry| {
+            entry.operator_id == expected_entry.operator_id
+                && entry.validator_id == expected_entry.validator_id
+                && entry.node_id == expected_entry.node_id
+        }) {
+            expected_entry.signature = entry.signature.clone();
+        }
+    }
+    expected.root = operator_acceptance_manifest_root(&expected);
 
     if manifest.accepted_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
         errors.push("accepted_at_unix_ms is more than five minutes in the future".to_string());
@@ -3677,15 +3709,14 @@ pub fn verify_operator_acceptance_jsons(
                 manifest.accepted_at_unix_ms,
             ),
         );
-        require_root(
+        verify_signature_material(
             &mut errors,
-            &format!("entries[{index}].signature.signature_sha3_256"),
-            &entry.signature.signature_sha3_256,
+            &format!("entries[{index}].signature"),
+            &entry.signature,
+            "ed25519-testnet-operator-acceptance",
+            &entry.operator_public_key,
             &operator_acceptance_signature_root(entry),
         );
-        if !entry.signature.verified {
-            errors.push(format!("entries[{index}].signature.verified must be true"));
-        }
     }
     require_root(
         &mut errors,
@@ -4760,12 +4791,22 @@ pub fn verify_validator_activation_jsons(
         validator_set_json,
     )?;
     let validator_set = verified_validator_set_manifest(validator_set_json)?;
-    let expected = validator_activation_manifest(
+    let mut expected = validator_activation_manifest(
         &bundle_report,
         &acceptance_report,
         &validator_set,
         manifest.activated_at_unix_ms,
     );
+    for expected_entry in &mut expected.entries {
+        if let Some(entry) = manifest.entries.iter().find(|entry| {
+            entry.operator_id == expected_entry.operator_id
+                && entry.validator_id == expected_entry.validator_id
+                && entry.node_id == expected_entry.node_id
+        }) {
+            expected_entry.signature = entry.signature.clone();
+        }
+    }
+    expected.root = validator_activation_manifest_root(&expected);
     let now = unix_ms();
     let mut errors = Vec::new();
 
@@ -4827,15 +4868,14 @@ pub fn verify_validator_activation_jsons(
                 manifest.activated_at_unix_ms,
             ),
         );
-        require_root(
+        verify_signature_material(
             &mut errors,
-            &format!("entries[{index}].signature.signature_sha3_256"),
-            &entry.signature.signature_sha3_256,
+            &format!("entries[{index}].signature"),
+            &entry.signature,
+            "ed25519-testnet-validator-activation",
+            &entry.consensus_public_key,
             &validator_activation_signature_root(entry),
         );
-        if !entry.signature.verified {
-            errors.push(format!("entries[{index}].signature.verified must be true"));
-        }
     }
     require_root(
         &mut errors,
@@ -4843,10 +4883,10 @@ pub fn verify_validator_activation_jsons(
         &manifest.root,
         &validator_activation_manifest_root(&manifest),
     );
-    if manifest.root != validator_activation_manifest_root(&expected) {
+    if manifest.root != expected.root {
         errors.push(format!(
             "root does not match expected validator activation root {}",
-            validator_activation_manifest_root(&expected)
+            expected.root
         ));
     }
 
@@ -5147,7 +5187,7 @@ pub fn verify_operator_join_confirmation_jsons(
     let deployment_attestation =
         verified_deployment_attestation_manifest(deployment_attestation_json)?;
     let now = unix_ms();
-    let expected = operator_join_confirmation_manifest(
+    let mut expected = operator_join_confirmation_manifest(
         &receipt,
         &join_report,
         &acceptance,
@@ -5155,6 +5195,16 @@ pub fn verify_operator_join_confirmation_jsons(
         &deployment_attestation,
         manifest.confirmed_at_unix_ms,
     );
+    for expected_entry in &mut expected.entries {
+        if let Some(entry) = manifest.entries.iter().find(|entry| {
+            entry.operator_id == expected_entry.operator_id
+                && entry.validator_id == expected_entry.validator_id
+                && entry.node_id == expected_entry.node_id
+        }) {
+            expected_entry.signature = entry.signature.clone();
+        }
+    }
+    expected.root = operator_join_confirmation_manifest_root(&expected);
     let mut errors = Vec::new();
 
     if manifest.confirmed_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
@@ -5222,15 +5272,14 @@ pub fn verify_operator_join_confirmation_jsons(
                 manifest.confirmed_at_unix_ms,
             ),
         );
-        require_root(
+        verify_signature_material(
             &mut errors,
-            &format!("entries[{index}].signature.signature_sha3_256"),
-            &entry.signature.signature_sha3_256,
+            &format!("entries[{index}].signature"),
+            &entry.signature,
+            "ed25519-testnet-operator-join-confirmation",
+            &entry.operator_public_key,
             &operator_join_confirmation_signature_root(entry),
         );
-        if !entry.signature.verified {
-            errors.push(format!("entries[{index}].signature.verified must be true"));
-        }
     }
     require_root(
         &mut errors,
@@ -5360,13 +5409,31 @@ pub fn verify_public_observer_confirmation_jsons(
         &deployment_attestation,
     )?;
     let now = unix_ms();
-    let expected = public_observer_confirmation_manifest(
+    let mut expected = public_observer_confirmation_manifest(
         &deployment_attestation,
         &join_confirmation_report,
         &public_status_report,
         &public_probe_report,
         manifest.observed_at_unix_ms,
     );
+    for expected_entry in &mut expected.entries {
+        if let Some(entry) = manifest.entries.iter().find(|entry| {
+            entry.observer_id == expected_entry.observer_id && entry.region == expected_entry.region
+        }) {
+            expected_entry.signature = entry.signature.clone();
+        }
+    }
+    expected.root = public_observer_confirmation_manifest_root(&expected);
+    let observer_keys_by_id_region = deployment_attestation
+        .observers
+        .iter()
+        .map(|observer| {
+            (
+                (observer.observer_id.as_str(), observer.region.as_str()),
+                observer.signature.public_key.as_str(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let mut errors = Vec::new();
 
     if manifest.observed_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
@@ -5454,15 +5521,17 @@ pub fn verify_public_observer_confirmation_jsons(
             &entry.observation_root,
             &public_observer_confirmation_entry_root(entry, manifest.observed_at_unix_ms),
         );
-        require_root(
+        verify_signature_material(
             &mut errors,
-            &format!("entries[{index}].signature.signature_sha3_256"),
-            &entry.signature.signature_sha3_256,
+            &format!("entries[{index}].signature"),
+            &entry.signature,
+            "ed25519-testnet-public-observer-confirmation",
+            observer_keys_by_id_region
+                .get(&(entry.observer_id.as_str(), entry.region.as_str()))
+                .copied()
+                .unwrap_or_default(),
             &public_observer_confirmation_signature_root(entry),
         );
-        if !entry.signature.verified {
-            errors.push(format!("entries[{index}].signature.verified must be true"));
-        }
     }
     require_root(
         &mut errors,
@@ -8435,11 +8504,6 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &observer.observed_evidence_root,
             &witness_evidence_root,
         );
-        require_hex_root(
-            errors,
-            &format!("observers[{index}].signature.signature_sha3_256"),
-            &observer.signature.signature_sha3_256,
-        );
         require_eq(
             errors,
             &format!("observers[{index}].signature.algorithm"),
@@ -8473,11 +8537,14 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &observer.signature.signature_sha3_256,
             &observer_signature_root(observer, &witness_evidence_root),
         );
-        if !observer.signature.verified {
-            errors.push(format!(
-                "observers[{index}].signature.verified must be true"
-            ));
-        }
+        verify_signature_material(
+            errors,
+            &format!("observers[{index}].signature"),
+            &observer.signature,
+            "ed25519-testnet-attestation",
+            &observer.signature.public_key,
+            &observer_signature_root(observer, &witness_evidence_root),
+        );
     }
     if observer_ids.len() < MIN_PUBLIC_TESTNET_OBSERVERS {
         errors.push(format!(
@@ -9091,6 +9158,7 @@ fn deployment_observer_confirmation_root(attestation: &DeploymentAttestation) ->
                 observer.signature.algorithm.as_str(),
                 observer.signature.public_key.as_str(),
                 observer.signature.signature_sha3_256.as_str(),
+                observer.signature.signature_hex.as_str(),
                 observer.signature.verified,
             )
         })
@@ -9107,6 +9175,7 @@ fn deployment_observer_confirmation_root(attestation: &DeploymentAttestation) ->
                 algorithm,
                 public_key,
                 signature_sha3_256,
+                signature_hex,
                 verified,
             )| {
                 json!({
@@ -9117,6 +9186,7 @@ fn deployment_observer_confirmation_root(attestation: &DeploymentAttestation) ->
                     "algorithm": algorithm,
                     "public_key": public_key,
                     "signature_sha3_256": signature_sha3_256,
+                    "signature_hex": signature_hex,
                     "verified": verified,
                 })
             },
@@ -9615,7 +9685,8 @@ fn operator_acceptance_manifest(
                     algorithm: "ed25519-testnet-operator-acceptance".to_string(),
                     public_key: String::new(),
                     signature_sha3_256: String::new(),
-                    verified: true,
+                    signature_hex: String::new(),
+                    verified: false,
                 },
             };
             entry.signature.public_key = entry.operator_public_key.clone();
@@ -9626,6 +9697,7 @@ fn operator_acceptance_manifest(
                 accepted_at_unix_ms,
             );
             entry.signature.signature_sha3_256 = operator_acceptance_signature_root(&entry);
+            complete_sample_signature(&mut entry.signature);
             entry
         })
         .collect::<Vec<_>>();
@@ -9816,7 +9888,8 @@ fn validator_activation_manifest(
                     algorithm: "ed25519-testnet-validator-activation".to_string(),
                     public_key: validator.consensus_public_key.clone(),
                     signature_sha3_256: String::new(),
-                    verified: true,
+                    signature_hex: String::new(),
+                    verified: false,
                 },
             };
             entry.activation_root = validator_activation_entry_root(
@@ -9826,6 +9899,7 @@ fn validator_activation_manifest(
                 activated_at_unix_ms,
             );
             entry.signature.signature_sha3_256 = validator_activation_signature_root(&entry);
+            complete_sample_signature(&mut entry.signature);
             entry
         })
         .collect::<Vec<_>>();
@@ -9931,12 +10005,14 @@ fn validator_join_receipt(
                     algorithm: "ed25519-testnet-validator-join".to_string(),
                     public_key: activation_entry.consensus_public_key.clone(),
                     signature_sha3_256: String::new(),
-                    verified: true,
+                    signature_hex: String::new(),
+                    verified: false,
                 },
             };
             entry.join_root =
                 validator_join_entry_root(&entry, activation_height, joined_at_unix_ms);
             entry.signature.signature_sha3_256 = validator_join_signature_root(&entry);
+            complete_sample_signature(&mut entry.signature);
             entry
         })
         .collect::<Vec<_>>();
@@ -10058,15 +10134,14 @@ fn verify_validator_join_entries(
             &entry.join_root,
             &validator_join_entry_root(entry, receipt.activation_height, receipt.joined_at_unix_ms),
         );
-        require_root(
+        verify_signature_material(
             errors,
-            &format!("entries[{index}].signature.signature_sha3_256"),
-            &entry.signature.signature_sha3_256,
+            &format!("entries[{index}].signature"),
+            &entry.signature,
+            "ed25519-testnet-validator-join",
+            &entry.consensus_public_key,
             &validator_join_signature_root(entry),
         );
-        if !entry.signature.verified {
-            errors.push(format!("entries[{index}].signature.verified must be true"));
-        }
     }
 }
 
@@ -10172,7 +10247,8 @@ fn operator_join_confirmation_manifest(
                     algorithm: "ed25519-testnet-operator-join-confirmation".to_string(),
                     public_key: String::new(),
                     signature_sha3_256: String::new(),
-                    verified: true,
+                    signature_hex: String::new(),
+                    verified: false,
                 },
             };
             entry.signature.public_key = entry.operator_public_key.clone();
@@ -10185,6 +10261,7 @@ fn operator_join_confirmation_manifest(
                 confirmed_at_unix_ms,
             );
             entry.signature.signature_sha3_256 = operator_join_confirmation_signature_root(&entry);
+            complete_sample_signature(&mut entry.signature);
             entry
         })
         .collect::<Vec<_>>();
@@ -10295,13 +10372,15 @@ fn public_observer_confirmation_manifest(
                     algorithm: "ed25519-testnet-public-observer-confirmation".to_string(),
                     public_key: observer.signature.public_key.clone(),
                     signature_sha3_256: String::new(),
-                    verified: true,
+                    signature_hex: String::new(),
+                    verified: false,
                 },
             };
             entry.observation_root =
                 public_observer_confirmation_entry_root(&entry, observed_at_unix_ms);
             entry.signature.signature_sha3_256 =
                 public_observer_confirmation_signature_root(&entry);
+            complete_sample_signature(&mut entry.signature);
             entry
         })
         .collect::<Vec<_>>();
@@ -10661,6 +10740,102 @@ fn require_hex_value(errors: &mut Vec<String>, label: &str, value: &str) {
     }
 }
 
+fn require_signature_hex(errors: &mut Vec<String>, label: &str, value: &str) {
+    if value.len() != 128 || !value.chars().all(|c| c.is_ascii_hexdigit()) {
+        errors.push(format!(
+            "{label} must be a 128-character hex Ed25519 signature"
+        ));
+    }
+}
+
+fn decode_fixed_hex(value: &str, label: &str, expected_len: usize) -> Result<Vec<u8>, String> {
+    let decoded = hex::decode(value).map_err(|error| format!("{label} must be hex: {error}"))?;
+    if decoded.len() != expected_len {
+        return Err(format!("{label} must decode to {expected_len} bytes"));
+    }
+    Ok(decoded)
+}
+
+fn verifying_key_from_hex(public_key_hex: &str, label: &str) -> Result<VerifyingKey, String> {
+    let bytes = decode_fixed_hex(public_key_hex, label, 32)?;
+    let bytes: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| format!("{label} must decode to 32 bytes"))?;
+    VerifyingKey::from_bytes(&bytes)
+        .map_err(|error| format!("{label} is not an Ed25519 key: {error}"))
+}
+
+fn verify_ed25519_signature(
+    public_key_hex: &str,
+    signing_root: &str,
+    signature_hex: &str,
+    signature_label: &str,
+) -> Result<(), String> {
+    if signing_root.len() != 64 || !signing_root.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("signing root must be a 64-character hex root".to_string());
+    }
+    let verifying_key = verifying_key_from_hex(public_key_hex, "public_key")?;
+    let signature_bytes = decode_fixed_hex(signature_hex, signature_label, 64)?;
+    let signature_bytes: [u8; 64] = signature_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| format!("{signature_label} must decode to 64 bytes"))?;
+    let signature = Signature::from_bytes(&signature_bytes);
+    verifying_key
+        .verify(signing_root.as_bytes(), &signature)
+        .map_err(|error| format!("{signature_label} Ed25519 verification failed: {error}"))
+}
+
+fn verify_signature_material(
+    errors: &mut Vec<String>,
+    label: &str,
+    signature: &SignatureVerification,
+    expected_algorithm: &str,
+    expected_public_key: &str,
+    expected_signature_root: &str,
+) {
+    require_eq(
+        errors,
+        &format!("{label}.algorithm"),
+        &signature.algorithm,
+        expected_algorithm,
+    );
+    require_eq(
+        errors,
+        &format!("{label}.public_key"),
+        &signature.public_key,
+        expected_public_key,
+    );
+    require_hex_value(
+        errors,
+        &format!("{label}.public_key"),
+        &signature.public_key,
+    );
+    require_root(
+        errors,
+        &format!("{label}.signature_sha3_256"),
+        &signature.signature_sha3_256,
+        expected_signature_root,
+    );
+    require_signature_hex(
+        errors,
+        &format!("{label}.signature_hex"),
+        &signature.signature_hex,
+    );
+    if !signature.verified {
+        errors.push(format!("{label}.verified must be true"));
+    }
+    if let Err(error) = verify_ed25519_signature(
+        &signature.public_key,
+        expected_signature_root,
+        &signature.signature_hex,
+        &format!("{label}.signature_hex"),
+    ) {
+        errors.push(error);
+    }
+}
+
 fn require_https_endpoint(errors: &mut Vec<String>, label: &str, endpoint: &str) {
     let scheme = "https://";
     if !endpoint.starts_with(scheme) {
@@ -10816,6 +10991,60 @@ fn sample_ed25519_public_key_hex(seed: u8) -> String {
             .verifying_key()
             .to_bytes(),
     )
+}
+
+fn sample_ed25519_secret_key_hex(seed: u8) -> String {
+    hex::encode([seed; 32])
+}
+
+fn sign_root_with_secret_key(secret_key_hex: &str, signing_root: &str) -> Result<String, String> {
+    if signing_root.len() != 64 || !signing_root.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("signing root must be a 64-character hex root".to_string());
+    }
+    let bytes = decode_fixed_hex(secret_key_hex, "secret_key_hex", 32)?;
+    let bytes: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| "secret_key_hex must decode to 32 bytes".to_string())?;
+    let signing_key = SigningKey::from_bytes(&bytes);
+    Ok(hex::encode(
+        signing_key.sign(signing_root.as_bytes()).to_bytes(),
+    ))
+}
+
+fn public_key_hex_for_secret_key(secret_key_hex: &str) -> Result<String, String> {
+    let bytes = decode_fixed_hex(secret_key_hex, "secret_key_hex", 32)?;
+    let bytes: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| "secret_key_hex must decode to 32 bytes".to_string())?;
+    Ok(hex::encode(
+        SigningKey::from_bytes(&bytes).verifying_key().to_bytes(),
+    ))
+}
+
+fn sample_secret_key_for_public_key(public_key_hex: &str) -> Option<String> {
+    [0xa1, 0xa2, 0xb1, 0xb2, 0xc1, 0xc2, 0xd1, 0xd2, 0xe1, 0xe2]
+        .into_iter()
+        .find(|seed| sample_ed25519_public_key_hex(*seed) == public_key_hex)
+        .map(sample_ed25519_secret_key_hex)
+}
+
+fn sample_signature_for_public_key(public_key_hex: &str, signing_root: &str) -> Option<String> {
+    sample_secret_key_for_public_key(public_key_hex)
+        .and_then(|secret_key| sign_root_with_secret_key(&secret_key, signing_root).ok())
+}
+
+fn complete_sample_signature(signature: &mut SignatureVerification) {
+    if let Some(signature_hex) =
+        sample_signature_for_public_key(&signature.public_key, &signature.signature_sha3_256)
+    {
+        signature.signature_hex = signature_hex;
+        signature.verified = true;
+    } else {
+        signature.signature_hex.clear();
+        signature.verified = false;
+    }
 }
 
 fn stable_root(value: &Value) -> String {
@@ -11053,12 +11282,14 @@ mod public_launch {
                 ObserverBuildInput {
                     observer_id: "observer-us-east-1".to_string(),
                     region: "us-east".to_string(),
-                    public_key: hex_64("custom-observer-a"),
+                    public_key: sample_ed25519_public_key_hex(0xe1),
+                    secret_key_hex: Some(sample_ed25519_secret_key_hex(0xe1)),
                 },
                 ObserverBuildInput {
                     observer_id: "observer-eu-west-1".to_string(),
                     region: "eu-west".to_string(),
-                    public_key: hex_64("custom-observer-b"),
+                    public_key: sample_ed25519_public_key_hex(0xe2),
+                    secret_key_hex: Some(sample_ed25519_secret_key_hex(0xe2)),
                 },
             ],
             rollback_plan_sha3_256: hex_64("custom-rollback-plan"),
@@ -12900,6 +13131,35 @@ mod public_launch {
     }
 
     #[test]
+    fn operator_acceptance_rejects_bad_signature_hex() {
+        let chain = sample_launch_chain();
+        let mut acceptance =
+            serde_json::from_str::<OperatorAcceptanceManifest>(&chain.acceptance).unwrap();
+        acceptance.entries[0].signature.signature_hex = "00".repeat(64);
+        acceptance.root = operator_acceptance_manifest_root(&acceptance);
+        let acceptance_json = serde_json::to_string(&acceptance).unwrap();
+
+        let error = verify_operator_acceptance_jsons(
+            &acceptance_json,
+            &chain.handoff,
+            &chain.deployment,
+            &chain.validators,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with(
+                        "entries[0].signature.signature_hex Ed25519 verification failed",
+                    )
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
     fn genesis_manifest_builds_from_verified_inputs() {
         let genesis = build_genesis_manifest_json_pretty(
             &sample_deployment_attestation_json_pretty(),
@@ -13476,6 +13736,42 @@ mod public_launch {
     }
 
     #[test]
+    fn validator_activation_rejects_signature_public_key_mismatch() {
+        let chain = sample_launch_chain();
+        let mut activation =
+            serde_json::from_str::<ValidatorActivationManifest>(&chain.activation).unwrap();
+        activation.entries[0].signature.public_key =
+            activation.entries[1].signature.public_key.clone();
+        activation.entries[0].signature.signature_sha3_256 =
+            validator_activation_signature_root(&activation.entries[0]);
+        complete_sample_signature(&mut activation.entries[0].signature);
+        activation.root = validator_activation_manifest_root(&activation);
+        let activation_json = serde_json::to_string(&activation).unwrap();
+
+        let error = verify_validator_activation_jsons(
+            &activation_json,
+            &chain.bundle,
+            &chain.deployment,
+            &chain.public_status,
+            &chain.public_probe,
+            &chain.validators,
+            &chain.handoff,
+            &chain.acceptance,
+            &chain.genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("entries[0].signature.public_key expected")
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
     fn validator_join_receipt_verifies_after_activation() {
         let deployment = sample_deployment_attestation_json_pretty();
         let public_status = sample_public_status_manifest_json_pretty();
@@ -13984,6 +14280,47 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error
                         == "public observer confirmation entries do not match verified deployment observers and public surface"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn public_observer_confirmation_rejects_wrong_signed_root() {
+        let chain = sample_launch_chain();
+        let mut observer_confirmation = serde_json::from_str::<PublicObserverConfirmationManifest>(
+            &chain.observer_confirmation,
+        )
+        .unwrap();
+        observer_confirmation.entries[0]
+            .signature
+            .signature_sha3_256 = hex_64("wrong-public-observer-confirmation-signature-root");
+        complete_sample_signature(&mut observer_confirmation.entries[0].signature);
+        observer_confirmation.root =
+            public_observer_confirmation_manifest_root(&observer_confirmation);
+        let observer_confirmation_json = serde_json::to_string(&observer_confirmation).unwrap();
+
+        let error = verify_public_observer_confirmation_jsons(
+            &observer_confirmation_json,
+            &chain.join_confirmation,
+            &chain.join,
+            &chain.activation,
+            &chain.bundle,
+            &chain.deployment,
+            &chain.public_status,
+            &chain.public_probe,
+            &chain.validators,
+            &chain.handoff,
+            &chain.acceptance,
+            &chain.genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("entries[0].signature.signature_sha3_256 does not match")
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
@@ -15210,6 +15547,107 @@ mod public_launch {
         }
     }
 
+    struct SampleLaunchChain {
+        deployment: String,
+        public_status: String,
+        public_probe: String,
+        validators: String,
+        handoff: String,
+        acceptance: String,
+        genesis: String,
+        bundle: String,
+        activation: String,
+        join: String,
+        join_confirmation: String,
+        observer_confirmation: String,
+    }
+
+    fn sample_launch_chain() -> SampleLaunchChain {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let activation = build_validator_activation_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join = build_validator_join_receipt_json_pretty(
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join_confirmation = build_operator_join_confirmation_json_pretty(
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let observer_confirmation = build_public_observer_confirmation_json_pretty(
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        SampleLaunchChain {
+            deployment,
+            public_status,
+            public_probe,
+            validators,
+            handoff,
+            acceptance,
+            genesis,
+            bundle,
+            activation,
+            join,
+            join_confirmation,
+            observer_confirmation,
+        }
+    }
+
     fn refresh_validator_manifest_root(manifest: &mut Value, validator_index: usize) {
         let fee_policy_root = manifest["fee_policy_root"]
             .as_str()
@@ -15237,12 +15675,14 @@ mod public_launch {
             &deployment.policy_claim,
             &deployment.public_probe,
         );
-        let observer = serde_json::from_value::<ObserverAttestation>(
+        let mut observer = serde_json::from_value::<ObserverAttestation>(
             attestation["observers"][observer_index].clone(),
         )
         .unwrap();
-        attestation["observers"][observer_index]["signature"]["signature_sha3_256"] =
-            json!(observer_signature_root(&observer, &witness_evidence_root));
+        observer.signature.signature_sha3_256 =
+            observer_signature_root(&observer, &witness_evidence_root);
+        complete_sample_signature(&mut observer.signature);
+        attestation["observers"][observer_index]["signature"] = json!(observer.signature);
     }
 
     fn refresh_operator_signature_root(attestation: &mut Value, operator_index: usize) {
