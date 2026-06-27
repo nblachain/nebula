@@ -24,6 +24,11 @@ pub const MIN_PUBLIC_TESTNET_VALIDATORS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_OPERATORS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_OBSERVERS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_REGIONS: usize = 2;
+pub const FUTURE_CLOCK_SKEW_MS: u128 = 300_000;
+pub const PUBLIC_ATTESTATION_MAX_AGE_MS: u128 = 86_400_000;
+pub const PUBLIC_ATTESTATION_MAX_TTL_MS: u128 = 604_800_000;
+pub const MIN_TLS_PIN_VALIDITY_MS: u128 = 604_800_000;
+pub const ROLLBACK_DRILL_MAX_AGE_MS: u128 = 604_800_000;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Acceptance {
@@ -614,6 +619,10 @@ pub fn readiness_report() -> NebulaReadiness {
             })),
             "launch_package": stable_root(&json!({
                 "deployment_attestation_verified": true,
+                "deployment_attestation_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
+                "deployment_attestation_max_ttl_ms": PUBLIC_ATTESTATION_MAX_TTL_MS,
+                "minimum_tls_pin_validity_ms": MIN_TLS_PIN_VALIDITY_MS,
+                "rollback_drill_max_age_ms": ROLLBACK_DRILL_MAX_AGE_MS,
                 "deployment_witness_root_verified": true,
                 "unique_bootstrap_node_ids_required": true,
                 "unique_bootstrap_endpoints_required": true,
@@ -1157,7 +1166,7 @@ pub fn verify_genesis_manifest_json(
         &manifest.runtime_version,
         VERSION,
     );
-    if manifest.genesis_time_unix_ms > now + 300_000 {
+    if manifest.genesis_time_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
         errors.push("genesis_time_unix_ms is more than five minutes in the future".to_string());
     }
     if manifest.activation_height == 0 {
@@ -1377,11 +1386,17 @@ pub fn verify_deployment_attestation_json(
         &attestation.runtime_version,
         VERSION,
     );
-    if attestation.generated_at_unix_ms > now + 300_000 {
+    if attestation.generated_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
         errors.push("generated_at_unix_ms is more than five minutes in the future".to_string());
+    }
+    if attestation.generated_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("generated_at_unix_ms is older than 24 hours".to_string());
     }
     if attestation.expires_at_unix_ms <= now {
         errors.push("expires_at_unix_ms is stale".to_string());
+    }
+    if attestation.expires_at_unix_ms > now + PUBLIC_ATTESTATION_MAX_TTL_MS {
+        errors.push("expires_at_unix_ms is more than seven days in the future".to_string());
     }
 
     verify_package_identity(&mut errors, &attestation.package_identity);
@@ -1744,6 +1759,10 @@ fn verify_public_endpoint(
             errors.push(format!(
                 "public_endpoint.tls_pins[{index}].not_after_unix_ms is stale"
             ));
+        } else if pin.not_after_unix_ms < now + MIN_TLS_PIN_VALIDITY_MS {
+            errors.push(format!(
+                "public_endpoint.tls_pins[{index}].not_after_unix_ms expires in less than seven days"
+            ));
         }
     }
 }
@@ -1884,7 +1903,7 @@ fn verify_receipt_json(
 }
 
 fn verify_receipt(errors: &mut Vec<String>, label: &str, receipt: &Receipt, now: u128) {
-    if receipt.completed_at_unix_ms > now + 300_000 {
+    if receipt.completed_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
         errors.push(format!(
             "{label}.completed_at_unix_ms is more than five minutes in the future"
         ));
@@ -2349,11 +2368,14 @@ fn verify_rollback_evidence(
         "rollback_evidence.rollback_plan_sha3_256",
         &rollback_evidence.rollback_plan_sha3_256,
     );
-    if rollback_evidence.last_drill_unix_ms > now + 300_000 {
+    if rollback_evidence.last_drill_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
         errors.push(
             "rollback_evidence.last_drill_unix_ms is more than five minutes in the future"
                 .to_string(),
         );
+    }
+    if rollback_evidence.last_drill_unix_ms < now.saturating_sub(ROLLBACK_DRILL_MAX_AGE_MS) {
+        errors.push("rollback_evidence.last_drill_unix_ms is older than seven days".to_string());
     }
     require_hex_root(
         errors,
@@ -2766,6 +2788,80 @@ mod public_launch {
             error,
             AttestationError::Invalid(vec!["expires_at_unix_ms is stale".to_string()])
         );
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_old_generation_time() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["generated_at_unix_ms"] = json!(0);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "generated_at_unix_ms is older than 24 hours"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_excessive_expiry_window() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["expires_at_unix_ms"] = json!(unix_ms() + PUBLIC_ATTESTATION_MAX_TTL_MS + 60_000);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "expires_at_unix_ms is more than seven days in the future"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_short_tls_pin_validity() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["public_endpoint"]["tls_pins"][0]["not_after_unix_ms"] =
+            json!(unix_ms() + MIN_TLS_PIN_VALIDITY_MS - 1);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "public_endpoint.tls_pins[0].not_after_unix_ms expires in less than seven days"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_stale_rollback_drill() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["rollback_evidence"]["last_drill_unix_ms"] = json!(0);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "rollback_evidence.last_drill_unix_ms is older than seven days"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
     }
 
     #[test]
