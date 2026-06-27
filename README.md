@@ -108,6 +108,8 @@ The public launch suite covers:
   endpoint evidence
 - deterministic rollback-readiness root for preflight, runbook, rollback drill,
   and recovery-point evidence
+- deterministic deployment-validity root for attestation lifetime and TLS pin
+  expiry evidence
 - policy claim and public probe body exact-shape validation
 - preflight and runbook receipt exact-shape validation
 - bootstrap node/operator and observer attestation exact-shape validation
@@ -252,6 +254,9 @@ verification status.
 It also reports a deterministic rollback-readiness root over deployment
 generation time, preflight and runbook roots, rollback plan, rollback drill
 time, and recovery-point root.
+It also reports a deterministic deployment-validity root over attestation
+generation and expiry times, public endpoint URL, launch bundle root, validity
+policy constants, and TLS pin expiry evidence.
 
 Operators can generate and verify the public status/probe surface before filling
 deployment evidence:
@@ -326,9 +331,10 @@ validator-set epoch `0`, fee-policy root, validator-admission root, initial
 bootstrap-roster root, operator-roster root, reward-ledger root, validator,
 operator, and region counts, total genesis power, fixed activation height `1`,
 public-surface root, operator-approval root, observer-confirmation root,
-rollback-readiness root, operational-evidence root, and fee token identities.
-The verifier keeps deployment, public-surface, operator-approval,
-observer-confirmation, rollback-readiness,
+rollback-readiness root, deployment-validity root, operational-evidence root,
+and fee token identities. The verifier keeps deployment, public-surface,
+operator-approval, observer-confirmation, rollback-readiness,
+deployment-validity,
 bootstrap-roster,
 operational-evidence, validator-set, operator-roster, reward-ledger,
 fee-policy, and validator-admission roots in separate domains. The final
@@ -351,9 +357,9 @@ attestation, or when the genesis manifest does not bind the exact deployment
 evidence root, validator-set root, validator-set epoch, validator count, total
 operator count, region count, public-surface root, bootstrap-roster root,
 operator-approval root, observer-confirmation root, rollback-readiness root,
-operator-roster root, reward-ledger root, operational-evidence root, genesis
-power, and deployment validity window produced by the other verified files. It
-also rejects
+deployment-validity root, operator-roster root, reward-ledger root,
+operational-evidence root, genesis power, and deployment validity window
+produced by the other verified files. It also rejects
 validator consensus/network keys that reuse deployment witness keys,
 validator-set manifests whose admitted validators do not map to the attested
 deployment operators and bootstrap nodes, validator P2P hosts that do not match
@@ -363,8 +369,8 @@ report also exposes the deployment observer quorum count and deployment region
 count verified from the attestation, the public-surface root, the
 operator-approval root, the observer-confirmation root, the bootstrap-roster
 root, the rollback-readiness root, the operational-evidence root, the
-operator-roster root, the matched reward-account count, the reward-ledger root,
-and the genesis fee token identities.
+deployment-validity root, the operator-roster root, the matched reward-account
+count, the reward-ledger root, and the genesis fee token identities.
 
 Operators can verify the full package with:
 

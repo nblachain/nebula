@@ -297,6 +297,7 @@ pub struct DeploymentAttestationReport {
     pub operator_approval_root: String,
     pub observer_confirmation_root: String,
     pub rollback_readiness_root: String,
+    pub deployment_validity_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub attestation_expires_at_unix_ms: u128,
@@ -364,6 +365,7 @@ pub struct GenesisManifest {
     pub operator_approval_root: String,
     pub observer_confirmation_root: String,
     pub rollback_readiness_root: String,
+    pub deployment_validity_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub validator_set_root: String,
@@ -392,6 +394,7 @@ pub struct GenesisManifestReport {
     pub operator_approval_root: String,
     pub observer_confirmation_root: String,
     pub rollback_readiness_root: String,
+    pub deployment_validity_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub validator_set_root: String,
@@ -418,6 +421,7 @@ pub struct LaunchPackageReport {
     pub operator_approval_root: String,
     pub observer_confirmation_root: String,
     pub rollback_readiness_root: String,
+    pub deployment_validity_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub public_status_manifest_root: String,
@@ -712,6 +716,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "deployment_attestation_max_ttl_ms": PUBLIC_ATTESTATION_MAX_TTL_MS,
                 "deployment_attestation_max_validity_window_ms": PUBLIC_ATTESTATION_MAX_TTL_MS,
                 "deployment_attestation_expires_after_generated": true,
+                "deployment_validity_root_reported": true,
                 "launch_bundle_id": PUBLIC_TESTNET_BUNDLE_ID,
                 "package_artifact_lock_roots_disjoint": true,
                 "minimum_tls_pin_validity_ms": MIN_TLS_PIN_VALIDITY_MS,
@@ -779,6 +784,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "genesis_binds_operator_approval_root": true,
                 "genesis_binds_observer_confirmation_root": true,
                 "genesis_binds_rollback_readiness_root": true,
+                "genesis_binds_deployment_validity_root": true,
                 "genesis_binds_bootstrap_roster_root": true,
                 "genesis_binds_operational_evidence_root": true,
                 "genesis_binds_validator_set_root": true,
@@ -1310,6 +1316,7 @@ pub fn build_genesis_manifest_json_pretty(
         operator_approval_root: deployment_report.operator_approval_root,
         observer_confirmation_root: deployment_report.observer_confirmation_root,
         rollback_readiness_root: deployment_report.rollback_readiness_root,
+        deployment_validity_root: deployment_report.deployment_validity_root,
         bootstrap_roster_root: deployment_report.bootstrap_roster_root,
         operational_evidence_root: deployment_report.operational_evidence_root,
         validator_set_root: validator_set_report.validator_set_root,
@@ -1391,6 +1398,11 @@ pub fn verify_genesis_manifest_json(
         &mut errors,
         "rollback_readiness_root",
         &manifest.rollback_readiness_root,
+    );
+    require_hex_root(
+        &mut errors,
+        "deployment_validity_root",
+        &manifest.deployment_validity_root,
     );
     require_hex_root(
         &mut errors,
@@ -1491,6 +1503,7 @@ pub fn verify_genesis_manifest_json(
         operator_approval_root: manifest.operator_approval_root,
         observer_confirmation_root: manifest.observer_confirmation_root,
         rollback_readiness_root: manifest.rollback_readiness_root,
+        deployment_validity_root: manifest.deployment_validity_root,
         bootstrap_roster_root: manifest.bootstrap_roster_root,
         operational_evidence_root: manifest.operational_evidence_root,
         validator_set_root: manifest.validator_set_root,
@@ -1527,6 +1540,10 @@ fn verify_genesis_root_domains(errors: &mut Vec<String>, manifest: &GenesisManif
         (
             "rollback_readiness_root",
             manifest.rollback_readiness_root.as_str(),
+        ),
+        (
+            "deployment_validity_root",
+            manifest.deployment_validity_root.as_str(),
         ),
         (
             "bootstrap_roster_root",
@@ -1657,6 +1674,12 @@ pub fn verify_launch_package_jsons(
             deployment_report.rollback_readiness_root
         ));
     }
+    if genesis_report.deployment_validity_root != deployment_report.deployment_validity_root {
+        errors.push(format!(
+            "genesis deployment_validity_root does not match deployment validity root {}",
+            deployment_report.deployment_validity_root
+        ));
+    }
     if genesis_report.bootstrap_roster_root != deployment_report.bootstrap_roster_root {
         errors.push(format!(
             "genesis bootstrap_roster_root does not match deployment bootstrap roster root {}",
@@ -1743,6 +1766,7 @@ pub fn verify_launch_package_jsons(
         operator_approval_root: deployment_report.operator_approval_root,
         observer_confirmation_root: deployment_report.observer_confirmation_root,
         rollback_readiness_root: deployment_report.rollback_readiness_root,
+        deployment_validity_root: deployment_report.deployment_validity_root,
         bootstrap_roster_root: deployment_report.bootstrap_roster_root,
         operational_evidence_root: deployment_report.operational_evidence_root,
         public_status_manifest_root: public_status_manifest.root,
@@ -1920,6 +1944,7 @@ pub fn verify_deployment_attestation_json(
         operator_approval_root: deployment_operator_approval_root(&attestation),
         observer_confirmation_root: deployment_observer_confirmation_root(&attestation),
         rollback_readiness_root: deployment_rollback_readiness_root(&attestation),
+        deployment_validity_root: deployment_validity_root(&attestation),
         bootstrap_roster_root: deployment_bootstrap_roster_root(&attestation),
         operational_evidence_root: deployment_operational_evidence_root(&attestation),
         attestation_expires_at_unix_ms: attestation.expires_at_unix_ms,
@@ -3547,6 +3572,45 @@ fn deployment_rollback_readiness_root(attestation: &DeploymentAttestation) -> St
     }))
 }
 
+fn deployment_validity_root(attestation: &DeploymentAttestation) -> String {
+    let mut tls_pins = attestation
+        .public_endpoint
+        .tls_pins
+        .iter()
+        .map(|pin| {
+            (
+                pin.cert_sha256.as_str(),
+                pin.public_key_sha256.as_str(),
+                pin.not_after_unix_ms,
+            )
+        })
+        .collect::<Vec<_>>();
+    tls_pins.sort_unstable();
+    let tls_pins = tls_pins
+        .into_iter()
+        .map(|(cert_sha256, public_key_sha256, not_after_unix_ms)| {
+            json!({
+                "cert_sha256": cert_sha256,
+                "public_key_sha256": public_key_sha256,
+                "not_after_unix_ms": not_after_unix_ms,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    stable_root(&json!({
+        "validity_domain": "nebula-deployment-validity-window-v1",
+        "chain_id": attestation.chain_id,
+        "launch_bundle_root": attestation.launch_bundle.root,
+        "public_endpoint_url": attestation.public_endpoint.url,
+        "generated_at_unix_ms": attestation.generated_at_unix_ms,
+        "expires_at_unix_ms": attestation.expires_at_unix_ms,
+        "max_attestation_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
+        "max_attestation_ttl_ms": PUBLIC_ATTESTATION_MAX_TTL_MS,
+        "minimum_tls_pin_validity_ms": MIN_TLS_PIN_VALIDITY_MS,
+        "tls_pins": tls_pins,
+    }))
+}
+
 fn deployment_bootstrap_roster_root(attestation: &DeploymentAttestation) -> String {
     let mut nodes = attestation
         .bootstrap_nodes
@@ -3732,6 +3796,7 @@ fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
         "operator_approval_root": manifest.operator_approval_root,
         "observer_confirmation_root": manifest.observer_confirmation_root,
         "rollback_readiness_root": manifest.rollback_readiness_root,
+        "deployment_validity_root": manifest.deployment_validity_root,
         "bootstrap_roster_root": manifest.bootstrap_roster_root,
         "operational_evidence_root": manifest.operational_evidence_root,
         "validator_set_root": manifest.validator_set_root,
@@ -4011,6 +4076,7 @@ mod public_launch {
         assert_eq!(report.operator_approval_root.len(), 64);
         assert_eq!(report.observer_confirmation_root.len(), 64);
         assert_eq!(report.rollback_readiness_root.len(), 64);
+        assert_eq!(report.deployment_validity_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
     }
@@ -5695,6 +5761,7 @@ mod public_launch {
         assert_eq!(report.operator_approval_root.len(), 64);
         assert_eq!(report.observer_confirmation_root.len(), 64);
         assert_eq!(report.rollback_readiness_root.len(), 64);
+        assert_eq!(report.deployment_validity_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.validator_set_root.len(), 64);
@@ -5721,6 +5788,7 @@ mod public_launch {
         assert_eq!(report.operator_approval_root.len(), 64);
         assert_eq!(report.observer_confirmation_root.len(), 64);
         assert_eq!(report.rollback_readiness_root.len(), 64);
+        assert_eq!(report.deployment_validity_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.operator_roster_root.len(), 64);
@@ -5894,6 +5962,7 @@ mod public_launch {
         assert_eq!(report.operator_approval_root.len(), 64);
         assert_eq!(report.observer_confirmation_root.len(), 64);
         assert_eq!(report.rollback_readiness_root.len(), 64);
+        assert_eq!(report.deployment_validity_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.public_status_manifest_root.len(), 64);
@@ -6082,6 +6151,40 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error.starts_with("genesis rollback_readiness_root does not match")
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_rejects_mismatched_genesis_deployment_validity_root() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let mut genesis = serde_json::from_str::<Value>(
+            &build_genesis_manifest_json_pretty(&deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        genesis["deployment_validity_root"] = json!(hex_64("different-deployment-validity-root"));
+        genesis["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(genesis.clone()).unwrap()
+        ));
+
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &genesis.to_string(),
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("genesis deployment_validity_root does not match")
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
