@@ -39,6 +39,7 @@ pub struct RuntimeNodeOptions {
     pub data_dir: Option<String>,
     pub bootstrap_rpc_url: Option<String>,
     pub sync_rpc_url: Option<String>,
+    pub sync_rpc_urls: Vec<String>,
     pub sequencer_secret_key_hex: Option<String>,
     pub max_request_bytes: usize,
     pub max_requests_per_minute: u32,
@@ -50,6 +51,7 @@ impl Default for RuntimeNodeOptions {
             data_dir: None,
             bootstrap_rpc_url: None,
             sync_rpc_url: None,
+            sync_rpc_urls: Vec::new(),
             sequencer_secret_key_hex: None,
             max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
             max_requests_per_minute: DEFAULT_MAX_REQUESTS_PER_MINUTE,
@@ -344,6 +346,7 @@ struct RuntimeRpcState {
     runtime: Arc<Mutex<NebulaRuntime>>,
     storage: Option<RuntimeStorage>,
     rpc_limits: RuntimeRpcLimits,
+    sync_peers: RuntimeSyncPeerSet,
     rate_limits: Arc<Mutex<BTreeMap<String, RuntimeRateLimitBucket>>>,
 }
 
@@ -351,6 +354,12 @@ struct RuntimeRpcState {
 struct RuntimeRpcLimits {
     max_request_bytes: usize,
     max_requests_per_minute: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct RuntimeSyncPeerSet {
+    bootstrap_peer_urls: Vec<String>,
+    sync_peer_urls: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -425,6 +434,18 @@ impl RuntimeRpcState {
             "rpc_max_requests_per_minute".to_string(),
             json!(self.rpc_limits.max_requests_per_minute),
         );
+        fields.insert(
+            "bootstrap_peer_urls".to_string(),
+            json!(self.sync_peers.bootstrap_peer_urls),
+        );
+        fields.insert(
+            "sync_peer_urls".to_string(),
+            json!(self.sync_peers.sync_peer_urls),
+        );
+        fields.insert(
+            "sync_peer_count".to_string(),
+            json!(self.sync_peers.sync_peer_urls.len()),
+        );
         Ok(status)
     }
 }
@@ -440,6 +461,23 @@ impl RuntimeRpcLimits {
         Ok(Self {
             max_request_bytes: options.max_request_bytes,
             max_requests_per_minute: options.max_requests_per_minute,
+        })
+    }
+}
+
+impl RuntimeSyncPeerSet {
+    fn from_options(options: &RuntimeNodeOptions) -> Result<Self, String> {
+        Ok(Self {
+            bootstrap_peer_urls: collect_peer_urls(
+                options.bootstrap_rpc_url.as_deref(),
+                &[],
+                "--bootstrap-rpc",
+            )?,
+            sync_peer_urls: collect_peer_urls(
+                options.sync_rpc_url.as_deref(),
+                &options.sync_rpc_urls,
+                "--sync-rpc",
+            )?,
         })
     }
 }
@@ -1078,15 +1116,17 @@ pub fn serve_runtime_rpc_with_options(
     options: RuntimeNodeOptions,
 ) -> std::io::Result<()> {
     let rpc_limits = RuntimeRpcLimits::from_options(&options).map_err(std::io::Error::other)?;
+    let sync_peers = RuntimeSyncPeerSet::from_options(&options).map_err(std::io::Error::other)?;
     let storage = options.data_dir.as_ref().map(RuntimeStorage::from_data_dir);
-    let bootstrap_url = options
-        .bootstrap_rpc_url
-        .as_deref()
-        .or(options.sync_rpc_url.as_deref());
+    let startup_bootstrap_peers = if sync_peers.bootstrap_peer_urls.is_empty() {
+        sync_peers.sync_peer_urls.clone()
+    } else {
+        sync_peers.bootstrap_peer_urls.clone()
+    };
     let runtime = load_runtime_for_node(
         config,
         storage.as_ref(),
-        bootstrap_url,
+        &startup_bootstrap_peers,
         options.sequencer_secret_key_hex.clone(),
     )
     .map_err(std::io::Error::other)?;
@@ -1101,6 +1141,7 @@ pub fn serve_runtime_rpc_with_options(
         runtime: Arc::new(Mutex::new(runtime)),
         storage,
         rpc_limits,
+        sync_peers,
         rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
     };
     let produce_blocks = state
@@ -1118,11 +1159,12 @@ pub fn serve_runtime_rpc_with_options(
             let _ = producer_state.persist();
         });
     }
-    if let Some(sync_rpc_url) = options.sync_rpc_url {
+    if !state.sync_peers.sync_peer_urls.is_empty() {
         let sync_state = state.clone();
+        let sync_rpc_urls = state.sync_peers.sync_peer_urls.clone();
         thread::spawn(move || loop {
             thread::sleep(Duration::from_millis(DEFAULT_PEER_SYNC_MS));
-            let _ = sync_runtime_from_peer(&sync_state, &sync_rpc_url);
+            let _ = sync_runtime_from_peers(&sync_state, &sync_rpc_urls);
         });
     }
 
@@ -1144,36 +1186,22 @@ pub fn serve_runtime_rpc_with_options(
 fn load_runtime_for_node(
     config: RuntimeConfig,
     storage: Option<&RuntimeStorage>,
-    bootstrap_rpc_url: Option<&str>,
+    bootstrap_rpc_urls: &[String],
     sequencer_secret_key_hex: Option<String>,
 ) -> Result<NebulaRuntime, String> {
     let local_snapshot = match storage {
         Some(storage) => storage.load_snapshot()?,
         None => None,
     };
-    let bootstrap_snapshot = match bootstrap_rpc_url {
-        Some(url) => Some(fetch_runtime_snapshot(url)?),
-        None => None,
-    };
-
-    let selected = match (local_snapshot, bootstrap_snapshot) {
-        (Some(local), Some(peer)) => {
-            if peer.latest_height() <= local.latest_height() {
-                return Err(format!(
-                    "bootstrap snapshot height {} must be ahead of local height {}",
-                    peer.latest_height(),
-                    local.latest_height()
-                ));
-            }
-            if !snapshot_extends(&local, &peer) {
-                return Err("bootstrap snapshot does not extend local chain".to_string());
-            }
-            Some(peer)
-        }
-        (Some(local), None) => Some(local),
-        (None, Some(peer)) => Some(peer),
-        (None, None) => None,
-    };
+    let (bootstrap_snapshots, fetch_errors) = fetch_runtime_snapshots(bootstrap_rpc_urls);
+    if local_snapshot.is_none() && bootstrap_snapshots.is_empty() && !bootstrap_rpc_urls.is_empty()
+    {
+        return Err(format!(
+            "no bootstrap peer returned a usable snapshot: {}",
+            fetch_errors.join("; ")
+        ));
+    }
+    let selected = select_bootstrap_snapshot(&config, local_snapshot, bootstrap_snapshots)?;
 
     match selected {
         Some(snapshot) => NebulaRuntime::from_snapshot_with_sequencer_secret(
@@ -1206,20 +1234,133 @@ fn snapshot_extends(local: &RuntimeSnapshot, peer: &RuntimeSnapshot) -> bool {
         .all(|(local_block, peer_block)| local_block.block_hash == peer_block.block_hash)
 }
 
-fn sync_runtime_from_peer(state: &RuntimeRpcState, sync_rpc_url: &str) -> Result<bool, String> {
-    let peer = fetch_runtime_snapshot(sync_rpc_url)?;
+fn select_bootstrap_snapshot(
+    config: &RuntimeConfig,
+    local_snapshot: Option<RuntimeSnapshot>,
+    peer_snapshots: Vec<(String, RuntimeSnapshot)>,
+) -> Result<Option<RuntimeSnapshot>, String> {
+    match local_snapshot {
+        Some(local) => {
+            let selected = select_best_extending_snapshot(&local, peer_snapshots)?;
+            Ok(selected.map(|(_, snapshot)| snapshot).or(Some(local)))
+        }
+        None => {
+            if peer_snapshots.is_empty() {
+                return Ok(None);
+            }
+            let mut selected: Option<(String, RuntimeSnapshot)> = None;
+            let mut rejected = Vec::new();
+            for (url, snapshot) in peer_snapshots {
+                if let Err(error) = snapshot_matches_config(config, &snapshot) {
+                    rejected.push(format!("{url}: {error}"));
+                    continue;
+                }
+                if selected
+                    .as_ref()
+                    .map(|(_, best)| snapshot.latest_height() > best.latest_height())
+                    .unwrap_or(true)
+                {
+                    selected = Some((url, snapshot));
+                }
+            }
+            selected.map(|(_, snapshot)| Some(snapshot)).ok_or_else(|| {
+                if rejected.is_empty() {
+                    "no bootstrap peer snapshot was available".to_string()
+                } else {
+                    format!(
+                        "no bootstrap peer snapshot matched local config: {}",
+                        rejected.join("; ")
+                    )
+                }
+            })
+        }
+    }
+}
+
+fn snapshot_matches_config(
+    config: &RuntimeConfig,
+    snapshot: &RuntimeSnapshot,
+) -> Result<(), String> {
+    if snapshot.config.chain_id != config.chain_id {
+        return Err(format!(
+            "chain_id {} does not match local chain_id {}",
+            snapshot.config.chain_id, config.chain_id
+        ));
+    }
+    if snapshot.config.runtime_version != config.runtime_version {
+        return Err(format!(
+            "runtime_version {} does not match local runtime_version {}",
+            snapshot.config.runtime_version, config.runtime_version
+        ));
+    }
+    if !snapshot
+        .config
+        .sequencer_public_key_hex
+        .eq_ignore_ascii_case(&config.sequencer_public_key_hex)
+    {
+        return Err(format!(
+            "sequencer_public_key_hex {} does not match local sequencer_public_key_hex {}",
+            snapshot.config.sequencer_public_key_hex, config.sequencer_public_key_hex
+        ));
+    }
+    Ok(())
+}
+
+fn select_best_extending_snapshot(
+    local: &RuntimeSnapshot,
+    peer_snapshots: Vec<(String, RuntimeSnapshot)>,
+) -> Result<Option<(String, RuntimeSnapshot)>, String> {
+    let mut selected: Option<(String, RuntimeSnapshot)> = None;
+    let mut rejected = Vec::new();
+    for (url, snapshot) in peer_snapshots {
+        if snapshot.latest_height() <= local.latest_height() {
+            continue;
+        }
+        if !snapshot_extends(local, &snapshot) {
+            rejected.push(format!(
+                "{url}: height {} does not extend local height {}",
+                snapshot.latest_height(),
+                local.latest_height()
+            ));
+            continue;
+        }
+        if selected
+            .as_ref()
+            .map(|(_, best)| snapshot.latest_height() > best.latest_height())
+            .unwrap_or(true)
+        {
+            selected = Some((url, snapshot));
+        }
+    }
+    if selected.is_none() && !rejected.is_empty() {
+        return Err(format!(
+            "no sync peer returned an extending ahead snapshot: {}",
+            rejected.join("; ")
+        ));
+    }
+    Ok(selected)
+}
+
+fn sync_runtime_from_peers(
+    state: &RuntimeRpcState,
+    sync_rpc_urls: &[String],
+) -> Result<bool, String> {
+    let (peer_snapshots, fetch_errors) = fetch_runtime_snapshots(sync_rpc_urls);
+    if peer_snapshots.is_empty() && !sync_rpc_urls.is_empty() {
+        return Err(format!(
+            "no sync peer returned a usable snapshot: {}",
+            fetch_errors.join("; ")
+        ));
+    }
     let imported = {
         let mut runtime = state
             .runtime
             .lock()
             .map_err(|_| "runtime mutex poisoned".to_string())?;
         let local = runtime.export_snapshot();
-        if peer.latest_height() <= local.latest_height() {
+        let Some((_, peer)) = select_best_extending_snapshot(&local, peer_snapshots)? else {
             return Ok(false);
-        }
-        if !snapshot_extends(&local, &peer) {
-            return Err("sync peer snapshot does not extend local chain".to_string());
-        }
+        };
         runtime.import_snapshot(peer)?;
         true
     };
@@ -1227,6 +1368,40 @@ fn sync_runtime_from_peer(state: &RuntimeRpcState, sync_rpc_url: &str) -> Result
         state.persist()?;
     }
     Ok(imported)
+}
+
+fn collect_peer_urls(
+    primary: Option<&str>,
+    additional: &[String],
+    flag_name: &str,
+) -> Result<Vec<String>, String> {
+    let mut urls = Vec::new();
+    for url in primary
+        .into_iter()
+        .chain(additional.iter().map(String::as_str))
+    {
+        let normalized = url.trim();
+        if normalized.is_empty() {
+            return Err(format!("{flag_name} must not be empty"));
+        }
+        parse_http_url(normalized).map_err(|error| format!("{flag_name} {normalized}: {error}"))?;
+        if !urls.iter().any(|existing| existing == normalized) {
+            urls.push(normalized.to_string());
+        }
+    }
+    Ok(urls)
+}
+
+fn fetch_runtime_snapshots(urls: &[String]) -> (Vec<(String, RuntimeSnapshot)>, Vec<String>) {
+    let mut snapshots = Vec::new();
+    let mut errors = Vec::new();
+    for url in urls {
+        match fetch_runtime_snapshot(url) {
+            Ok(snapshot) => snapshots.push((url.clone(), snapshot)),
+            Err(error) => errors.push(format!("{url}: {error}")),
+        }
+    }
+    (snapshots, errors)
 }
 
 fn fetch_runtime_snapshot(url: &str) -> Result<RuntimeSnapshot, String> {
@@ -1338,6 +1513,9 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
                 "ok": true,
                 "service": "nebula-testnet-rpc",
                 "rpc_limits": state.rpc_limits,
+                "bootstrap_peer_urls": state.sync_peers.bootstrap_peer_urls,
+                "sync_peer_urls": state.sync_peers.sync_peer_urls,
+                "sync_peer_count": state.sync_peers.sync_peer_urls.len(),
             }),
         )?,
         ("GET", "/status") => match state.status_json() {
@@ -2090,6 +2268,7 @@ mod tests {
                 max_request_bytes,
                 max_requests_per_minute,
             },
+            sync_peers: RuntimeSyncPeerSet::default(),
             rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -2133,13 +2312,62 @@ mod tests {
     }
 
     #[test]
+    fn runtime_node_options_collect_distinct_public_sync_peers() {
+        let options = RuntimeNodeOptions {
+            bootstrap_rpc_url: Some(" http://127.0.0.1:9944/snapshot ".to_string()),
+            sync_rpc_url: Some("http://127.0.0.1:9945/snapshot".to_string()),
+            sync_rpc_urls: vec![
+                "http://127.0.0.1:9945/snapshot".to_string(),
+                "http://127.0.0.1:9946/snapshot".to_string(),
+            ],
+            ..RuntimeNodeOptions::default()
+        };
+        let peers = RuntimeSyncPeerSet::from_options(&options).unwrap();
+
+        assert_eq!(
+            peers.bootstrap_peer_urls,
+            vec!["http://127.0.0.1:9944/snapshot"]
+        );
+        assert_eq!(
+            peers.sync_peer_urls,
+            vec![
+                "http://127.0.0.1:9945/snapshot",
+                "http://127.0.0.1:9946/snapshot"
+            ]
+        );
+
+        let options = RuntimeNodeOptions {
+            sync_rpc_url: Some("https://127.0.0.1:9945/snapshot".to_string()),
+            ..RuntimeNodeOptions::default()
+        };
+        assert!(RuntimeSyncPeerSet::from_options(&options)
+            .unwrap_err()
+            .contains("--sync-rpc"));
+    }
+
+    #[test]
     fn runtime_rpc_status_reports_public_rpc_limits() {
         let runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
-        let state = test_rpc_state_with_limits(runtime, 2048, 7);
+        let mut state = test_rpc_state_with_limits(runtime, 2048, 7);
+        state.sync_peers = RuntimeSyncPeerSet {
+            bootstrap_peer_urls: vec!["http://127.0.0.1:9944/snapshot".to_string()],
+            sync_peer_urls: vec![
+                "http://127.0.0.1:9945/snapshot".to_string(),
+                "http://127.0.0.1:9946/snapshot".to_string(),
+            ],
+        };
         let status = state.status_json().unwrap();
 
         assert_eq!(status["rpc_max_request_bytes"], 2048);
         assert_eq!(status["rpc_max_requests_per_minute"], 7);
+        assert_eq!(status["sync_peer_count"], 2);
+        assert_eq!(
+            status["sync_peer_urls"],
+            json!([
+                "http://127.0.0.1:9945/snapshot",
+                "http://127.0.0.1:9946/snapshot"
+            ])
+        );
         assert_eq!(
             dispatch_json_rpc_method(&state, "nebula_status", json!({})).unwrap()
                 ["rpc_max_requests_per_minute"],
@@ -2484,6 +2712,49 @@ mod tests {
         let mut peer = local.clone();
         peer.blocks[0].block_hash = "a".repeat(64);
         assert!(!snapshot_extends(&local, &peer));
+    }
+
+    #[test]
+    fn sync_peer_selection_uses_highest_extending_snapshot() {
+        let mut sequencer = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let local = sequencer.export_snapshot();
+
+        sequencer.faucet("alice").unwrap();
+        sequencer.produce_block();
+        let height_one = sequencer.export_snapshot();
+        sequencer.faucet("bob").unwrap();
+        sequencer.produce_block();
+        let height_two = sequencer.export_snapshot();
+
+        let selected = select_best_extending_snapshot(
+            &local,
+            vec![
+                ("http://127.0.0.1:9945/snapshot".to_string(), height_one),
+                ("http://127.0.0.1:9946/snapshot".to_string(), height_two),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(selected.0, "http://127.0.0.1:9946/snapshot");
+        assert_eq!(selected.1.latest_height(), 2);
+    }
+
+    #[test]
+    fn sync_peer_selection_rejects_only_forked_ahead_snapshots() {
+        let mut sequencer = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let local = sequencer.export_snapshot();
+        sequencer.faucet("alice").unwrap();
+        sequencer.produce_block();
+        let mut forked = sequencer.export_snapshot();
+        forked.blocks[0].block_hash = "a".repeat(64);
+
+        assert!(select_best_extending_snapshot(
+            &local,
+            vec![("http://127.0.0.1:9945/snapshot".to_string(), forked)]
+        )
+        .unwrap_err()
+        .contains("does not extend local height"));
     }
 
     #[test]

@@ -53,12 +53,14 @@ The public launch sequence for this crate is:
    bundle that external validators compare before joining.
 8. Rehearse the Base-style RPC devnet with one persistent sequencer and
    persisted followers. Followers must import a verified startup snapshot with
-   `--bootstrap-rpc`, continuously sync newer verified snapshots with
-   `--sync-rpc`, and expose matching `/health`, `/status`, `/snapshot`, and
-   JSON-RPC `/rpc` views. Each snapshot block must commit to the expected
-   sequencer public key and verify its Ed25519 signature before accepting the
-   follower. Public RPC nodes enforce request-size and per-client rate limits;
-   tune them with `--max-request-bytes` and `--max-requests-per-minute`.
+   `--bootstrap-rpc`, continuously sync newer verified snapshots from a
+   repeatable `--sync-rpc` peer set, and expose matching `/health`, `/status`,
+   `/snapshot`, and JSON-RPC `/rpc` views. Each snapshot block must commit to
+   the expected sequencer public key and verify its Ed25519 signature before
+   accepting the follower. `/health`, `/status`, and `nebula_status` must expose
+   configured sync peers so operators can confirm replica failover coverage.
+   Public RPC nodes enforce request-size and per-client rate limits; tune them
+   with `--max-request-bytes` and `--max-requests-per-minute`.
 9. Build and verify validator activation receipts, validator join receipts,
    operator join confirmations, public observer confirmations, and the public
    testnet launch-candidate certificate against the same deployment,
@@ -77,15 +79,18 @@ persisted followers:
 
 ```bash
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a --max-request-bytes 1048576 --max-requests-per-minute 600
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --sync-rpc http://127.0.0.1:9944/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9946/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
 ```
 
 The sequencer produces sub-second blocks. Followers do not produce blocks; they
 persist `nebula-runtime-snapshot.json` under `--data-dir`. `--bootstrap-rpc`
-imports one verified snapshot at startup. `--sync-rpc <http://peer/snapshot>`
-keeps fetching, verifying, importing, and persisting newer snapshots from the
-peer.
+imports one verified snapshot at startup. Repeat
+`--sync-rpc <http://peer/snapshot>` for the sequencer and replica peers; the
+follower keeps fetching, verifying, importing, and persisting newer snapshots
+from the highest ahead peer whose snapshot extends local state. `/health`,
+`/status`, and `nebula_status` expose the configured `sync_peer_urls` list so
+operators can verify that replicas share the intended failover peer set.
 
 Public RPC nodes enforce a maximum request body size and per-client request
 rate limit before dispatching JSON-RPC work. Use `--max-request-bytes <bytes>`
@@ -112,7 +117,7 @@ cargo fmt --manifest-path crates/nebula-testnet/Cargo.toml -- --check
 cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
 cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a --max-request-bytes 1048576 --max-requests-per-minute 600
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --sync-rpc http://127.0.0.1:9944/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > /tmp/nebula-public-status.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-status /tmp/nebula-public-status.json --json
