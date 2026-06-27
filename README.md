@@ -238,7 +238,8 @@ evidence is absent or stale.
     public observers accept the endpoint. Operators must treat
     stale blocks, missing
     persisted snapshots, mismatched backup roots, missing bridge policy roots,
-    nXMR custody deficits, full mempools, followers with no successful sync peer
+    nXMR custody deficits, full mempools, `mempool-admission-rejections-observed`,
+    followers with no successful sync peer
     evidence or missing sync quorum evidence, unexpected admission-rejection spikes, missing
     private admin control on launch-bound sequencers, public RPC admin methods,
     default dev sequencer keys, or unexpected sync/RPC-limit values as
@@ -291,7 +292,9 @@ evidence is absent or stale.
     deployment, public-surface, validator, genesis, and fee-policy roots.
 23. Run the economics trial with `NBLA` gas, `nXMR` gas, nXMR-funded NBLA
     buybacks at `0.001 XMR` per `NBLA`, and validator-reward accounting for the
-    bought NBLA while live-value policy stays disabled.
+    bought NBLA while live-value policy stays disabled. Final public launch
+    readiness rejects runtime evidence that has not exercised both gas paths or
+    whose nXMR-funded buyback accounting misses the target conversion rate.
 24. Publish the remaining blocking evidence list. If any deployment, operator,
     validator, observer, sequencer/follower, snapshot, ops/backup, bridge
     custody, key-rotation/accountability, certificate, or economics evidence is

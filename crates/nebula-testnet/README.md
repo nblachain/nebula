@@ -158,7 +158,8 @@ The public launch sequence for this crate is:
    `nebula_opsStatus`, `nebula_backupManifest`, and `/metrics` files before
    observers accept the endpoint.
    Stale blocks, missing persisted snapshots, mismatched backup roots, missing
-   fee-policy or bridge-policy roots, full mempools, missing sync quorum evidence, missing
+   fee-policy or bridge-policy roots, full mempools, `mempool-admission-rejections-observed`,
+   missing sync quorum evidence, missing
    private admin control on launch-bound sequencers, public RPC admin methods,
    default dev sequencer keys, unexpected admission-rejection spikes, or unexpected sync/RPC limit values keep the
    public endpoint launch-blocked. Fast-moving sync attempt/import counters
@@ -183,7 +184,9 @@ The public launch sequence for this crate is:
     deposit, nXMR custody and withdrawal finalization, follower sync, verified
     runtime-surface evidence from the live follower, and launch-bound
     accountability evidence fail-closed behavior. Run the `NBLA`/`nXMR`
-    economics trial with live value disabled, and keep reporting any remaining blocking evidence
+    economics trial with live value disabled; final launch readiness rejects
+    runtime evidence that has not exercised both gas paths or whose nXMR-funded
+    buyback accounting misses the target conversion rate. Keep reporting any remaining blocking evidence
     until every deployment, operator, validator, observer, RPC, snapshot, bridge
     custody, ops/backup, key-rotation/accountability, certificate, and economics
     gap is closed.

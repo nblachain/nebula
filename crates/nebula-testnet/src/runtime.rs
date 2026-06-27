@@ -1795,6 +1795,9 @@ impl RuntimeRpcState {
         if status.mempool_size >= status.max_mempool_transactions {
             blocking_gaps.push("mempool-at-capacity".to_string());
         }
+        if status.mempool_admission_rejection_count > 0 {
+            blocking_gaps.push("mempool-admission-rejections-observed".to_string());
+        }
         if !status.sequencer_accountability_clean {
             blocking_gaps.push("sequencer-accountability-evidence-open".to_string());
         }
@@ -8560,6 +8563,43 @@ mod tests {
         assert!(ops
             .blocking_gaps
             .contains(&"mempool-at-capacity".to_string()));
+    }
+
+    #[test]
+    fn runtime_ops_status_fails_closed_after_mempool_admission_rejection() {
+        let dir = std::env::temp_dir().join(format!("nebula-runtime-mempool-reject-{}", unix_ms()));
+        let storage = RuntimeStorage::from_data_dir(&dir);
+        let mut runtime =
+            NebulaRuntime::new(runtime_config_with_launch_binding_and_disabled_nbla_faucet())
+                .unwrap();
+        rotate_runtime_off_default_dev_key(&mut runtime);
+        runtime.produce_block();
+
+        let error = runtime
+            .submit_transaction(test_nbla_transaction(0, "rejected-before-admission"))
+            .unwrap_err();
+
+        assert!(error.contains("sender"));
+        assert_eq!(runtime.status().mempool_admission_rejection_count, 1);
+        storage.save_snapshot(&runtime.export_snapshot()).unwrap();
+        let mut state = test_rpc_state_with_limits(
+            runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+        state.storage = Some(storage);
+        enable_private_admin_control(&mut state);
+
+        let ops = state.ops_status().unwrap();
+        assert!(!ops.public_ops_ready);
+        assert_eq!(ops.mempool_size, 0);
+        assert_eq!(ops.mempool_admission_rejection_count, 1);
+        assert_eq!(
+            ops.blocking_gaps,
+            vec!["mempool-admission-rejections-observed".to_string()]
+        );
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

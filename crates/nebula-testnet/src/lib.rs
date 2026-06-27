@@ -5876,6 +5876,10 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         genesis_manifest_json,
     )?;
     let runtime_surface = verify_runtime_surface_evidence_json(runtime_surface_evidence_json)?;
+    let runtime_surface_evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(
+        runtime_surface_evidence_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
     let deployment = verify_deployment_attestation_json(deployment_attestation_json)?;
     let deployment_attestation = serde_json::from_str::<DeploymentAttestation>(
         deployment_attestation_json.trim_start_matches('\u{feff}'),
@@ -5931,6 +5935,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
             "region_count must be at least {MIN_PUBLIC_TESTNET_REGIONS}"
         ));
     }
+    require_public_launch_economics_trial(&mut errors, &runtime_surface_evidence.status);
 
     if !errors.is_empty() {
         return Err(AttestationError::Invalid(errors));
@@ -5969,6 +5974,106 @@ pub fn verify_public_testnet_launch_readiness_jsons(
     report.public_launch_readiness_root = public_testnet_launch_readiness_root(&report);
 
     Ok(report)
+}
+
+fn require_public_launch_economics_trial(errors: &mut Vec<String>, status: &Value) {
+    let total_nxmr_fees_units =
+        json_u128_field(status, "runtime_surface.status.total_nxmr_fees_units");
+    let buyback_pool_nebulai =
+        json_u128_field(status, "runtime_surface.status.buyback_pool_nebulai");
+    let validator_reward_nebulai =
+        json_u128_field(status, "runtime_surface.status.validator_reward_nebulai");
+
+    let total_nxmr_fees_units = match total_nxmr_fees_units {
+        Ok(value) => value,
+        Err(AttestationError::Invalid(mut field_errors)) => {
+            errors.append(&mut field_errors);
+            return;
+        }
+        Err(AttestationError::MalformedJson(error)) => {
+            errors.push(error);
+            return;
+        }
+    };
+    let buyback_pool_nebulai = match buyback_pool_nebulai {
+        Ok(value) => value,
+        Err(AttestationError::Invalid(mut field_errors)) => {
+            errors.append(&mut field_errors);
+            return;
+        }
+        Err(AttestationError::MalformedJson(error)) => {
+            errors.push(error);
+            return;
+        }
+    };
+    let validator_reward_nebulai = match validator_reward_nebulai {
+        Ok(value) => value,
+        Err(AttestationError::Invalid(mut field_errors)) => {
+            errors.append(&mut field_errors);
+            return;
+        }
+        Err(AttestationError::MalformedJson(error)) => {
+            errors.push(error);
+            return;
+        }
+    };
+
+    if total_nxmr_fees_units == 0 {
+        errors.push(
+            "runtime_surface.status.total_nxmr_fees_units must be greater than zero to prove nXMR gas was exercised"
+                .to_string(),
+        );
+    }
+
+    let converted_nbla_nebulai = match total_nxmr_fees_units
+        .checked_mul(TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT)
+    {
+        Some(value) => value,
+        None => {
+            errors.push(
+                "runtime_surface.status.total_nxmr_fees_units conversion overflowed".to_string(),
+            );
+            return;
+        }
+    };
+    let expected_buyback_nebulai =
+        match split_basis_points(converted_nbla_nebulai, NXMR_BUYBACK_BPS) {
+            Ok(value) => value,
+            Err(_) => {
+                errors.push(
+                    "runtime_surface.status.buyback_pool_nebulai accounting overflowed".to_string(),
+                );
+                return;
+            }
+        };
+    let expected_nxmr_validator_reward_nebulai =
+        match split_basis_points(converted_nbla_nebulai, NXMR_VALIDATOR_REWARD_BPS) {
+            Ok(value) => value,
+            Err(_) => {
+                errors.push(
+                    "runtime_surface.status.validator_reward_nebulai accounting overflowed"
+                        .to_string(),
+                );
+                return;
+            }
+        };
+
+    if buyback_pool_nebulai != expected_buyback_nebulai {
+        errors.push(format!(
+            "runtime_surface.status.buyback_pool_nebulai expected {expected_buyback_nebulai} from {total_nxmr_fees_units} nXMR fee units at 0.001 XMR/NBLA but got {buyback_pool_nebulai}"
+        ));
+    }
+    if validator_reward_nebulai < expected_nxmr_validator_reward_nebulai {
+        errors.push(format!(
+            "runtime_surface.status.validator_reward_nebulai expected at least {expected_nxmr_validator_reward_nebulai} from nXMR gas rewards but got {validator_reward_nebulai}"
+        ));
+    }
+    if validator_reward_nebulai <= expected_nxmr_validator_reward_nebulai {
+        errors.push(
+            "runtime_surface.status.validator_reward_nebulai must exceed nXMR-derived rewards to prove NBLA gas was exercised"
+                .to_string(),
+        );
+    }
 }
 
 pub fn verify_deployment_attestation_json(
@@ -11254,6 +11359,58 @@ mod public_launch {
         Ok(output)
     }
 
+    fn runtime_surface_with_economics_counters(
+        runtime_surface_json: &str,
+        total_nxmr_fees_units: u128,
+        buyback_pool_nebulai: u128,
+        validator_reward_nebulai: u128,
+    ) -> Result<String, AttestationError> {
+        let mut evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(runtime_surface_json)
+            .expect("runtime surface evidence parses");
+        evidence.status["total_nxmr_fees_units"] = json!(total_nxmr_fees_units);
+        evidence.status["buyback_pool_nebulai"] = json!(buyback_pool_nebulai);
+        evidence.status["validator_reward_nebulai"] = json!(validator_reward_nebulai);
+        match evidence.rpc_status.get_mut("result") {
+            Some(result) => *result = evidence.status.clone(),
+            None => evidence.rpc_status = evidence.status.clone(),
+        }
+        evidence.metrics_text = metrics_text_with_value(
+            &evidence.metrics_text,
+            "nebula_total_nxmr_fees_units",
+            total_nxmr_fees_units,
+        );
+        evidence.metrics_text = metrics_text_with_value(
+            &evidence.metrics_text,
+            "nebula_buyback_pool_nebulai",
+            buyback_pool_nebulai,
+        );
+        evidence.metrics_text = metrics_text_with_value(
+            &evidence.metrics_text,
+            "nebula_validator_reward_nebulai",
+            validator_reward_nebulai,
+        );
+        evidence.root = runtime_surface_evidence_root(&evidence);
+        let output = serde_json::to_string_pretty(&evidence)
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+        verify_runtime_surface_evidence_json(&output)?;
+        Ok(output)
+    }
+
+    fn metrics_text_with_value(metrics_text: &str, metric_name: &str, value: u128) -> String {
+        let prefix = format!("{metric_name} ");
+        metrics_text
+            .lines()
+            .map(|line| {
+                if line.starts_with(&prefix) {
+                    format!("{prefix}{value}")
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[test]
     fn public_launch_blocks_without_deployment_attestation() {
         let report = readiness_report();
@@ -14713,6 +14870,93 @@ mod public_launch {
             .unwrap()
             .public_testnet_launch_certificate_root
         );
+
+        let no_economics_runtime_surface =
+            runtime_surface_with_economics_counters(&external_runtime_surface, 0, 0, 0).unwrap();
+        let no_economics_certificate = build_public_testnet_launch_certificate_json_pretty(
+            &observer_confirmation,
+            &no_economics_runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let no_economics_ready_error = verify_public_testnet_launch_readiness_jsons(
+            &no_economics_certificate,
+            &observer_confirmation,
+            &no_economics_runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match no_economics_ready_error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| error == "runtime_surface.status.total_nxmr_fees_units must be greater than zero to prove nXMR gas was exercised"));
+                assert!(errors.iter().any(|error| error == "runtime_surface.status.validator_reward_nebulai must exceed nXMR-derived rewards to prove NBLA gas was exercised"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
+        let mispriced_nxmr_runtime_surface =
+            runtime_surface_with_economics_counters(&external_runtime_surface, 1_000, 999, 1_010)
+                .unwrap();
+        let mispriced_nxmr_certificate = build_public_testnet_launch_certificate_json_pretty(
+            &observer_confirmation,
+            &mispriced_nxmr_runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let mispriced_nxmr_ready_error = verify_public_testnet_launch_readiness_jsons(
+            &mispriced_nxmr_certificate,
+            &observer_confirmation,
+            &mispriced_nxmr_runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match mispriced_nxmr_ready_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error
+                    == "runtime_surface.status.buyback_pool_nebulai expected 1000 from 1000 nXMR fee units at 0.001 XMR/NBLA but got 999"
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
 
         let wrong_endpoint = "https://other.testnet.nebula.example/status";
         let wrong_endpoint_runtime_surface =
