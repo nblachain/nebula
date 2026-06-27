@@ -170,6 +170,14 @@ fn health_endpoint_exposes_chain_root_ops_and_backup_evidence() {
         status["sequencer_public_key_hex"]
     );
     assert_eq!(health["bridge_policy_root"], status["bridge_policy_root"]);
+    assert_eq!(
+        health["bridge_policy"]["deposit_observer_identity_quorum_required"],
+        true
+    );
+    assert_eq!(
+        health["bridge_policy"]["withdrawal_operator_identity_quorum_required"],
+        true
+    );
     assert_eq!(health["sync_peer_quorum"], status["sync_peer_quorum"]);
     assert_eq!(health["sync_quorum_met"], status["sync_quorum_met"]);
     assert_eq!(
@@ -458,6 +466,7 @@ fn bridge_deposit(seed: u8, amount_nxmr_units: u128) -> Value {
         "amount_nxmr_units": amount_nxmr_units,
         "confirmations": MIN_BRIDGE_CONFIRMATIONS,
         "observer_id": "observer-public-rpc",
+        "observer_ids": ["observer-public-rpc", "observer-backup-rpc"],
         "proof_root": hex_64("p45"),
         "custody_proof_root": hex_64("c45"),
         "relayer_set_root": hex_64("r45"),
