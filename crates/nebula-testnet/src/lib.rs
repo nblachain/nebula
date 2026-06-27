@@ -677,6 +677,7 @@ pub fn readiness_report() -> NebulaReadiness {
             })),
             "preflight_receipt": stable_root(&json!({
                 "receipt_id": "preflight-receipt",
+                "completed_at_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
                 "all_phases_passed": true,
                 "all_steps_passed": true,
                 "phase_names_required": true,
@@ -689,6 +690,7 @@ pub fn readiness_report() -> NebulaReadiness {
             })),
             "runbook_receipt": stable_root(&json!({
                 "receipt_id": "runbook-receipt",
+                "completed_at_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
                 "all_phases_passed": true,
                 "all_steps_passed": true,
                 "phase_names_required": true,
@@ -1960,6 +1962,9 @@ fn verify_receipt(errors: &mut Vec<String>, label: &str, receipt: &Receipt, now:
             "{label}.completed_at_unix_ms is more than five minutes in the future"
         ));
     }
+    if receipt.completed_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push(format!("{label}.completed_at_unix_ms is stale"));
+    }
     if receipt.phases.is_empty() {
         errors.push(format!("{label}.phases must not be empty"));
     }
@@ -3033,6 +3038,27 @@ mod public_launch {
     }
 
     #[test]
+    fn preflight_receipt_rejects_stale_completion_time() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_preflight_receipt_json_pretty()).unwrap();
+        value["completed_at_unix_ms"] = json!(0);
+        value["root"] = json!(receipt_root(
+            &serde_json::from_value::<Receipt>(value.clone()).unwrap()
+        ));
+
+        let error = verify_preflight_receipt_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "preflight-receipt.completed_at_unix_ms is stale"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
     fn runbook_receipt_rejects_unexpected_fields() {
         let mut value =
             serde_json::from_str::<Value>(&sample_runbook_receipt_json_pretty()).unwrap();
@@ -3066,6 +3092,27 @@ mod public_launch {
             error,
             AttestationError::Invalid(vec!["expires_at_unix_ms is stale".to_string()])
         );
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_stale_preflight_receipt() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["preflight_receipt"]["completed_at_unix_ms"] = json!(0);
+        value["preflight_receipt"]["root"] = json!(receipt_root(
+            &serde_json::from_value::<Receipt>(value["preflight_receipt"].clone()).unwrap()
+        ));
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "preflight_receipt.completed_at_unix_ms is stale"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
     }
 
     #[test]

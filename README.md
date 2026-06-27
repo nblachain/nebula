@@ -81,8 +81,8 @@ The public launch suite covers:
 - unique bootstrap node, operator, observer, endpoint, witness-key,
   bootstrap-region, operator-region, and observer-region validation
 - unique TLS certificate and public-key pin validation
-- deployment freshness windows for generated attestations, expiry, TLS pins,
-  and rollback drills
+- deployment freshness windows for generated attestations, preflight/runbook
+  receipts, expiry, TLS pins, and rollback drills
 - standalone preflight/runbook receipt exact-shape and unique evidence
   validation
 - policy claim and public probe body exact-shape validation
@@ -167,8 +167,8 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - observer quorums that do not cover at least two regions
 - duplicate TLS certificate and public-key pins
 - deployment attestations older than `24` hours, expiry windows longer than
-  `7` days, TLS pins with less than `7` days remaining, and rollback drills
-  older than `7` days
+  `7` days, preflight/runbook receipts older than `24` hours, TLS pins with
+  less than `7` days remaining, and rollback drills older than `7` days
 
 Until an operator provides fresh deployment evidence that satisfies those rules,
 `public_launch_ready` must remain `false`.
@@ -186,7 +186,7 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 Operators can also verify preflight and runbook receipts before wrapping them in
 deployment evidence. Receipt phase names must be unique, step names must be
 unique within each phase, and step evidence roots must be unique across the
-receipt:
+receipt. Receipts older than `24` hours are rejected:
 
 ```bash
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-preflight-receipt > /tmp/nebula-preflight.json
