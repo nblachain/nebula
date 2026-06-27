@@ -611,6 +611,8 @@ pub fn readiness_report() -> NebulaReadiness {
                 "signed_admission_root_binds_validator_payload": true,
                 "operator_contact_required": true,
                 "operator_contact_address_required": true,
+                "hex_consensus_key_required": true,
+                "hex_network_key_required": true,
                 "unique_consensus_keys_required": true,
                 "unique_reward_accounts_required": true,
                 "reward_account_operator_binding_required": true,
@@ -645,8 +647,10 @@ pub fn readiness_report() -> NebulaReadiness {
                 "bootstrap_operator_region_binding_required": true,
                 "unique_operator_ids_required": true,
                 "unique_operator_keys_required": true,
+                "hex_operator_keys_required": true,
                 "unique_observer_ids_required": true,
                 "unique_observer_keys_required": true,
+                "hex_observer_keys_required": true,
                 "operator_region_spread_required": true,
                 "observer_region_spread_required": true,
                 "operator_signature_roots_verified": true,
@@ -819,14 +823,14 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
                 OperatorAttestation {
                     operator_id: "operator-a".to_string(),
                     region: "us-east".to_string(),
-                    public_key: "nebula-operator-key-a".to_string(),
+                    public_key: hex_64("operator-key-a"),
                     signed_evidence_root: witness_evidence_root.clone(),
                     signature_sha3_256: String::new(),
                 },
                 OperatorAttestation {
                     operator_id: "operator-b".to_string(),
                     region: "eu-west".to_string(),
-                    public_key: "nebula-operator-key-b".to_string(),
+                    public_key: hex_64("operator-key-b"),
                     signed_evidence_root: witness_evidence_root.clone(),
                     signature_sha3_256: String::new(),
                 },
@@ -846,7 +850,7 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
                     observed_evidence_root: witness_evidence_root.clone(),
                     signature: SignatureVerification {
                         algorithm: "ed25519-testnet-attestation".to_string(),
-                        public_key: "nebula-observer-key-a".to_string(),
+                        public_key: hex_64("observer-key-a"),
                         signature_sha3_256: String::new(),
                         verified: true,
                     },
@@ -858,7 +862,7 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
                     observed_evidence_root: witness_evidence_root.clone(),
                     signature: SignatureVerification {
                         algorithm: "ed25519-testnet-attestation".to_string(),
-                        public_key: "nebula-observer-key-b".to_string(),
+                        public_key: hex_64("observer-key-b"),
                         signature_sha3_256: String::new(),
                         verified: true,
                     },
@@ -976,8 +980,8 @@ pub fn sample_validator_set_json_pretty() -> String {
             node_id: "bootstrap-us-east-1".to_string(),
             region: "us-east".to_string(),
             operator_contact: "mailto:operator-a@testnet.nebula.example".to_string(),
-            consensus_public_key: "nebula-consensus-key-a".to_string(),
-            network_public_key: "nebula-network-key-a".to_string(),
+            consensus_public_key: hex_64("consensus-key-a"),
+            network_public_key: hex_64("network-key-a"),
             p2p_endpoint: "tcp://bootstrap-a.testnet.nebula.example:26656".to_string(),
             reward_account: "nbla-reward-operator-a".to_string(),
             commission_bps: 500,
@@ -990,8 +994,8 @@ pub fn sample_validator_set_json_pretty() -> String {
             node_id: "bootstrap-eu-west-1".to_string(),
             region: "eu-west".to_string(),
             operator_contact: "mailto:operator-b@testnet.nebula.example".to_string(),
-            consensus_public_key: "nebula-consensus-key-b".to_string(),
-            network_public_key: "nebula-network-key-b".to_string(),
+            consensus_public_key: hex_64("consensus-key-b"),
+            network_public_key: hex_64("network-key-b"),
             p2p_endpoint: "tcp://bootstrap-b.testnet.nebula.example:26656".to_string(),
             reward_account: "nbla-reward-operator-b".to_string(),
             commission_bps: 500,
@@ -2110,6 +2114,11 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("operators[{index}].public_key"),
             &operator.public_key,
         );
+        require_hex_value(
+            errors,
+            &format!("operators[{index}].public_key"),
+            &operator.public_key,
+        );
         operator_regions.insert(operator.region.clone());
         operator_regions_by_id.insert(operator.operator_id.clone(), operator.region.clone());
         insert_unique(
@@ -2290,6 +2299,11 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("observers[{index}].signature.public_key"),
             &observer.signature.public_key,
         );
+        require_hex_value(
+            errors,
+            &format!("observers[{index}].signature.public_key"),
+            &observer.signature.public_key,
+        );
         insert_unique(
             errors,
             &mut observer_keys,
@@ -2443,7 +2457,17 @@ fn verify_validator_admission(
         &format!("validators[{index}].consensus_public_key"),
         &validator.consensus_public_key,
     );
+    require_hex_value(
+        errors,
+        &format!("validators[{index}].consensus_public_key"),
+        &validator.consensus_public_key,
+    );
     require_non_empty(
+        errors,
+        &format!("validators[{index}].network_public_key"),
+        &validator.network_public_key,
+    );
+    require_hex_value(
         errors,
         &format!("validators[{index}].network_public_key"),
         &validator.network_public_key,
@@ -2769,6 +2793,12 @@ fn require_root(errors: &mut Vec<String>, label: &str, actual: &str, expected: &
 fn require_hex_root(errors: &mut Vec<String>, label: &str, value: &str) {
     if value.len() != 64 || !value.chars().all(|c| c.is_ascii_hexdigit()) {
         errors.push(format!("{label} must be a 64-character hex root"));
+    }
+}
+
+fn require_hex_value(errors: &mut Vec<String>, label: &str, value: &str) {
+    if value.len() != 64 || !value.chars().all(|c| c.is_ascii_hexdigit()) {
+        errors.push(format!("{label} must be a 64-character hex value"));
     }
 }
 
@@ -3392,6 +3422,25 @@ mod public_launch {
     }
 
     #[test]
+    fn deployment_attestation_rejects_non_hex_operator_public_key() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["operators"][0]["public_key"] = json!("operator-key-a");
+        refresh_operator_signature_root(&mut value, 0);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(
+                    |error| error == "operators[0].public_key must be a 64-character hex value"
+                ));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
     fn deployment_attestation_rejects_operator_wrong_signature_root() {
         let mut value =
             serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
@@ -3640,6 +3689,24 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "validators[1].consensus_public_key must be unique"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_non_hex_consensus_key() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["consensus_public_key"] = json!("consensus-key-a");
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "validators[0].consensus_public_key must be a 64-character hex value"
+                }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
