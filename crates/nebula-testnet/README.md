@@ -50,8 +50,8 @@ surfaces `/ops`, `/backup`, `/metrics`, `nebula_opsStatus`, and
 `nebula_backupManifest` are intended for public operators to verify block
 freshness, latest height/hash, state/snapshot roots, persisted snapshot path and
 presence, sync peer count/quorum, sync quorum height/hash/state root, RPC limit
-policy, bridge policy root, backup manifest root, and scrapeable public ops
-readiness gauges before opening an endpoint.
+policy, fee policy root, bridge policy root, backup manifest root, and
+scrapeable public ops readiness gauges before opening an endpoint.
 
 Sequencer key rotation and operator accountability are launch gates too. Public
 operators must be able to discover the active sequencer key, key-rotation
@@ -150,14 +150,14 @@ The public launch sequence for this crate is:
    root, successful peer count, mempool cap/remaining capacity/full and admission rejection counts,
    RPC request-size, sync snapshot-response, and rate-limit policy, admin RPC
    private-listener state,
-   public-admin isolation, non-dev sequencer-key status, bridge policy root,
-   backup manifest root, and public ops readiness gauges.
+   public-admin isolation, non-dev sequencer-key status, `fee_policy_root`,
+   bridge policy root, backup manifest root, and public ops readiness gauges.
    Build and verify runtime-surface evidence from captured `/health`,
    `/status`, `/snapshot`, `/ops`, `/backup`, `nebula_status`,
    `nebula_opsStatus`, `nebula_backupManifest`, and `/metrics` files before
    observers accept the endpoint.
    Stale blocks, missing persisted snapshots, mismatched backup roots, missing
-   bridge policy roots, full mempools, missing sync quorum evidence, missing
+   fee-policy or bridge-policy roots, full mempools, missing sync quorum evidence, missing
    private admin control on launch-bound sequencers, public RPC admin methods,
    default dev sequencer keys, unexpected admission-rejection spikes, or unexpected sync/RPC limit values keep the
    public endpoint launch-blocked. Fast-moving sync attempt/import counters
@@ -508,6 +508,10 @@ the target rate, and the bought NBLA is credited to validator rewards. Fees and
 validator points are denominated in `nebulai`, where
 `1 NBLA = 1,000,000 nebulai` and the target buyback reference is
 `1 NBLA = 0.001 XMR`, represented on Nebula as `1 NBLA = 0.001 nXMR`.
+The canonical `fee_policy_root` is the stable root of the full
+`HybridFeePolicy`; launch bindings, runtime surfaces, JSON-RPC mirrors,
+snapshots, runtime-surface evidence, and launch certificates must all agree on
+it.
 
 The validator-set verifier requires genesis epoch `0`, at least two validators,
 two operators, and two regions. Validator IDs, operator IDs, and node IDs must

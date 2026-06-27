@@ -82,8 +82,8 @@ The target architecture is:
   `nebula_opsStatus`, and `nebula_backupManifest` so public operators can
   verify block freshness, chain head, state/snapshot roots, persisted snapshot
   state, sync peers, RPC limits, private admin listener state, public-admin
-  isolation, non-dev sequencer-key status, bridge policy root, and backup
-  manifest root before opening endpoints
+  isolation, non-dev sequencer-key status, fee policy root, bridge policy root,
+  and backup manifest root before opening endpoints
 - post-quantum attestation roots and role-separated validator, operator,
   observer, witness, TLS, consensus, and network keys
 
@@ -425,8 +425,9 @@ public testnet endpoint, operators must compare those reports with `/health`,
 height/hash, state root, snapshot root, persisted snapshot path and presence,
 configured sync peer count/quorum, sync quorum height/hash/state root,
 mempool cap/remaining capacity/full and admission rejection counts, public NBLA
-faucet disabled state, RPC max-request/rate-limit policy, admin RPC private-listener state, public-admin isolation, non-dev sequencer-key status, bridge
-policy root, bridge custody reconciliation, and backup manifest root. The
+faucet disabled state, RPC max-request/rate-limit policy, admin RPC private-listener state, public-admin isolation, non-dev sequencer-key status,
+`fee_policy_root`, bridge policy root, bridge custody reconciliation, and backup
+manifest root. The
 runtime-surface evidence builder turns those captured files plus JSON-RPC mirror
 responses and `/metrics` text into a single root; the verifier rejects stale
 captures, split durable `/status` versus JSON-RPC views, invalid snapshot roots,
@@ -699,6 +700,10 @@ Nebula testnet uses a hybrid fee policy:
 - `NBLA` gas is credited directly to the validator reward ledger.
 - `nXMR` gas funds NBLA buybacks at the target rate, and the bought NBLA is
   credited to the validator reward ledger.
+- The canonical `fee_policy_root` is the stable root of the full
+  `HybridFeePolicy`; launch bindings, `/health`, `/status`, `/ops`, `/backup`,
+  JSON-RPC mirrors, snapshots, runtime-surface evidence, and the launch
+  certificate must all agree on it.
 
 Public testnet rewards are non-transferable validator points. Points mirror the
 validator reward ledger in `nebulai` so validators can prove uptime, attestation

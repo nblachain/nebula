@@ -702,6 +702,7 @@ pub struct PublicTestnetLaunchCertificate {
     pub runtime_version: String,
     pub launch_package_bundle_root: String,
     pub launch_package_root: String,
+    pub fee_policy_root: String,
     pub validator_activation_root: String,
     pub validator_join_root: String,
     pub operator_join_confirmation_root: String,
@@ -727,6 +728,7 @@ pub struct PublicTestnetLaunchCertificateReport {
     pub public_testnet_launch_certificate_root: String,
     pub launch_package_bundle_root: String,
     pub launch_package_root: String,
+    pub fee_policy_root: String,
     pub validator_activation_root: String,
     pub validator_join_root: String,
     pub operator_join_confirmation_root: String,
@@ -755,6 +757,7 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub deployment_attestation_root: String,
     pub launch_package_bundle_root: String,
     pub launch_package_root: String,
+    pub fee_policy_root: String,
     pub validator_activation_root: String,
     pub validator_join_root: String,
     pub operator_join_confirmation_root: String,
@@ -996,6 +999,7 @@ pub struct RuntimeSurfaceEvidenceReport {
     pub runtime_version: String,
     pub launch_package_bundle_root: String,
     pub launch_package_root: String,
+    pub fee_policy_root: String,
     pub validator_set_root: String,
     pub genesis_root: String,
     pub latest_height: u64,
@@ -1119,6 +1123,10 @@ pub fn hybrid_fee_policy() -> HybridFeePolicy {
         nbla_validator_reward_bps: FEE_BASIS_POINTS,
         testnet_reward_unit: "non-transferable validator points",
     }
+}
+
+pub fn fee_policy_root() -> String {
+    stable_root(&json!(hybrid_fee_policy()))
 }
 
 pub fn quote_hybrid_fee(
@@ -1254,19 +1262,7 @@ pub fn readiness_report() -> NebulaReadiness {
                     "guide-mirror"
                 ],
             })),
-            "economics": stable_root(&json!({
-                "native_fee_token": NBLA_SYMBOL,
-                "bridged_fee_token": NXMR_SYMBOL,
-                "native_base_unit": NEBULAI_UNIT,
-                "nebulai_per_nbla": NEBULAI_PER_NBLA,
-                "target_nxmr_per_nbla": "0.001",
-                "target_nxmr_base_units_per_nxmr": TARGET_NXMR_BASE_UNITS_PER_NXMR,
-                "target_nxmr_to_nbla_rate_nebulai_per_unit": TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT,
-                "nxmr_buyback_bps": NXMR_BUYBACK_BPS,
-                "nxmr_reserve_backing_bps": NXMR_RESERVE_BACKING_BPS,
-                "nxmr_validator_reward_bps": NXMR_VALIDATOR_REWARD_BPS,
-                "testnet_reward_unit": "non-transferable validator points",
-            })),
+            "economics": fee_policy_root(),
             "validator_admission": stable_root(&json!({
                 "minimum_validator_count": MIN_PUBLIC_TESTNET_VALIDATORS,
                 "minimum_operator_count": MIN_PUBLIC_TESTNET_OPERATORS,
@@ -3100,6 +3096,8 @@ fn verify_runtime_surface_evidence(
         json_string_field(&evidence.status, "status.launch_package_bundle_root").ok();
     let launch_package_root =
         json_string_field(&evidence.status, "status.launch_package_root").ok();
+    let runtime_fee_policy_root =
+        json_string_field(&evidence.status, "status.fee_policy_root").ok();
     let validator_set_root = json_string_field(&evidence.status, "status.validator_set_root").ok();
     let genesis_root = json_string_field(&evidence.status, "status.genesis_root").ok();
     match &launch_package_bundle_root {
@@ -3109,6 +3107,16 @@ fn verify_runtime_surface_evidence(
     match &launch_package_root {
         Some(root) => require_hex_root(&mut errors, "status.launch_package_root", root),
         None => errors.push("status.launch_package_root must be a string".to_string()),
+    }
+    let expected_fee_policy_root = fee_policy_root();
+    match &runtime_fee_policy_root {
+        Some(root) => require_root(
+            &mut errors,
+            "status.fee_policy_root",
+            root,
+            &expected_fee_policy_root,
+        ),
+        None => errors.push("status.fee_policy_root must be a string".to_string()),
     }
     match &validator_set_root {
         Some(root) => require_hex_root(&mut errors, "status.validator_set_root", root),
@@ -3154,6 +3162,8 @@ fn verify_runtime_surface_evidence(
             .expect("launch package bundle root was parsed when no errors were recorded"),
         launch_package_root: launch_package_root
             .expect("launch package root was parsed when no errors were recorded"),
+        fee_policy_root: runtime_fee_policy_root
+            .expect("fee policy root was parsed when no errors were recorded"),
         validator_set_root: validator_set_root
             .expect("validator set root was parsed when no errors were recorded"),
         genesis_root: genesis_root.expect("genesis root was parsed when no errors were recorded"),
@@ -4696,6 +4706,7 @@ pub fn build_runtime_launch_binding_from_jsons(
         deployment_attestation_root: launch_report.deployment_attestation_root,
         public_status_manifest_root: launch_report.public_status_manifest_root,
         public_probe_root: launch_report.public_probe_root,
+        fee_policy_root: launch_report.fee_policy_root,
         validator_set_root: launch_report.validator_set_root,
         operator_handoff_root: launch_report.operator_handoff_root,
         operator_acceptance_root: bundle_report.operator_acceptance_root,
@@ -5685,6 +5696,12 @@ pub fn verify_public_testnet_launch_certificate_jsons(
     );
     require_root(
         &mut errors,
+        "fee_policy_root",
+        &certificate.fee_policy_root,
+        &expected.fee_policy_root,
+    );
+    require_root(
+        &mut errors,
         "validator_activation_root",
         &certificate.validator_activation_root,
         &expected.validator_activation_root,
@@ -5790,6 +5807,7 @@ pub fn verify_public_testnet_launch_certificate_jsons(
         public_testnet_launch_certificate_root: certificate.root,
         launch_package_bundle_root: certificate.launch_package_bundle_root,
         launch_package_root: certificate.launch_package_root,
+        fee_policy_root: certificate.fee_policy_root,
         validator_activation_root: certificate.validator_activation_root,
         validator_join_root: certificate.validator_join_root,
         operator_join_confirmation_root: certificate.operator_join_confirmation_root,
@@ -5913,6 +5931,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         deployment_attestation_root: deployment.evidence_root,
         launch_package_bundle_root: certificate.launch_package_bundle_root,
         launch_package_root: certificate.launch_package_root,
+        fee_policy_root: certificate.fee_policy_root,
         validator_activation_root: certificate.validator_activation_root,
         validator_join_root: certificate.validator_join_root,
         operator_join_confirmation_root: certificate.operator_join_confirmation_root,
@@ -6800,6 +6819,7 @@ const RUNTIME_STATUS_DURABLE_FIELDS: &[&str] = &[
     "deployment_attestation_root",
     "public_status_manifest_root",
     "public_probe_root",
+    "fee_policy_root",
     "validator_set_root",
     "operator_handoff_root",
     "operator_acceptance_root",
@@ -6884,6 +6904,7 @@ const RUNTIME_OPS_DURABLE_FIELDS: &[&str] = &[
     "deployment_attestation_root",
     "public_status_manifest_root",
     "public_probe_root",
+    "fee_policy_root",
     "validator_set_root",
     "operator_handoff_root",
     "operator_acceptance_root",
@@ -6969,6 +6990,7 @@ const RUNTIME_BACKUP_DURABLE_FIELDS: &[&str] = &[
     "deployment_attestation_root",
     "public_status_manifest_root",
     "public_probe_root",
+    "fee_policy_root",
     "validator_set_root",
     "operator_handoff_root",
     "operator_acceptance_root",
@@ -7165,6 +7187,7 @@ fn require_health_status_agreement(errors: &mut Vec<String>, health: &Value, sta
         "deployment_attestation_root",
         "public_status_manifest_root",
         "public_probe_root",
+        "fee_policy_root",
         "validator_set_root",
         "operator_handoff_root",
         "operator_acceptance_root",
@@ -7272,6 +7295,7 @@ fn require_ops_backup_snapshot_agreement(
             ("deployment_attestation_root", "deployment_attestation_root"),
             ("public_status_manifest_root", "public_status_manifest_root"),
             ("public_probe_root", "public_probe_root"),
+            ("fee_policy_root", "fee_policy_root"),
             ("validator_set_root", "validator_set_root"),
             ("operator_handoff_root", "operator_handoff_root"),
             ("operator_acceptance_root", "operator_acceptance_root"),
@@ -7376,6 +7400,7 @@ fn require_ops_backup_snapshot_agreement(
         "deployment_attestation_root",
         "public_status_manifest_root",
         "public_probe_root",
+        "fee_policy_root",
         "validator_set_root",
         "operator_handoff_root",
         "operator_acceptance_root",
@@ -10530,6 +10555,7 @@ fn verified_launch_certificate_reports(
     let runtime_surface = verify_runtime_surface_evidence_json(runtime_surface_evidence_json)?;
     let genesis = verify_genesis_manifest_json(genesis_manifest_json)?;
     let deployment = verify_deployment_attestation_json(deployment_attestation_json)?;
+    let public_probe = parse_public_probe_json(public_probe_json, "public_probe")?;
     let mut errors = Vec::new();
     require_eq(
         &mut errors,
@@ -10548,6 +10574,12 @@ fn verified_launch_certificate_reports(
         "runtime_surface.launch_package_root",
         &runtime_surface.launch_package_root,
         &launch_package_bundle.launch_package_root,
+    );
+    require_root(
+        &mut errors,
+        "runtime_surface.fee_policy_root",
+        &runtime_surface.fee_policy_root,
+        &public_probe.body.fee_policy_root,
     );
     require_root(
         &mut errors,
@@ -10589,6 +10621,7 @@ fn public_testnet_launch_certificate(
             .launch_package_bundle_root
             .clone(),
         launch_package_root: reports.launch_package_bundle.launch_package_root.clone(),
+        fee_policy_root: reports.runtime_surface.fee_policy_root.clone(),
         validator_activation_root: reports
             .validator_activation
             .validator_activation_root
@@ -10634,6 +10667,7 @@ fn public_testnet_launch_certificate_root(certificate: &PublicTestnetLaunchCerti
         "runtime_version": certificate.runtime_version,
         "launch_package_bundle_root": certificate.launch_package_bundle_root,
         "launch_package_root": certificate.launch_package_root,
+        "fee_policy_root": certificate.fee_policy_root,
         "validator_activation_root": certificate.validator_activation_root,
         "validator_join_root": certificate.validator_join_root,
         "operator_join_confirmation_root": certificate.operator_join_confirmation_root,
@@ -10663,6 +10697,7 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "deployment_attestation_root": report.deployment_attestation_root,
         "launch_package_bundle_root": report.launch_package_bundle_root,
         "launch_package_root": report.launch_package_root,
+        "fee_policy_root": report.fee_policy_root,
         "validator_activation_root": report.validator_activation_root,
         "validator_join_root": report.validator_join_root,
         "operator_join_confirmation_root": report.operator_join_confirmation_root,
@@ -11144,6 +11179,10 @@ mod public_launch {
         assert_eq!(report.economics.nxmr_buyback_bps, 10_000);
         assert_eq!(report.economics.nxmr_reserve_backing_bps, 0);
         assert_eq!(report.economics.nxmr_validator_reward_bps, 10_000);
+        assert_eq!(
+            report.status_roots["economics"].as_str().unwrap(),
+            fee_policy_root()
+        );
     }
 
     #[test]
@@ -11209,7 +11248,7 @@ mod public_launch {
         assert_eq!(report.public_probe_root.len(), 64);
         assert_eq!(report.endpoint_url, "https://testnet.nebula.example/status");
         assert_eq!(report.launch_bundle_root.len(), 64);
-        assert_eq!(report.fee_policy_root.len(), 64);
+        assert_eq!(report.fee_policy_root, fee_policy_root());
     }
 
     #[test]
@@ -13529,6 +13568,7 @@ mod public_launch {
         assert_eq!(binding.operator_count, 2);
         assert_eq!(binding.region_count, 2);
         assert_eq!(binding.launch_package_bundle_root.len(), 64);
+        assert_eq!(binding.fee_policy_root, fee_policy_root());
         assert_eq!(binding.validator_reward_accounts.len(), 2);
         assert_eq!(
             binding.validator_reward_accounts[0].reward_account,
@@ -14742,6 +14782,43 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "validator_count expected 2 but got 1"));
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("public testnet launch certificate root does not match")
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
+        let mut wrong_fee_policy = certificate.clone();
+        wrong_fee_policy["fee_policy_root"] = json!(hex_64("wrong-fee-policy-root"));
+        wrong_fee_policy["root"] = json!(public_testnet_launch_certificate_root(
+            &serde_json::from_value::<PublicTestnetLaunchCertificate>(wrong_fee_policy.clone())
+                .unwrap()
+        ));
+
+        let error = verify_public_testnet_launch_certificate_jsons(
+            &wrong_fee_policy.to_string(),
+            &observer_confirmation,
+            &runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error.starts_with("fee_policy_root does not match")));
                 assert!(errors.iter().any(|error| {
                     error.starts_with("public testnet launch certificate root does not match")
                 }));

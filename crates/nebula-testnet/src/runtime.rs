@@ -1,6 +1,6 @@
 use crate::{
-    quote_hybrid_fee, FeeAsset, HybridFeeQuote, CHAIN_ID, NBLA_SYMBOL, NEBULAI_PER_NBLA,
-    NXMR_SYMBOL, TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT, VERSION,
+    fee_policy_root, quote_hybrid_fee, FeeAsset, HybridFeeQuote, CHAIN_ID, NBLA_SYMBOL,
+    NEBULAI_PER_NBLA, NXMR_SYMBOL, TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT, VERSION,
 };
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -218,6 +218,7 @@ pub struct RuntimeLaunchBinding {
     pub deployment_attestation_root: String,
     pub public_status_manifest_root: String,
     pub public_probe_root: String,
+    pub fee_policy_root: String,
     pub validator_set_root: String,
     pub operator_handoff_root: String,
     pub operator_acceptance_root: String,
@@ -260,6 +261,14 @@ impl RuntimeLaunchBinding {
             64,
         )?;
         validate_fixed_hex(&self.public_probe_root, "public_probe_root", 64)?;
+        validate_fixed_hex(&self.fee_policy_root, "fee_policy_root", 64)?;
+        let expected_fee_policy_root = fee_policy_root();
+        if self.fee_policy_root != expected_fee_policy_root {
+            return Err(format!(
+                "launch binding fee_policy_root {} does not match canonical fee_policy_root {}",
+                self.fee_policy_root, expected_fee_policy_root
+            ));
+        }
         validate_fixed_hex(&self.validator_set_root, "validator_set_root", 64)?;
         validate_fixed_hex(&self.operator_handoff_root, "operator_handoff_root", 64)?;
         validate_fixed_hex(
@@ -560,6 +569,7 @@ pub struct RuntimeStatus {
     pub deployment_attestation_root: Option<String>,
     pub public_status_manifest_root: Option<String>,
     pub public_probe_root: Option<String>,
+    pub fee_policy_root: Option<String>,
     pub validator_set_root: Option<String>,
     pub operator_handoff_root: Option<String>,
     pub operator_acceptance_root: Option<String>,
@@ -641,6 +651,7 @@ pub struct RuntimeOpsStatus {
     pub deployment_attestation_root: Option<String>,
     pub public_status_manifest_root: Option<String>,
     pub public_probe_root: Option<String>,
+    pub fee_policy_root: Option<String>,
     pub validator_set_root: Option<String>,
     pub operator_handoff_root: Option<String>,
     pub operator_acceptance_root: Option<String>,
@@ -740,6 +751,7 @@ pub struct RuntimeBackupManifest {
     pub deployment_attestation_root: Option<String>,
     pub public_status_manifest_root: Option<String>,
     pub public_probe_root: Option<String>,
+    pub fee_policy_root: Option<String>,
     pub validator_set_root: Option<String>,
     pub operator_handoff_root: Option<String>,
     pub operator_acceptance_root: Option<String>,
@@ -1785,6 +1797,7 @@ impl RuntimeRpcState {
             deployment_attestation_root: status.deployment_attestation_root,
             public_status_manifest_root: status.public_status_manifest_root,
             public_probe_root: status.public_probe_root,
+            fee_policy_root: status.fee_policy_root,
             validator_set_root: status.validator_set_root,
             operator_handoff_root: status.operator_handoff_root,
             operator_acceptance_root: status.operator_acceptance_root,
@@ -1889,6 +1902,7 @@ impl RuntimeRpcState {
             deployment_attestation_root: ops_status.deployment_attestation_root,
             public_status_manifest_root: ops_status.public_status_manifest_root,
             public_probe_root: ops_status.public_probe_root,
+            fee_policy_root: ops_status.fee_policy_root,
             validator_set_root: ops_status.validator_set_root,
             operator_handoff_root: ops_status.operator_handoff_root,
             operator_acceptance_root: ops_status.operator_acceptance_root,
@@ -1986,6 +2000,7 @@ impl RuntimeRpcState {
             "deployment_attestation_root": status["deployment_attestation_root"],
             "public_status_manifest_root": status["public_status_manifest_root"],
             "public_probe_root": status["public_probe_root"],
+            "fee_policy_root": status["fee_policy_root"],
             "validator_set_root": status["validator_set_root"],
             "operator_handoff_root": status["operator_handoff_root"],
             "operator_acceptance_root": status["operator_acceptance_root"],
@@ -2842,6 +2857,7 @@ impl NebulaRuntime {
             public_status_manifest_root: launch_binding
                 .map(|binding| binding.public_status_manifest_root.clone()),
             public_probe_root: launch_binding.map(|binding| binding.public_probe_root.clone()),
+            fee_policy_root: launch_binding.map(|binding| binding.fee_policy_root.clone()),
             validator_set_root: launch_binding.map(|binding| binding.validator_set_root.clone()),
             operator_handoff_root: launch_binding
                 .map(|binding| binding.operator_handoff_root.clone()),
@@ -6322,6 +6338,7 @@ fn ops_status_root(report: &RuntimeOpsStatus) -> String {
         "deployment_attestation_root": report.deployment_attestation_root,
         "public_status_manifest_root": report.public_status_manifest_root,
         "public_probe_root": report.public_probe_root,
+        "fee_policy_root": report.fee_policy_root,
         "validator_set_root": report.validator_set_root,
         "operator_handoff_root": report.operator_handoff_root,
         "operator_acceptance_root": report.operator_acceptance_root,
@@ -6422,6 +6439,7 @@ fn backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
         "deployment_attestation_root": manifest.deployment_attestation_root,
         "public_status_manifest_root": manifest.public_status_manifest_root,
         "public_probe_root": manifest.public_probe_root,
+        "fee_policy_root": manifest.fee_policy_root,
         "validator_set_root": manifest.validator_set_root,
         "operator_handoff_root": manifest.operator_handoff_root,
         "operator_acceptance_root": manifest.operator_acceptance_root,
@@ -6788,6 +6806,7 @@ mod tests {
             deployment_attestation_root: "1".repeat(64),
             public_status_manifest_root: "2".repeat(64),
             public_probe_root: "3".repeat(64),
+            fee_policy_root: fee_policy_root(),
             validator_set_root: "4".repeat(64),
             operator_handoff_root: "5".repeat(64),
             operator_acceptance_root: "6".repeat(64),
@@ -6841,6 +6860,17 @@ mod tests {
         let mut config = RuntimeConfig::public_testnet_default();
         config.launch_binding = Some(test_launch_binding());
         config
+    }
+
+    #[test]
+    fn launch_binding_rejects_mismatched_fee_policy_root() {
+        let mut binding = test_launch_binding();
+        binding.fee_policy_root = "f".repeat(64);
+        let error = binding
+            .validate_against_config(&RuntimeConfig::public_testnet_default())
+            .unwrap_err();
+
+        assert!(error.contains("fee_policy_root"));
     }
 
     fn runtime_config_with_launch_binding_and_disabled_nbla_faucet() -> RuntimeConfig {
@@ -7898,6 +7928,10 @@ mod tests {
             ops.launch_package_bundle_root.as_deref(),
             Some(binding.launch_package_bundle_root.as_str())
         );
+        assert_eq!(
+            ops.fee_policy_root.as_deref(),
+            Some(binding.fee_policy_root.as_str())
+        );
         assert_eq!(ops.launch_validator_count, Some(binding.validator_count));
         assert_eq!(ops.launch_operator_count, Some(binding.operator_count));
         assert_eq!(ops.launch_region_count, Some(binding.region_count));
@@ -7954,6 +7988,10 @@ mod tests {
             manifest.launch_package_bundle_root.as_deref(),
             Some(binding.launch_package_bundle_root.as_str())
         );
+        assert_eq!(
+            manifest.fee_policy_root.as_deref(),
+            Some(binding.fee_policy_root.as_str())
+        );
         assert_eq!(manifest.snapshot_root.len(), 64);
         assert!(manifest.snapshot_persisted);
         assert!(manifest.storage_snapshot_matches_runtime);
@@ -7995,6 +8033,7 @@ mod tests {
             rpc_ops["launch_package_bundle_root"],
             binding.launch_package_bundle_root
         );
+        assert_eq!(rpc_ops["fee_policy_root"], binding.fee_policy_root);
         assert_eq!(rpc_ops["mempool_admission_rejection_count"], 0);
         assert_eq!(rpc_ops["faucet_nxmr_units"], 0);
         assert_eq!(rpc_ops["bridge_only_nxmr"], true);
@@ -8020,6 +8059,7 @@ mod tests {
         assert_eq!(rpc_backup["backup_root"].as_str().unwrap().len(), 64);
         assert_eq!(rpc_backup["snapshot_persisted"], true);
         assert_eq!(rpc_backup["launch_binding_present"], true);
+        assert_eq!(rpc_backup["fee_policy_root"], binding.fee_policy_root);
         assert_eq!(rpc_backup["mempool_admission_rejection_count"], 0);
         assert_eq!(rpc_backup["faucet_nxmr_units"], 0);
         assert_eq!(rpc_backup["bridge_only_nxmr"], true);
@@ -8077,6 +8117,7 @@ mod tests {
             health["launch_package_bundle_root"],
             binding.launch_package_bundle_root
         );
+        assert_eq!(health["fee_policy_root"], binding.fee_policy_root);
         assert_eq!(health["launch_validator_count"], binding.validator_count);
         assert_eq!(health["launch_operator_count"], binding.operator_count);
         assert_eq!(health["launch_region_count"], binding.region_count);
@@ -8219,6 +8260,7 @@ mod tests {
         assert_eq!(report.snapshot_root.len(), 64);
         assert_eq!(report.ops_root.len(), 64);
         assert_eq!(report.backup_root.len(), 64);
+        assert_eq!(report.fee_policy_root, crate::fee_policy_root());
         assert!(report.blocking_gaps.is_empty());
 
         let _ = fs::remove_dir_all(dir);
@@ -8298,6 +8340,89 @@ mod tests {
             crate::AttestationError::Invalid(errors) => assert!(errors
                 .iter()
                 .any(|error| error.contains("status.latest_height"))),
+            crate::AttestationError::MalformedJson(error) => {
+                panic!("unexpected malformed JSON: {error}")
+            }
+        }
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn runtime_surface_evidence_rejects_fee_policy_root_mismatch() {
+        let dir = std::env::temp_dir().join(format!(
+            "nebula-runtime-surface-evidence-fee-policy-{}",
+            unix_ms()
+        ));
+        let storage = RuntimeStorage::from_data_dir(&dir);
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        rotate_runtime_off_default_dev_key(&mut runtime);
+        runtime.faucet("alice").unwrap();
+        disable_public_nbla_faucet(&mut runtime);
+        runtime.produce_block();
+        let snapshot = runtime.export_snapshot();
+        storage.save_snapshot(&snapshot).unwrap();
+        let mut state = test_rpc_state_with_limits(
+            runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+        state.storage = Some(storage);
+        enable_private_admin_control(&mut state);
+
+        let health = state.health_json().unwrap();
+        let mut status = state.status_json().unwrap();
+        status["fee_policy_root"] = json!("f".repeat(64));
+        let snapshot = state
+            .runtime
+            .lock()
+            .expect("runtime mutex")
+            .export_snapshot();
+        let ops = state.ops_status().unwrap();
+        let backup = state.backup_manifest().unwrap();
+        let error = crate::build_runtime_surface_evidence_json_pretty(
+            crate::RuntimeSurfaceEvidenceBuildInput {
+                endpoint_url: "https://public.testnet.nebula.example/status".to_string(),
+                capture_mode: crate::RUNTIME_SURFACE_CAPTURE_MODE_EXTERNAL_PUBLIC_ENDPOINT
+                    .to_string(),
+                tls_observation: Some(crate::TlsEndpointPin {
+                    cert_sha256: "aa".repeat(32),
+                    public_key_sha256: "bb".repeat(32),
+                    not_after_unix_ms: unix_ms() + 2_592_000_000,
+                }),
+                captured_at_unix_ms: unix_ms(),
+                health_json: health.to_string(),
+                status_json: status.to_string(),
+                snapshot_json: serde_json::to_string(&snapshot).unwrap(),
+                ops_json: serde_json::to_string(&ops).unwrap(),
+                backup_json: serde_json::to_string(&backup).unwrap(),
+                rpc_status_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_status",
+                    "result": status,
+                })
+                .to_string(),
+                rpc_ops_status_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_opsStatus",
+                    "result": state.ops_status().unwrap(),
+                })
+                .to_string(),
+                rpc_backup_manifest_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_backupManifest",
+                    "result": state.backup_manifest().unwrap(),
+                })
+                .to_string(),
+                metrics_text: state.metrics_text().unwrap(),
+            },
+        )
+        .unwrap_err();
+
+        match error {
+            crate::AttestationError::Invalid(errors) => assert!(errors
+                .iter()
+                .any(|error| error.contains("status.fee_policy_root"))),
             crate::AttestationError::MalformedJson(error) => {
                 panic!("unexpected malformed JSON: {error}")
             }
