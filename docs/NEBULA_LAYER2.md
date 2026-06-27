@@ -108,6 +108,7 @@ The public launch suite covers:
 - genesis manifest root and epoch binding across deployment evidence,
   validator set, and fee policy
 - genesis manifest operator-count and region-count binding
+- launch package reporting for genesis fee token identities
 - genesis manifest artifact-root domain separation
 - genesis manifest freshness validation
 - genesis timestamp binding to the deployment attestation validity window
@@ -313,7 +314,7 @@ deployment operators and bootstrap nodes, validator P2P hosts that do not match
 their attested bootstrap endpoint host, and deployment operators or bootstrap
 nodes that are not represented by an admitted validator. The launch-package
 report also exposes the deployment observer quorum count and deployment region
-count verified from the attestation.
+count verified from the attestation, plus the genesis fee token identities.
 
 Operators can verify the full package with:
 

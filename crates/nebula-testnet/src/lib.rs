@@ -378,6 +378,9 @@ pub struct GenesisManifestReport {
     pub initial_region_count: usize,
     pub initial_total_power: u64,
     pub activation_height: u64,
+    pub native_fee_token: String,
+    pub native_base_unit: String,
+    pub bridged_fee_token: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -404,6 +407,9 @@ pub struct LaunchPackageReport {
     pub validator_count: usize,
     pub total_genesis_power: u64,
     pub activation_height: u64,
+    pub native_fee_token: String,
+    pub native_base_unit: String,
+    pub bridged_fee_token: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -730,6 +736,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "genesis_binds_region_count": true,
                 "genesis_binds_validator_count": true,
                 "genesis_binds_total_power": true,
+                "genesis_fee_token_identities_reported": true,
                 "genesis_time_within_deployment_window": true,
             })),
             "public_status_surface": stable_root(&json!({
@@ -1382,6 +1389,9 @@ pub fn verify_genesis_manifest_json(
         initial_region_count: manifest.initial_region_count,
         initial_total_power: manifest.initial_total_power,
         activation_height: manifest.activation_height,
+        native_fee_token: manifest.native_fee_token,
+        native_base_unit: manifest.native_base_unit,
+        bridged_fee_token: manifest.bridged_fee_token,
     })
 }
 
@@ -1560,6 +1570,9 @@ pub fn verify_launch_package_jsons(
         validator_count: validator_set_report.validator_count,
         total_genesis_power: validator_set_report.total_genesis_power,
         activation_height: genesis_report.activation_height,
+        native_fee_token: genesis_report.native_fee_token,
+        native_base_unit: genesis_report.native_base_unit,
+        bridged_fee_token: genesis_report.bridged_fee_token,
     })
 }
 
@@ -5164,6 +5177,9 @@ mod public_launch {
         assert_eq!(report.initial_region_count, 2);
         assert_eq!(report.initial_total_power, 2);
         assert_eq!(report.activation_height, 1);
+        assert_eq!(report.native_fee_token, NBLA_SYMBOL);
+        assert_eq!(report.native_base_unit, NEBULAI_UNIT);
+        assert_eq!(report.bridged_fee_token, NXMR_SYMBOL);
         assert_eq!(report.genesis_root.len(), 64);
         assert_eq!(report.deployment_attestation_root.len(), 64);
         assert_eq!(report.validator_set_root.len(), 64);
@@ -5344,6 +5360,9 @@ mod public_launch {
         assert_eq!(report.validator_count, 2);
         assert_eq!(report.total_genesis_power, 2);
         assert_eq!(report.activation_height, 1);
+        assert_eq!(report.native_fee_token, NBLA_SYMBOL);
+        assert_eq!(report.native_base_unit, NEBULAI_UNIT);
+        assert_eq!(report.bridged_fee_token, NXMR_SYMBOL);
         assert_eq!(report.deployment_attestation_root.len(), 64);
         assert_eq!(report.witness_evidence_root.len(), 64);
         assert_eq!(report.public_status_manifest_root.len(), 64);

@@ -110,8 +110,9 @@ The launch-package verifier checks that the deployment, public surface,
 validator set, and genesis artifacts all agree before operators advance to a
 live rollout, with deployment attestations expiring within `7` days of
 generation. It reports the verified deployment observer quorum count and
-deployment region count. It also rejects validator consensus/network keys that
-reuse deployment witness keys, admitted validators that do not map to attested
-deployment operators and bootstrap nodes, validator P2P hosts that do not match
-their attested bootstrap endpoint host, plus deployment operators or bootstrap
-nodes that are not represented by an admitted validator.
+deployment region count, plus the genesis fee token identities. It also rejects
+validator consensus/network keys that reuse deployment witness keys, admitted
+validators that do not map to attested deployment operators and bootstrap nodes,
+validator P2P hosts that do not match their attested bootstrap endpoint host,
+plus deployment operators or bootstrap nodes that are not represented by an
+admitted validator.
