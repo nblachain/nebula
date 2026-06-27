@@ -71,7 +71,7 @@ The public launch suite covers:
 - deployment evidence root binding
 - public status manifest redaction
 - public endpoint and TLS pin evidence
-- HTTPS-only public status/probe endpoints
+- HTTPS-only public status/probe endpoints with non-empty hosts
 - standalone public status/probe surface exact-shape validation
 - final package binding for the public status/probe surface
 - shared deployment witness root binding for bootstrap nodes, operators, and
@@ -155,6 +155,7 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - duplicated preflight/runbook receipt phase names, step names, and step
   evidence roots
 - public status/probe endpoints that do not use `https://`
+- public status/probe and bootstrap endpoints that do not include a host
 - operator and observer witness roots that do not match the deployment surface
 - bootstrap node attestation roots that do not bind the deployment witness root
 - operator, observer, and validator admission signature roots that do not bind
@@ -210,10 +211,11 @@ node IDs, consensus keys, network keys, reward accounts, and P2P endpoints must
 be unique. Genesis power must be positive, no single validator may hold more
 than `5000` basis points of total genesis power, commission must be at or below
 `10000` basis points, operator contacts must use `mailto:` or `https://`,
-reward accounts must use the `nbla-reward-` prefix, and rewards must be
-denominated in `nebulai`. Each validator admission signature root must bind the
-validator identity, operator contact, keys, reward account, commission, genesis
-power, reward unit, and fee-policy root.
+P2P endpoints must use `tcp://host:port`, reward accounts must use the
+`nbla-reward-` prefix, and rewards must be denominated in `nebulai`. Each
+validator admission signature root must bind the validator identity, operator
+contact, keys, reward account, commission, genesis power, reward unit, and
+fee-policy root.
 
 Operators can generate the required shape and verify a filled validator set
 with:

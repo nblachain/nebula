@@ -613,6 +613,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "unique_consensus_keys_required": true,
                 "unique_reward_accounts_required": true,
                 "unique_p2p_endpoints_required": true,
+                "p2p_endpoint_host_port_required": true,
                 "max_single_validator_genesis_power_bps": MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS,
             })),
             "genesis_manifest": stable_root(&json!({
@@ -632,10 +633,12 @@ pub fn readiness_report() -> NebulaReadiness {
                 "rollback_drill_max_age_ms": ROLLBACK_DRILL_MAX_AGE_MS,
                 "deployment_witness_root_verified": true,
                 "public_https_endpoint_required": true,
+                "public_endpoint_authority_required": true,
                 "unique_tls_cert_pins_required": true,
                 "unique_tls_public_key_pins_required": true,
                 "unique_bootstrap_node_ids_required": true,
                 "unique_bootstrap_endpoints_required": true,
+                "bootstrap_endpoint_authority_required": true,
                 "bootstrap_region_spread_required": true,
                 "bootstrap_operator_region_binding_required": true,
                 "unique_operator_ids_required": true,
@@ -666,6 +669,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "public_launch_ready": false,
                 "launch_bundle_root_required": true,
                 "endpoint_url_required": true,
+                "endpoint_authority_required": true,
                 "redacted_public_status": true,
             })),
             "public_probe_surface": stable_root(&json!({
@@ -673,6 +677,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "body_chain_id_required": true,
                 "body_launch_bundle_root_required": true,
                 "body_fee_policy_root_required": true,
+                "endpoint_authority_required": true,
                 "unexpected_fields_rejected": true,
             })),
             "preflight_receipt": stable_root(&json!({
@@ -2158,11 +2163,11 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("bootstrap_nodes[{index}].endpoint"),
             &node.endpoint,
         );
-        if !node.endpoint.starts_with("https://") {
-            errors.push(format!(
-                "bootstrap_nodes[{index}].endpoint must use an https:// endpoint"
-            ));
-        }
+        require_https_endpoint(
+            errors,
+            &format!("bootstrap_nodes[{index}].endpoint"),
+            &node.endpoint,
+        );
         bootstrap_regions.insert(node.region.clone());
         insert_unique(
             errors,
@@ -2439,11 +2444,11 @@ fn verify_validator_admission(
             "validators[{index}].reward_account must use the nbla-reward- prefix"
         ));
     }
-    if !validator.p2p_endpoint.starts_with("tcp://") {
-        errors.push(format!(
-            "validators[{index}].p2p_endpoint must use a tcp:// endpoint"
-        ));
-    }
+    require_tcp_endpoint_with_port(
+        errors,
+        &format!("validators[{index}].p2p_endpoint"),
+        &validator.p2p_endpoint,
+    );
     if !validator.operator_contact.starts_with("mailto:")
         && !validator.operator_contact.starts_with("https://")
     {
@@ -2744,9 +2749,49 @@ fn require_hex_root(errors: &mut Vec<String>, label: &str, value: &str) {
 }
 
 fn require_https_endpoint(errors: &mut Vec<String>, label: &str, endpoint: &str) {
-    if !endpoint.starts_with("https://") {
+    let scheme = "https://";
+    if !endpoint.starts_with(scheme) {
         errors.push(format!("{label} must use an https:// endpoint"));
+        return;
     }
+    require_endpoint_authority(errors, label, endpoint, scheme);
+}
+
+fn require_tcp_endpoint_with_port(errors: &mut Vec<String>, label: &str, endpoint: &str) {
+    let scheme = "tcp://";
+    if !endpoint.starts_with(scheme) {
+        errors.push(format!("{label} must use a tcp:// endpoint"));
+        return;
+    }
+    let Some(authority) = require_endpoint_authority(errors, label, endpoint, scheme) else {
+        return;
+    };
+    let Some((host, port)) = authority.rsplit_once(':') else {
+        errors.push(format!("{label} must include a numeric port"));
+        return;
+    };
+    if host.trim().is_empty()
+        || port.trim().is_empty()
+        || !port.chars().all(|character| character.is_ascii_digit())
+        || port.parse::<u16>().ok().filter(|port| *port > 0).is_none()
+    {
+        errors.push(format!("{label} must include a numeric port"));
+    }
+}
+
+fn require_endpoint_authority<'a>(
+    errors: &mut Vec<String>,
+    label: &str,
+    endpoint: &'a str,
+    scheme: &str,
+) -> Option<&'a str> {
+    let remainder = endpoint.strip_prefix(scheme).unwrap_or_default();
+    let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.trim().is_empty() || authority.chars().any(char::is_whitespace) {
+        errors.push(format!("{label} must include a host after {scheme}"));
+        return None;
+    }
+    Some(authority)
 }
 
 fn require_non_empty(errors: &mut Vec<String>, label: &str, value: &str) {
@@ -2901,6 +2946,27 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "public_status_manifest.endpoint_url must use an https:// endpoint"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn public_status_rejects_endpoint_without_host() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_public_status_manifest_json_pretty()).unwrap();
+        value["endpoint_url"] = json!("https://");
+        value["root"] = json!(public_status_manifest_root(
+            &serde_json::from_value::<PublicStatusManifest>(value.clone()).unwrap()
+        ));
+
+        let error = verify_public_status_manifest_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "public_status_manifest.endpoint_url must include a host after https://"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
@@ -3184,6 +3250,25 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "public_endpoint.url must use an https:// endpoint"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_bootstrap_endpoint_without_host() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["bootstrap_nodes"][0]["endpoint"] = json!("https://");
+        refresh_bootstrap_node_root(&mut value, 0);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "bootstrap_nodes[0].endpoint must include a host after https://"
+                }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
@@ -3566,6 +3651,24 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "validators[0].operator_contact must use mailto: or https://"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_p2p_endpoint_without_numeric_port() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["p2p_endpoint"] = json!("tcp://bootstrap-a.testnet.nebula.example");
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "validators[0].p2p_endpoint must include a numeric port"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

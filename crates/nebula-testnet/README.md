@@ -40,7 +40,8 @@ shared witness root for the launch bundle, public status, HTTPS endpoint/TLS
 pins, policy claim, and public probe. Operator and observer signature roots must
 bind their signer identity and that witness root. Bootstrap node IDs/endpoints,
 operator IDs/keys, observer IDs/keys, and TLS certificate/public-key pins must
-be unique. Bootstrap nodes must match their attested operator region. Bootstrap
+be unique. Public status, probe, and bootstrap HTTPS endpoints must include a
+host. Bootstrap nodes must match their attested operator region. Bootstrap
 nodes, operator quorums, and observer quorums must each cover at least two
 regions. Deployment evidence must be generated within `24` hours, expire within
 `7` days, carry TLS pins with at least `7` days remaining, and include a
@@ -62,9 +63,10 @@ The validator-set verifier requires at least two validators, two operators, and
 two regions. Validator IDs, node IDs, keys, reward accounts, and P2P endpoints
 must be unique. No single validator may hold more than `5000` basis points of
 total genesis power. Operator contacts must use `mailto:` or `https://`.
-Validator admission rewards are denominated in `nebulai`, and each signed
-admission root must bind the validator identity, operator contact, keys, reward
-account, commission, genesis power, reward unit, and fee-policy root.
+P2P endpoints must use `tcp://host:port`. Validator admission rewards are
+denominated in `nebulai`, and each signed admission root must bind the validator
+identity, operator contact, keys, reward account, commission, genesis power,
+reward unit, and fee-policy root.
 
 The genesis manifest builder binds verified deployment evidence and validator
 admission into the root artifact used to start a public testnet.
