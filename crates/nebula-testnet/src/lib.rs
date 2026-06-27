@@ -4627,6 +4627,16 @@ pub fn build_runtime_launch_binding_from_jsons(
             "validator_id {validator_id} is not admitted in validator set"
         )]));
     }
+    let mut validator_reward_accounts = validator_set_manifest
+        .validators
+        .iter()
+        .map(|validator| runtime::RuntimeValidatorRewardAccount {
+            validator_id: validator.validator_id.clone(),
+            operator_id: validator.operator_id.clone(),
+            reward_account: validator.reward_account.clone(),
+        })
+        .collect::<Vec<_>>();
+    validator_reward_accounts.sort_by(|left, right| left.validator_id.cmp(&right.validator_id));
     let mut bridge_operator_keys = deployment_attestation
         .operators
         .iter()
@@ -4665,11 +4675,14 @@ pub fn build_runtime_launch_binding_from_jsons(
         validator_count: launch_report.validator_count,
         operator_count: launch_report.matched_operator_count,
         region_count: launch_report.matched_region_count,
+        validator_reward_accounts,
         bridge_operator_keys,
         bridge_observer_keys,
     };
+    let mut validation_config = runtime::RuntimeConfig::public_testnet_default();
+    validation_config.validator_id = validator_id.to_string();
     binding
-        .validate_against_config(&runtime::RuntimeConfig::public_testnet_default())
+        .validate_against_config(&validation_config)
         .map_err(|error| AttestationError::Invalid(vec![error]))?;
     Ok(binding)
 }
@@ -6771,6 +6784,7 @@ const RUNTIME_STATUS_DURABLE_FIELDS: &[&str] = &[
     "total_nxmr_fees_units",
     "buyback_pool_nebulai",
     "validator_reward_nebulai",
+    "validator_reward_account",
     "faucet_nbla_nebulai",
     "faucet_nxmr_units",
     "bridge_only_nxmr",
@@ -13255,6 +13269,15 @@ mod public_launch {
         assert_eq!(binding.operator_count, 2);
         assert_eq!(binding.region_count, 2);
         assert_eq!(binding.launch_package_bundle_root.len(), 64);
+        assert_eq!(binding.validator_reward_accounts.len(), 2);
+        assert_eq!(
+            binding.validator_reward_accounts[0].reward_account,
+            "nbla-reward-operator-a"
+        );
+        assert_eq!(
+            binding.validator_reward_accounts[1].reward_account,
+            "nbla-reward-operator-b"
+        );
         assert_eq!(binding.bridge_operator_keys.len(), 2);
         assert_eq!(binding.bridge_operator_keys[0].operator_id, "operator-a");
         assert_eq!(binding.bridge_operator_keys[1].operator_id, "operator-b");

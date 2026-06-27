@@ -385,6 +385,11 @@ Public spend flows require Ed25519 account signatures. For
 nonce)`, and accepted withdrawals consume the account nonce before burning
 nXMR into `operator_pending`.
 
+Launch-bound runtimes credit NBLA gas rewards and nXMR-funded NBLA buyback
+rewards to the validator-set reward account (`nbla-reward-<operator_id>`) for
+the local validator, and expose that selected `validator_reward_account` through
+the runtime status surfaces.
+
 Bridge custody rehearsal uses the runtime RPC names that public operators will
 see. `nebula_bridgePolicy` reports the active policy root and quorum constants.
 The faucet credits only `NBLA` for local unbound rehearsals. Launch-bound public
@@ -458,11 +463,12 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 `--bootstrap-rpc` performs that one-time startup import. To keep following a
 sequencer plus replica set, repeat `--sync-rpc <http://peer/snapshot>` for each
 upstream snapshot peer. Set `--sync-peer-quorum <count>` to require matching
-height, latest block hash, and state root from that many peers before a follower
-imports; use quorum `1` for single-peer local rehearsals and quorum `2` or higher
-for public replica sets. The follower continuously fetches, verifies, imports,
-and persists newer snapshots from the highest ahead chain-state group whose
-snapshots extend local state:
+height, latest block hash, and state root from that many distinct exporting
+validator identities before a follower imports; URL aliases for the same peer do
+not increase quorum. Use quorum `1` for single-peer local rehearsals and quorum
+`2` or higher for public replica sets. The follower continuously fetches,
+verifies, imports, and persists newer snapshots from the highest ahead
+chain-state group whose snapshots extend local state:
 
 ```bash
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --sync-peer-quorum 2 --disable-nbla-faucet --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600 --max-active-connections 512 --admin-max-active-connections 32
@@ -474,8 +480,9 @@ and keep serving from its persisted local snapshot. `/health`, `/status`, and
 `nebula_status` expose the configured `sync_peer_urls` list, per-peer
 `sync_peer_telemetry`, `sync_peer_quorum`, `sync_quorum_met`,
 `sync_quorum_peer_count`, `sync_quorum_height`, `sync_quorum_latest_hash`,
-`sync_quorum_state_root`, successful peer count, attempt/success/failure/import
-counts, stale snapshot count, fork rejection count, and quorum rejection count.
+`sync_quorum_state_root`, successful peer count, last seen peer identities,
+attempt/success/failure/import counts, stale snapshot count, fork rejection
+count, and quorum rejection count.
 Followers remain launch-blocked with `follower-no-successful-sync-peer` until at
 least one configured peer has returned a valid snapshot response and with
 `follower-sync-quorum-not-met` until the configured peer quorum agrees on the

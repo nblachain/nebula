@@ -414,6 +414,46 @@ fn public_rpc_rejects_incomplete_declared_body_without_dispatching() {
 }
 
 #[test]
+fn public_rpc_rate_limit_fires_after_headers_before_reading_declared_body() {
+    let mut config = RuntimeConfig::public_testnet_default();
+    config.block_target_ms = 999;
+    let rpc_addr = start_rpc_server_with_config(
+        config,
+        RuntimeNodeOptions {
+            max_requests_per_minute: 1,
+            trusted_proxy_ips: vec!["127.0.0.1".to_string()],
+            ..RuntimeNodeOptions::default()
+        },
+    );
+
+    let client_header = "X-Forwarded-For: 203.0.113.200";
+    let (headers, _body) =
+        http_response_with_headers(&rpc_addr, "GET", "/status", &[client_header], None)
+            .expect("first forwarded client request succeeds");
+    assert!(
+        headers.lines().next().unwrap_or_default().contains(" 200 "),
+        "{headers}"
+    );
+
+    let mut stream = TcpStream::connect(&rpc_addr).expect("rate-limited request connects");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("set rate-limited request read timeout");
+    write!(
+        stream,
+        "POST /rpc HTTP/1.1\r\nHost: {rpc_addr}\r\n{client_header}\r\nContent-Type: application/json\r\nContent-Length: 512\r\nConnection: close\r\n\r\n",
+    )
+    .expect("write only rate-limited request headers");
+
+    let (headers, response_body) = read_http_response(stream).expect("read rate-limit response");
+    assert!(
+        headers.lines().next().unwrap_or_default().contains(" 429 "),
+        "expected 429 before body read, got {headers:?}: {response_body:?}"
+    );
+    assert!(response_body.contains("rate limit exceeded"));
+}
+
+#[test]
 fn metrics_endpoint_exposes_public_rpc_operational_gauges() {
     let (rpc_addr, _admin_addr) = start_rpc_server_with_admin(Some(ADMIN_TOKEN));
 

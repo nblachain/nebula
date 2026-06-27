@@ -6,7 +6,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha3::{Digest, Sha3_256};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
@@ -41,6 +41,7 @@ pub const DEFAULT_MAX_REQUESTS_PER_MINUTE: u32 = 600;
 pub const DEFAULT_MAX_ACTIVE_CONNECTIONS: usize = 512;
 pub const DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS: usize = 32;
 pub const DEFAULT_MAX_SNAPSHOT_RESPONSE_BYTES: usize = 268_435_456;
+const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
 const RPC_RATE_LIMIT_WINDOW_MS: u128 = 60_000;
 pub const DEFAULT_DEV_SEQUENCER_SECRET_KEY_HEX: &str =
     "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -166,6 +167,20 @@ impl RuntimeConfig {
     }
 
     pub fn validator_reward_account(&self) -> String {
+        if let Some(binding) = &self.launch_binding {
+            if let Some(reward_account) = binding
+                .validator_reward_accounts
+                .iter()
+                .find(|account| {
+                    account
+                        .validator_id
+                        .eq_ignore_ascii_case(&self.validator_id)
+                })
+                .map(|account| account.reward_account.clone())
+            {
+                return reward_account;
+            }
+        }
         format!("{VALIDATOR_REWARD_ACCOUNT_PREFIX}{}", self.validator_id)
     }
 }
@@ -188,6 +203,14 @@ pub struct RuntimeBridgeObserverKey {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct RuntimeValidatorRewardAccount {
+    pub validator_id: String,
+    pub operator_id: String,
+    pub reward_account: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeLaunchBinding {
     pub chain_id: String,
     pub runtime_version: String,
@@ -205,6 +228,7 @@ pub struct RuntimeLaunchBinding {
     pub validator_count: usize,
     pub operator_count: usize,
     pub region_count: usize,
+    pub validator_reward_accounts: Vec<RuntimeValidatorRewardAccount>,
     pub bridge_operator_keys: Vec<RuntimeBridgeOperatorKey>,
     pub bridge_observer_keys: Vec<RuntimeBridgeObserverKey>,
 }
@@ -262,8 +286,16 @@ impl RuntimeLaunchBinding {
         if self.region_count == 0 {
             return Err("launch binding region_count must be greater than zero".to_string());
         }
+        validate_launch_validator_reward_accounts(self, config)?;
         validate_launch_bridge_operator_keys(self)?;
         validate_launch_bridge_observer_keys(self)?;
+        if self.validator_reward_accounts.len() != self.validator_count {
+            return Err(format!(
+                "launch binding validator_count {} does not match validator_reward_accounts length {}",
+                self.validator_count,
+                self.validator_reward_accounts.len()
+            ));
+        }
         if self.bridge_operator_keys.len() != self.operator_count {
             return Err(format!(
                 "launch binding operator_count {} does not match bridge_operator_keys length {}",
@@ -1015,6 +1047,7 @@ pub struct RuntimeSyncPeerTelemetry {
     pub last_seen_latest_hash: Option<String>,
     pub last_seen_state_root: Option<String>,
     pub last_seen_snapshot_root: Option<String>,
+    pub last_seen_peer_id: Option<String>,
     pub last_import_height: Option<u64>,
     pub last_import_snapshot_root: Option<String>,
     pub last_error: Option<String>,
@@ -1059,26 +1092,29 @@ fn sync_quorum_summary(
     required_quorum: usize,
 ) -> (bool, usize, Option<u64>, Option<String>, Option<String>) {
     let required_quorum = required_quorum.max(1);
-    let mut groups: BTreeMap<(u64, String, String), usize> = BTreeMap::new();
+    let mut groups: BTreeMap<(u64, String, String), BTreeSet<String>> = BTreeMap::new();
     for peer in peer_telemetry {
-        let (Some(height), Some(latest_hash), Some(state_root)) = (
+        let (Some(height), Some(latest_hash), Some(state_root), Some(peer_id)) = (
             peer.last_seen_height,
             peer.last_seen_latest_hash.as_ref(),
             peer.last_seen_state_root.as_ref(),
+            peer.last_seen_peer_id.as_ref(),
         ) else {
             continue;
         };
         if peer.last_success_unix_ms.is_none() {
             continue;
         }
-        *groups
+        groups
             .entry((height, latest_hash.clone(), state_root.clone()))
-            .or_default() += 1;
+            .or_default()
+            .insert(peer_id.clone());
     }
 
     let mut best_any: Option<(u64, usize, String, String)> = None;
     let mut best_met: Option<(u64, usize, String, String)> = None;
-    for ((height, latest_hash, state_root), count) in groups {
+    for ((height, latest_hash, state_root), peer_ids) in groups {
+        let count = peer_ids.len();
         let candidate = (height, count, latest_hash, state_root);
         if best_any
             .as_ref()
@@ -1374,6 +1410,7 @@ impl RuntimeRpcState {
         entry.last_seen_latest_hash = snapshot.latest_block_hash().map(str::to_string);
         entry.last_seen_state_root = Some(snapshot.state_root.clone());
         entry.last_seen_snapshot_root = Some(snapshot.root.clone());
+        entry.last_seen_peer_id = Some(sync_peer_identity(snapshot));
         entry.last_error = None;
         entry.last_error_unix_ms = None;
         entry.success_count = entry.success_count.saturating_add(1);
@@ -2036,6 +2073,7 @@ impl RuntimeRpcState {
             "bridge_live_value_enabled": status["bridge_live_value_enabled"],
             "faucet_nbla_nebulai": status["faucet_nbla_nebulai"],
             "faucet_nxmr_units": status["faucet_nxmr_units"],
+            "validator_reward_account": status["validator_reward_account"],
             "bridge_only_nxmr": status["bridge_only_nxmr"],
             "bridge_deposited_nxmr_units": status["bridge_deposited_nxmr_units"],
             "account_nxmr_units": status["account_nxmr_units"],
@@ -3927,6 +3965,18 @@ fn select_best_extending_snapshot(
     Ok(selected)
 }
 
+fn sync_peer_identity(snapshot: &RuntimeSnapshot) -> String {
+    snapshot.config.validator_id.trim().to_ascii_lowercase()
+}
+
+fn distinct_sync_peer_count(candidates: &[(String, RuntimeSnapshot)]) -> usize {
+    candidates
+        .iter()
+        .map(|(_, snapshot)| sync_peer_identity(snapshot))
+        .collect::<BTreeSet<_>>()
+        .len()
+}
+
 fn select_best_extending_snapshot_with_telemetry(
     state: &RuntimeRpcState,
     local: &RuntimeSnapshot,
@@ -3966,13 +4016,17 @@ fn select_best_extending_snapshot_with_telemetry(
     }
     let selected_key = candidate_groups
         .iter()
-        .filter(|(_, candidates)| candidates.len() >= state.sync_peers.sync_peer_quorum)
+        .filter(|(_, candidates)| {
+            distinct_sync_peer_count(candidates) >= state.sync_peers.sync_peer_quorum
+        })
         .max_by(
             |(left_key, left_candidates), (right_key, right_candidates)| {
+                let left_peer_count = distinct_sync_peer_count(left_candidates);
+                let right_peer_count = distinct_sync_peer_count(right_candidates);
                 left_key
                     .0
                     .cmp(&right_key.0)
-                    .then(left_candidates.len().cmp(&right_candidates.len()))
+                    .then(left_peer_count.cmp(&right_peer_count))
                     .then(left_key.1.cmp(&right_key.1))
                     .then(left_key.2.cmp(&right_key.2))
             },
@@ -4200,7 +4254,100 @@ fn handle_http_connection(
 
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 4096];
-    loop {
+    let header_end = loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break None,
+            Ok(read) => {
+                buffer.extend_from_slice(&chunk[..read]);
+                if buffer.len() > state.rpc_limits.max_request_bytes {
+                    write_json_response(
+                        &mut stream,
+                        413,
+                        &json!({
+                            "error": "request body too large",
+                            "max_request_bytes": state.rpc_limits.max_request_bytes,
+                        }),
+                    )?;
+                    return Ok(());
+                }
+                if let Some(header_end) = http_header_end(&buffer) {
+                    break Some(header_end);
+                }
+                if buffer.len() > MAX_HTTP_HEADER_BYTES {
+                    write_json_response(
+                        &mut stream,
+                        431,
+                        &json!({
+                            "error": "request headers too large",
+                            "max_header_bytes": MAX_HTTP_HEADER_BYTES,
+                        }),
+                    )?;
+                    return Ok(());
+                }
+            }
+            Err(error)
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    || error.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                break None;
+            }
+            Err(error) => return Err(error),
+        }
+    };
+
+    let Some(header_end) = header_end else {
+        write_json_response(
+            &mut stream,
+            400,
+            &json!({"error": "incomplete HTTP request headers"}),
+        )?;
+        return Ok(());
+    };
+
+    if request_size_exceeds_limit(&buffer, state.rpc_limits.max_request_bytes) {
+        write_json_response(
+            &mut stream,
+            413,
+            &json!({
+                "error": "request body too large",
+                "max_request_bytes": state.rpc_limits.max_request_bytes,
+            }),
+        )?;
+        return Ok(());
+    }
+
+    let head = String::from_utf8_lossy(&buffer[..header_end]).into_owned();
+    let client_id = match state
+        .client_identity
+        .client_id_for_request(access, peer_ip, &head)
+    {
+        Ok(client_id) => client_id,
+        Err(error) => {
+            write_json_response(
+                &mut stream,
+                400,
+                &json!({
+                    "error": error,
+                    "listener": access.label(),
+                }),
+            )?;
+            return Ok(());
+        }
+    };
+    if let Err(error) = state.check_request_allowed(access, &client_id) {
+        write_json_response(
+            &mut stream,
+            429,
+            &json!({
+                "error": error,
+                "listener": access.label(),
+                "client_identity_mode": state.client_identity.mode(),
+            }),
+        )?;
+        return Ok(());
+    }
+
+    while !request_complete(&buffer) {
         match stream.read(&mut chunk) {
             Ok(0) => break,
             Ok(read) => {
@@ -4215,9 +4362,6 @@ fn handle_http_connection(
                         }),
                     )?;
                     return Ok(());
-                }
-                if request_complete(&buffer) {
-                    break;
                 }
             }
             Err(error)
@@ -4248,35 +4392,6 @@ fn handle_http_connection(
         )?;
         return Ok(());
     };
-    let client_id = match state
-        .client_identity
-        .client_id_for_request(access, peer_ip, head)
-    {
-        Ok(client_id) => client_id,
-        Err(error) => {
-            write_json_response(
-                &mut stream,
-                400,
-                &json!({
-                    "error": error,
-                    "listener": access.label(),
-                }),
-            )?;
-            return Ok(());
-        }
-    };
-    if let Err(error) = state.check_request_allowed(access, &client_id) {
-        write_json_response(
-            &mut stream,
-            429,
-            &json!({
-                "error": error,
-                "listener": access.label(),
-                "client_identity_mode": state.client_identity.mode(),
-            }),
-        )?;
-        return Ok(());
-    }
     let Some(request_line) = head.lines().next() else {
         write_json_response(&mut stream, 400, &json!({"error": "missing request line"}))?;
         return Ok(());
@@ -4699,8 +4814,12 @@ fn write_text_response(
     )
 }
 
+fn http_header_end(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
 fn request_complete(buffer: &[u8]) -> bool {
-    let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else {
+    let Some(header_end) = http_header_end(buffer) else {
         return false;
     };
     let headers = String::from_utf8_lossy(&buffer[..header_end]);
@@ -4712,7 +4831,7 @@ fn request_size_exceeds_limit(buffer: &[u8], max_request_bytes: usize) -> bool {
     if buffer.len() > max_request_bytes {
         return true;
     }
-    let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else {
+    let Some(header_end) = http_header_end(buffer) else {
         return false;
     };
     let headers = String::from_utf8_lossy(&buffer[..header_end]);
@@ -5728,6 +5847,52 @@ fn validate_quorum_roots(roots: &[String], name: &str, minimum_count: usize) -> 
     Ok(())
 }
 
+fn validate_launch_validator_reward_accounts(
+    binding: &RuntimeLaunchBinding,
+    config: &RuntimeConfig,
+) -> Result<(), String> {
+    let mut seen_validators = BTreeMap::<String, usize>::new();
+    let mut seen_reward_accounts = BTreeMap::<String, usize>::new();
+    let mut local_reward_account = None;
+    for (index, account) in binding.validator_reward_accounts.iter().enumerate() {
+        validate_account_id(&account.validator_id)?;
+        validate_account_id(&account.operator_id)?;
+        validate_account_id(&account.reward_account)?;
+        let expected_reward_account = format!("nbla-reward-{}", account.operator_id);
+        if account.reward_account != expected_reward_account {
+            return Err(format!(
+                "validator_reward_accounts[{index}].reward_account expected {expected_reward_account} but got {}",
+                account.reward_account
+            ));
+        }
+        let validator_id = account.validator_id.to_ascii_lowercase();
+        if let Some(previous_index) = seen_validators.insert(validator_id, index) {
+            return Err(format!(
+                "validator_reward_accounts[{index}].validator_id duplicates validator_reward_accounts[{previous_index}]"
+            ));
+        }
+        let reward_account = account.reward_account.to_ascii_lowercase();
+        if let Some(previous_index) = seen_reward_accounts.insert(reward_account, index) {
+            return Err(format!(
+                "validator_reward_accounts[{index}].reward_account duplicates validator_reward_accounts[{previous_index}]"
+            ));
+        }
+        if account
+            .validator_id
+            .eq_ignore_ascii_case(&config.validator_id)
+        {
+            local_reward_account = Some(account.reward_account.clone());
+        }
+    }
+    if local_reward_account.is_none() {
+        return Err(format!(
+            "launch binding validator_reward_accounts missing validator_id {}",
+            config.validator_id
+        ));
+    }
+    Ok(())
+}
+
 fn validate_launch_bridge_operator_keys(binding: &RuntimeLaunchBinding) -> Result<(), String> {
     if binding.bridge_operator_keys.len() < MIN_WITHDRAWAL_OPERATOR_QUORUM {
         return Err(format!(
@@ -6630,9 +6795,21 @@ mod tests {
             launch_package_root: "8".repeat(64),
             launch_package_bundle_root: "9".repeat(64),
             activation_height: 1,
-            validator_count: 3,
+            validator_count: 2,
             operator_count: 2,
             region_count: 2,
+            validator_reward_accounts: vec![
+                RuntimeValidatorRewardAccount {
+                    validator_id: "validator-a".to_string(),
+                    operator_id: "operator-a".to_string(),
+                    reward_account: "nbla-reward-operator-a".to_string(),
+                },
+                RuntimeValidatorRewardAccount {
+                    validator_id: "validator-b".to_string(),
+                    operator_id: "operator-b".to_string(),
+                    reward_account: "nbla-reward-operator-b".to_string(),
+                },
+            ],
             bridge_operator_keys: vec![
                 RuntimeBridgeOperatorKey {
                     operator_id: "operator-a".to_string(),
@@ -7671,8 +7848,11 @@ mod tests {
             .blocking_gaps
             .contains(&"follower-sync-quorum-not-met".to_string()));
 
+        let mut second_snapshot = snapshot.clone();
+        second_snapshot.config.validator_id = "validator-b".to_string();
+        second_snapshot.root = snapshot_root(&second_snapshot);
         state
-            .record_sync_peer_success("http://127.0.0.1:9946/snapshot", &snapshot, 1)
+            .record_sync_peer_success("http://127.0.0.1:9946/snapshot", &second_snapshot, 1)
             .unwrap();
         let ops = state.ops_status().unwrap();
         assert!(!ops.public_ops_ready);
@@ -8557,6 +8737,44 @@ mod tests {
     }
 
     #[test]
+    fn launch_bound_runtime_rewards_validator_set_reward_account() {
+        let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        assert_eq!(
+            runtime.config().validator_reward_account(),
+            "nbla-reward-operator-a"
+        );
+        assert!(runtime.account("validator:validator-a").is_none());
+
+        let account = test_account_id();
+        runtime.faucet(&account).unwrap();
+        let tx = sign_test_transaction(RuntimeTransaction {
+            from: account,
+            to: "launch-bound-recipient".to_string(),
+            amount_nebulai: 10,
+            gas_units: 5,
+            gas_price_nebulai: 2,
+            fee_asset: NBLA_SYMBOL.to_string(),
+            nonce: 0,
+            signature: String::new(),
+            memo: None,
+        });
+        let tx_id = runtime.submit_transaction(tx).unwrap().tx_id;
+        runtime.produce_block();
+
+        let receipt = runtime.receipt(&tx_id).unwrap();
+        assert_eq!(receipt.status, TransactionStatus::Included);
+        assert_eq!(receipt.validator_reward_nebulai, 10);
+        let reward_account = runtime.account("nbla-reward-operator-a").unwrap();
+        assert_eq!(reward_account.nbla_nebulai, 10);
+        assert_eq!(reward_account.validator_points, 10);
+        assert!(runtime.account("validator:validator-a").is_none());
+        assert_eq!(
+            runtime.status().validator_reward_account,
+            "nbla-reward-operator-a"
+        );
+    }
+
+    #[test]
     fn runtime_rejects_unsigned_user_spends_and_withdrawals() {
         let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
         let account = test_account_id();
@@ -9216,9 +9434,17 @@ mod tests {
                 .unwrap();
         peer_runtime.produce_block();
         let peer_snapshot = peer_runtime.export_snapshot();
-        let body = serde_json::to_string(&peer_snapshot).unwrap();
-        let (first_url, first_handle) = one_shot_http_response(body.clone(), "HTTP/1.1 200 OK");
-        let (second_url, second_handle) = one_shot_http_response(body, "HTTP/1.1 200 OK");
+        let mut second_peer_snapshot = peer_snapshot.clone();
+        second_peer_snapshot.config.validator_id = "validator-b".to_string();
+        second_peer_snapshot.root = snapshot_root(&second_peer_snapshot);
+        let (first_url, first_handle) = one_shot_http_response(
+            serde_json::to_string(&peer_snapshot).unwrap(),
+            "HTTP/1.1 200 OK",
+        );
+        let (second_url, second_handle) = one_shot_http_response(
+            serde_json::to_string(&second_peer_snapshot).unwrap(),
+            "HTTP/1.1 200 OK",
+        );
         let mut state = test_rpc_state_with_limits(
             local_runtime,
             DEFAULT_MAX_REQUEST_BYTES,
@@ -9249,6 +9475,52 @@ mod tests {
         assert_eq!(status["sync_quorum_state_root"], peer_snapshot.state_root);
         assert_eq!(status["sync_quorum_rejection_count"], 0);
         assert_eq!(status["sync_import_count"], 1);
+        let peers = status["sync_peer_telemetry"].as_array().unwrap();
+        assert_eq!(peers[0]["last_seen_peer_id"], "validator-a");
+        assert_eq!(peers[1]["last_seen_peer_id"], "validator-b");
+    }
+
+    #[test]
+    fn sync_peer_quorum_rejects_aliases_for_same_peer_identity() {
+        let local_runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let local_snapshot = local_runtime.export_snapshot();
+        let mut peer_runtime =
+            NebulaRuntime::from_snapshot(RuntimeConfig::public_testnet_default(), local_snapshot)
+                .unwrap();
+        peer_runtime.produce_block();
+        let peer_snapshot = peer_runtime.export_snapshot();
+        let body = serde_json::to_string(&peer_snapshot).unwrap();
+        let (first_url, first_handle) = one_shot_http_response(body.clone(), "HTTP/1.1 200 OK");
+        let (second_url, second_handle) = one_shot_http_response(body, "HTTP/1.1 200 OK");
+        let mut state = test_rpc_state_with_limits(
+            local_runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+        state.sync_peers = RuntimeSyncPeerSet {
+            bootstrap_peer_urls: Vec::new(),
+            sync_peer_urls: vec![first_url.clone(), second_url.clone()],
+            sync_peer_quorum: 2,
+        };
+
+        let imported =
+            sync_runtime_from_peers(&state, &[first_url.clone(), second_url.clone()]).unwrap();
+        first_handle.join().unwrap();
+        second_handle.join().unwrap();
+
+        assert!(!imported);
+        let status = state.status_json().unwrap();
+        assert_eq!(status["latest_height"], 0);
+        assert_eq!(status["sync_successful_peer_count"], 2);
+        assert_eq!(status["sync_quorum_met"], false);
+        assert_eq!(status["sync_quorum_peer_count"], 1);
+        assert_eq!(status["sync_quorum_rejection_count"], 2);
+        assert_eq!(status["sync_import_count"], 0);
+        let peers = status["sync_peer_telemetry"].as_array().unwrap();
+        assert_eq!(peers[0]["last_seen_peer_id"], "validator-a");
+        assert_eq!(peers[1]["last_seen_peer_id"], "validator-a");
+        assert_eq!(peers[0]["quorum_rejection_count"], 1);
+        assert_eq!(peers[1]["quorum_rejection_count"], 1);
     }
 
     #[test]

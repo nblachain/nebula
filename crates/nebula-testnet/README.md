@@ -40,6 +40,11 @@ Public spend paths require Ed25519 account signatures. For
 nonce)`, and accepted withdrawals consume the account nonce before burning
 nXMR into `operator_pending`.
 
+Launch-bound runtimes credit NBLA gas rewards and nXMR-funded NBLA buyback
+rewards to the validator-set reward account (`nbla-reward-<operator_id>`) for
+the local validator, and expose that selected `validator_reward_account` through
+the runtime status surfaces.
+
 Operator ops, backup, and metrics evidence is also a launch gate. The runtime
 surfaces `/ops`, `/backup`, `/metrics`, `nebula_opsStatus`, and
 `nebula_backupManifest` are intended for public operators to verify block
@@ -198,16 +203,18 @@ persist `nebula-runtime-snapshot.json` under `--data-dir`. `--bootstrap-rpc`
 imports one verified snapshot at startup. Repeat
 `--sync-rpc <http://peer/snapshot>` for the sequencer and replica peers. Set
 `--sync-peer-quorum <count>` to require matching height, latest block hash, and
-state root from that many peers before a follower imports; use quorum `1` for
-single-peer local rehearsals and quorum `2` or higher for public replica sets.
-The follower keeps fetching, verifying, importing, and persisting newer
-snapshots from the highest ahead chain-state group whose snapshots extend local
-state. `/health`, `/status`, and `nebula_status` expose the configured
+state root from that many distinct exporting validator identities before a
+follower imports; URL aliases for the same peer do not increase quorum. Use
+quorum `1` for single-peer local rehearsals and quorum `2` or higher for public
+replica sets. The follower keeps fetching, verifying, importing, and persisting
+newer snapshots from the highest ahead chain-state group whose snapshots extend
+local state. `/health`, `/status`, and `nebula_status` expose the configured
 `sync_peer_urls` list, per-peer `sync_peer_telemetry`, `sync_peer_quorum`,
 `sync_quorum_met`, `sync_quorum_peer_count`, `sync_quorum_height`,
 `sync_quorum_latest_hash`, `sync_quorum_state_root`, successful peer count,
-attempt/success/failure/import counts, stale snapshot count, fork rejection
-count, and quorum rejection count. Followers remain launch-blocked with
+last seen peer identities, attempt/success/failure/import counts, stale
+snapshot count, fork rejection count, and quorum rejection count. Followers
+remain launch-blocked with
 `follower-no-successful-sync-peer` until at least one configured peer has
 returned a valid snapshot response, `follower-no-imported-sync-snapshot` until a
 newer snapshot has been imported, `follower-import-not-at-served-head` until the
