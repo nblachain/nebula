@@ -220,7 +220,7 @@ use the `nbla-reward-{operator_id}` form, and rewards must be denominated in
 `nebulai`. Each validator admission signature root must bind the validator
 identity, operator contact, keys, reward account, commission, genesis power,
 reward unit, and fee-policy root. Consensus and network public keys must be
-64-character hex values.
+64-character hex values, and consensus/network key domains must be disjoint.
 
 Operators can generate the required shape and verify a filled validator set
 with:

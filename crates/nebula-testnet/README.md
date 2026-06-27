@@ -70,7 +70,7 @@ admission reward accounts must use `nbla-reward-{operator_id}` and rewards are
 denominated in `nebulai`. Each signed admission root must bind the validator
 identity, operator contact, keys, reward account, commission, genesis power,
 reward unit, and fee-policy root. Consensus and network public keys must be
-64-character hex values.
+64-character hex values, and consensus/network key domains must be disjoint.
 
 The genesis manifest builder binds verified deployment evidence and validator
 admission into the root artifact used to start a public testnet. The final

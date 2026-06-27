@@ -613,6 +613,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "operator_contact_address_required": true,
                 "hex_consensus_key_required": true,
                 "hex_network_key_required": true,
+                "consensus_network_key_domains_disjoint": true,
                 "unique_consensus_keys_required": true,
                 "unique_reward_accounts_required": true,
                 "reward_account_operator_binding_required": true,
@@ -2472,6 +2473,21 @@ fn verify_validator_admission(
         &format!("validators[{index}].network_public_key"),
         &validator.network_public_key,
     );
+    if validator.consensus_public_key == validator.network_public_key {
+        errors.push(format!(
+            "validators[{index}].network_public_key must differ from consensus_public_key"
+        ));
+    }
+    if network_keys.contains(&validator.consensus_public_key) {
+        errors.push(format!(
+            "validators[{index}].consensus_public_key must not reuse a network_public_key"
+        ));
+    }
+    if consensus_keys.contains(&validator.network_public_key) {
+        errors.push(format!(
+            "validators[{index}].network_public_key must not reuse a consensus_public_key"
+        ));
+    }
     require_non_empty(
         errors,
         &format!("validators[{index}].p2p_endpoint"),
@@ -3706,6 +3722,44 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "validators[0].consensus_public_key must be a 64-character hex value"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_same_consensus_and_network_key() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["network_public_key"] =
+            value["validators"][0]["consensus_public_key"].clone();
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "validators[0].network_public_key must differ from consensus_public_key"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_network_key_reused_as_consensus_key() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][1]["network_public_key"] =
+            value["validators"][0]["consensus_public_key"].clone();
+        refresh_validator_manifest_root(&mut value, 1);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "validators[1].network_public_key must not reuse a consensus_public_key"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
