@@ -638,6 +638,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "unique_operator_keys_required": true,
                 "unique_observer_ids_required": true,
                 "unique_observer_keys_required": true,
+                "observer_region_spread_required": true,
                 "operator_signature_roots_verified": true,
                 "observer_signature_roots_verified": true,
                 "public_status_surface_verified": true,
@@ -2136,6 +2137,7 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
 
     let mut observer_ids = BTreeSet::new();
     let mut observer_keys = BTreeSet::new();
+    let mut observer_regions = BTreeSet::new();
     for (index, observer) in attestation.observers.iter().enumerate() {
         require_non_empty(
             errors,
@@ -2153,6 +2155,7 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("observers[{index}].observer_id"),
             &observer.observer_id,
         );
+        observer_regions.insert(observer.region.clone());
         require_eq(
             errors,
             &format!("observers[{index}].observed_endpoint"),
@@ -2207,6 +2210,11 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
     if observer_ids.len() < MIN_PUBLIC_TESTNET_OBSERVERS {
         errors.push(format!(
             "observers must include at least {MIN_PUBLIC_TESTNET_OBSERVERS} unique observer_id values"
+        ));
+    }
+    if observer_regions.len() < MIN_PUBLIC_TESTNET_REGIONS {
+        errors.push(format!(
+            "observers must cover at least {MIN_PUBLIC_TESTNET_REGIONS} regions"
         ));
     }
 }
@@ -3197,6 +3205,25 @@ mod public_launch {
     }
 
     #[test]
+    fn deployment_attestation_rejects_single_region_observer_quorum() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["observers"][1]["region"] = value["observers"][0]["region"].clone();
+        refresh_observer_signature_root(&mut value, 1);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "observers must cover at least 2 regions"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
     fn sample_validator_set_verifies_public_testnet_admission() {
         let report = verify_validator_set_json(&sample_validator_set_json_pretty()).unwrap();
 
@@ -3557,6 +3584,24 @@ mod public_launch {
         manifest["root"] = json!(validator_set_root(
             &serde_json::from_value::<ValidatorSetManifest>(manifest.clone()).unwrap()
         ));
+    }
+
+    fn refresh_observer_signature_root(attestation: &mut Value, observer_index: usize) {
+        let deployment =
+            serde_json::from_value::<DeploymentAttestation>(attestation.clone()).unwrap();
+        let witness_evidence_root = deployment_witness_root(
+            &deployment.launch_bundle,
+            &deployment.public_status_manifest,
+            &deployment.public_endpoint,
+            &deployment.policy_claim,
+            &deployment.public_probe,
+        );
+        let observer = serde_json::from_value::<ObserverAttestation>(
+            attestation["observers"][observer_index].clone(),
+        )
+        .unwrap();
+        attestation["observers"][observer_index]["signature"]["signature_sha3_256"] =
+            json!(observer_signature_root(&observer, &witness_evidence_root));
     }
 }
 
