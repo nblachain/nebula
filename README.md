@@ -214,10 +214,10 @@ than `5000` basis points of total genesis power, commission must be at or below
 `10000` basis points, operator contacts must use `mailto:` or `https://`,
 `mailto:` contacts must include an email address, `https://` contacts must
 include a host, P2P endpoints must use `tcp://host:port`, reward accounts must
-use the `nbla-reward-` prefix, and rewards must be denominated in `nebulai`.
-Each validator admission signature root must bind the validator identity,
-operator contact, keys, reward account, commission, genesis power, reward unit,
-and fee-policy root.
+use the `nbla-reward-{operator_id}` form, and rewards must be denominated in
+`nebulai`. Each validator admission signature root must bind the validator
+identity, operator contact, keys, reward account, commission, genesis power,
+reward unit, and fee-policy root.
 
 Operators can generate the required shape and verify a filled validator set
 with:

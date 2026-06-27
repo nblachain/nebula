@@ -65,9 +65,10 @@ must be unique. No single validator may hold more than `5000` basis points of
 total genesis power. Operator contacts must use `mailto:` or `https://`.
 `mailto:` contacts must include an email address, `https://` contacts must
 include a host, and P2P endpoints must use `tcp://host:port`. Validator
-admission rewards are denominated in `nebulai`, and each signed admission root
-must bind the validator identity, operator contact, keys, reward account,
-commission, genesis power, reward unit, and fee-policy root.
+admission reward accounts must use `nbla-reward-{operator_id}` and rewards are
+denominated in `nebulai`. Each signed admission root must bind the validator
+identity, operator contact, keys, reward account, commission, genesis power,
+reward unit, and fee-policy root.
 
 The genesis manifest builder binds verified deployment evidence and validator
 admission into the root artifact used to start a public testnet. The final

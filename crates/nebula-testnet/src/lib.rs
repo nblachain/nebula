@@ -613,6 +613,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "operator_contact_address_required": true,
                 "unique_consensus_keys_required": true,
                 "unique_reward_accounts_required": true,
+                "reward_account_operator_binding_required": true,
                 "unique_p2p_endpoints_required": true,
                 "p2p_endpoint_host_port_required": true,
                 "max_single_validator_genesis_power_bps": MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS,
@@ -2462,6 +2463,13 @@ fn verify_validator_admission(
             "validators[{index}].reward_account must use the nbla-reward- prefix"
         ));
     }
+    let expected_reward_account = format!("nbla-reward-{}", validator.operator_id);
+    if validator.reward_account != expected_reward_account {
+        errors.push(format!(
+            "validators[{index}].reward_account expected {expected_reward_account} but got {}",
+            validator.reward_account
+        ));
+    }
     require_tcp_endpoint_with_port(
         errors,
         &format!("validators[{index}].p2p_endpoint"),
@@ -3656,6 +3664,25 @@ mod public_launch {
     }
 
     #[test]
+    fn validator_set_rejects_reward_account_for_wrong_operator() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["reward_account"] = json!("nbla-reward-operator-c");
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "validators[0].reward_account expected nbla-reward-operator-a but got nbla-reward-operator-c"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
     fn validator_set_rejects_concentrated_genesis_power() {
         let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
         value["validators"][0]["genesis_power"] = json!(3);
@@ -4018,6 +4045,7 @@ mod public_launch {
         let mut validators =
             serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
         validators["validators"][0]["operator_id"] = json!("operator-c");
+        validators["validators"][0]["reward_account"] = json!("nbla-reward-operator-c");
         refresh_validator_manifest_root(&mut validators, 0);
         let genesis =
             build_genesis_manifest_json_pretty(&deployment, &validators.to_string()).unwrap();
