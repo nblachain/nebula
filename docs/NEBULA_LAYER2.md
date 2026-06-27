@@ -95,6 +95,8 @@ The public launch suite covers:
   validator set, and genesis manifest artifacts
 - launch package binding between admitted validators, deployment operators, and
   bootstrap nodes
+- launch package rejection of deployment operators and bootstrap nodes that
+  have no admitted validator
 - bootstrap node/operator region binding inside deployment evidence
 
 ## Hybrid Fees And Validator Rewards
@@ -240,7 +242,8 @@ attestation, or when the genesis manifest does not bind the exact deployment
 evidence root, validator-set root, validator count, and total genesis power
 produced by the other verified files. It also rejects validator-set manifests
 whose admitted validators do not map to the attested deployment operators and
-bootstrap nodes.
+bootstrap nodes, and rejects deployment operators or bootstrap nodes that are
+not represented by an admitted validator.
 
 Operators can verify the full package with:
 

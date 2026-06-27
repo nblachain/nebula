@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha3::{Digest, Sha3_256};
@@ -652,6 +654,8 @@ pub fn readiness_report() -> NebulaReadiness {
                 "public_probe_binds_deployment_attestation": true,
                 "validator_set_binds_deployment_operators": true,
                 "validator_set_binds_bootstrap_nodes": true,
+                "all_deployment_operators_admitted": true,
+                "all_bootstrap_nodes_admitted": true,
                 "genesis_binds_deployment_attestation_root": true,
                 "genesis_binds_validator_set_root": true,
                 "genesis_binds_validator_count": true,
@@ -2261,8 +2265,13 @@ fn verify_validator_deployment_binding(
         .iter()
         .map(|node| (node.node_id.as_str(), node))
         .collect::<BTreeMap<_, _>>();
+    let mut admitted_operator_ids = BTreeSet::new();
+    let mut admitted_node_ids = BTreeSet::new();
 
     for (index, validator) in validator_set.validators.iter().enumerate() {
+        admitted_operator_ids.insert(validator.operator_id.as_str());
+        admitted_node_ids.insert(validator.node_id.as_str());
+
         match operators_by_id.get(validator.operator_id.as_str()) {
             Some(operator) => {
                 require_eq(
@@ -2297,6 +2306,24 @@ fn verify_validator_deployment_binding(
                 "validators[{index}].node_id {} is not present in deployment bootstrap_nodes",
                 validator.node_id
             )),
+        }
+    }
+
+    for (index, operator) in attestation.operators.iter().enumerate() {
+        if !admitted_operator_ids.contains(operator.operator_id.as_str()) {
+            errors.push(format!(
+                "operators[{index}].operator_id {} has no admitted validator",
+                operator.operator_id
+            ));
+        }
+    }
+
+    for (index, node) in attestation.bootstrap_nodes.iter().enumerate() {
+        if !admitted_node_ids.contains(node.node_id.as_str()) {
+            errors.push(format!(
+                "bootstrap_nodes[{index}].node_id {} has no admitted validator",
+                node.node_id
+            ));
         }
     }
 }
@@ -3647,6 +3674,60 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error
                         == "validators[0].node_id bootstrap-ap-south-1 is not present in deployment bootstrap_nodes"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_rejects_unadmitted_deployment_operator_and_bootstrap_node() {
+        let mut deployment =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        let mut operator = deployment["operators"][0].clone();
+        operator["operator_id"] = json!("operator-c");
+        operator["region"] = json!("ap-south");
+        operator["public_key"] = json!(hex_64("operator-c-key"));
+        deployment["operators"]
+            .as_array_mut()
+            .unwrap()
+            .push(operator);
+        refresh_operator_signature_root(&mut deployment, 2);
+
+        let mut bootstrap_node = deployment["bootstrap_nodes"][0].clone();
+        bootstrap_node["node_id"] = json!("bootstrap-ap-south-1");
+        bootstrap_node["operator_id"] = json!("operator-c");
+        bootstrap_node["region"] = json!("ap-south");
+        bootstrap_node["endpoint"] = json!("https://bootstrap-ap-south-1.nebula.example:443");
+        deployment["bootstrap_nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(bootstrap_node);
+        refresh_bootstrap_node_root(&mut deployment, 2);
+
+        let deployment = deployment.to_string();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "operators[2].operator_id operator-c has no admitted validator"
+                }));
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "bootstrap_nodes[2].node_id bootstrap-ap-south-1 has no admitted validator"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
