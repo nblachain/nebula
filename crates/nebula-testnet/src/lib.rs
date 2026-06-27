@@ -623,6 +623,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "unique_p2p_endpoints_required": true,
                 "p2p_endpoint_host_port_required": true,
                 "p2p_endpoint_userinfo_forbidden": true,
+                "p2p_endpoint_query_fragment_forbidden": true,
                 "max_single_validator_genesis_power_bps": MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS,
             })),
             "genesis_manifest": stable_root(&json!({
@@ -649,6 +650,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "public_https_endpoint_required": true,
                 "public_endpoint_authority_required": true,
                 "endpoint_userinfo_forbidden": true,
+                "endpoint_query_fragment_forbidden": true,
                 "unique_tls_cert_pins_required": true,
                 "unique_tls_public_key_pins_required": true,
                 "tls_cert_public_key_pin_domains_disjoint": true,
@@ -3104,6 +3106,10 @@ fn require_endpoint_authority<'a>(
         errors.push(format!("{label} must not include userinfo"));
         return None;
     }
+    if remainder.contains('?') || remainder.contains('#') {
+        errors.push(format!("{label} must not include query or fragment"));
+        return None;
+    }
     Some(authority)
 }
 
@@ -3324,6 +3330,27 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "public_status_manifest.endpoint_url must not include userinfo"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn public_status_rejects_endpoint_with_query() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_public_status_manifest_json_pretty()).unwrap();
+        value["endpoint_url"] = json!("https://testnet.nebula.example/status?operator=a");
+        value["root"] = json!(public_status_manifest_root(
+            &serde_json::from_value::<PublicStatusManifest>(value.clone()).unwrap()
+        ));
+
+        let error = verify_public_status_manifest_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "public_status_manifest.endpoint_url must not include query or fragment"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
@@ -4455,6 +4482,25 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "validators[0].p2p_endpoint must not include userinfo"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_p2p_endpoint_with_fragment() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["p2p_endpoint"] =
+            json!("tcp://bootstrap-a.testnet.nebula.example:26656#operator-a");
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "validators[0].p2p_endpoint must not include query or fragment"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

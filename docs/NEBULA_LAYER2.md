@@ -71,7 +71,8 @@ The public launch suite covers:
 - deployment evidence root binding
 - public status manifest redaction
 - public endpoint and TLS pin evidence
-- HTTPS-only public status/probe endpoints with non-empty hosts and no userinfo
+- HTTPS-only public status/probe endpoints with non-empty hosts, no userinfo,
+  and no query or fragment
 - standalone public status/probe surface exact-shape validation
 - final package binding for the public status/probe surface
 - shared deployment witness root binding for bootstrap nodes, operators, and
@@ -170,8 +171,8 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - duplicated preflight/runbook receipt phase names, step names, and step
   evidence roots
 - public status/probe endpoints that do not use `https://`
-- public status/probe and bootstrap endpoints that do not include a host or
-  include userinfo
+- public status/probe and bootstrap endpoints that do not include a host,
+  include userinfo, or include query/fragment components
 - operator and observer witness roots that do not match the deployment surface
 - operator and observer public keys that are not 64-character hex values
 - observer public keys that reuse an operator public key
@@ -240,7 +241,8 @@ Genesis power must be positive, no single validator may hold more than `5000`
 basis points of total genesis power, commission must be at or below `10000`
 basis points, operator contacts must use `mailto:` or `https://`, `mailto:`
 contacts must include an email address, `https://` contacts must include a host
-and no userinfo, P2P endpoints must use `tcp://host:port` with no userinfo,
+and no userinfo/query/fragment components, P2P endpoints must use
+`tcp://host:port` with no userinfo/query/fragment components,
 reward accounts must use the `nbla-reward-{operator_id}` form, and rewards must
 be denominated in `nebulai`. Each validator admission signature root must bind
 the validator identity, operator contact, keys, reward account, commission,
