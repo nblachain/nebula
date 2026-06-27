@@ -270,7 +270,7 @@ pub struct ObserverAttestation {
     pub signature: SignatureVerification,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SignatureVerification {
     pub algorithm: String,
@@ -501,6 +501,42 @@ pub struct OperatorHandoffReport {
     pub launch_bundle_root: String,
     pub validator_set_root: String,
     pub validator_deployment_binding_root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorAcceptanceManifest {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub launch_bundle_root: String,
+    pub operator_handoff_root: String,
+    pub accepted_at_unix_ms: u128,
+    pub entries: Vec<OperatorAcceptanceEntry>,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorAcceptanceEntry {
+    pub operator_id: String,
+    pub validator_id: String,
+    pub node_id: String,
+    pub accepted_handoff_root: String,
+    pub operator_public_key: String,
+    pub accepted: bool,
+    pub acceptance_root: String,
+    pub signature: SignatureVerification,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OperatorAcceptanceReport {
+    pub operator_acceptance_ready: bool,
+    pub level: &'static str,
+    pub operator_acceptance_root: String,
+    pub operator_handoff_root: String,
+    pub accepted_operator_count: usize,
+    pub accepted_validator_count: usize,
+    pub accepted_at_unix_ms: u128,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -757,6 +793,16 @@ pub fn readiness_report() -> NebulaReadiness {
                 "reward_account_reported": true,
                 "signed_admission_root_reported": true,
                 "entry_roots_required": true,
+            })),
+            "operator_acceptance": stable_root(&json!({
+                "operator_handoff_root_required": true,
+                "accepted_at_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
+                "one_acceptance_entry_per_handoff_entry": true,
+                "accepted_handoff_root_required": true,
+                "operator_public_key_required": true,
+                "operator_acceptance_signature_roots_verified": true,
+                "operator_acceptance_signatures_verified": true,
+                "all_handoff_entries_accepted": true,
             })),
             "genesis_manifest": stable_root(&json!({
                 "deployment_attestation_root_required": true,
@@ -1509,6 +1555,166 @@ pub fn verify_operator_handoff_jsons(
         launch_bundle_root: manifest.launch_bundle_root,
         validator_set_root: manifest.validator_set_root,
         validator_deployment_binding_root: manifest.validator_deployment_binding_root,
+    })
+}
+
+pub fn sample_operator_acceptance_json_pretty() -> String {
+    build_operator_acceptance_json_pretty(
+        &sample_operator_handoff_json_pretty(),
+        &sample_deployment_attestation_json_pretty(),
+        &sample_validator_set_json_pretty(),
+    )
+    .expect("sample operator acceptance builds")
+}
+
+pub fn build_operator_acceptance_json_pretty(
+    operator_handoff_json: &str,
+    deployment_attestation_json: &str,
+    validator_set_json: &str,
+) -> Result<String, AttestationError> {
+    verify_operator_handoff_jsons(
+        operator_handoff_json,
+        deployment_attestation_json,
+        validator_set_json,
+    )?;
+    let handoff = serde_json::from_str::<OperatorHandoffManifest>(
+        operator_handoff_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let deployment_attestation =
+        verified_deployment_attestation_manifest(deployment_attestation_json)?;
+    let manifest = operator_acceptance_manifest(&handoff, &deployment_attestation, unix_ms());
+
+    serde_json::to_string_pretty(&manifest)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+pub fn verify_operator_acceptance_jsons(
+    operator_acceptance_json: &str,
+    operator_handoff_json: &str,
+    deployment_attestation_json: &str,
+    validator_set_json: &str,
+) -> Result<OperatorAcceptanceReport, AttestationError> {
+    verify_operator_handoff_jsons(
+        operator_handoff_json,
+        deployment_attestation_json,
+        validator_set_json,
+    )?;
+    let manifest = serde_json::from_str::<OperatorAcceptanceManifest>(
+        operator_acceptance_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let handoff = serde_json::from_str::<OperatorHandoffManifest>(
+        operator_handoff_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let deployment_attestation =
+        verified_deployment_attestation_manifest(deployment_attestation_json)?;
+    let mut errors = Vec::new();
+    let now = unix_ms();
+    let expected = operator_acceptance_manifest(
+        &handoff,
+        &deployment_attestation,
+        manifest.accepted_at_unix_ms,
+    );
+
+    if manifest.accepted_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
+        errors.push("accepted_at_unix_ms is more than five minutes in the future".to_string());
+    }
+    if manifest.accepted_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("accepted_at_unix_ms is older than 24 hours".to_string());
+    }
+    require_eq(
+        &mut errors,
+        "chain_id",
+        &manifest.chain_id,
+        &expected.chain_id,
+    );
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &manifest.runtime_version,
+        &expected.runtime_version,
+    );
+    require_eq(
+        &mut errors,
+        "launch_bundle_root",
+        &manifest.launch_bundle_root,
+        &expected.launch_bundle_root,
+    );
+    require_eq(
+        &mut errors,
+        "operator_handoff_root",
+        &manifest.operator_handoff_root,
+        &expected.operator_handoff_root,
+    );
+    if manifest.entries != expected.entries {
+        errors.push(
+            "operator acceptance entries do not match verified operator handoff and deployment"
+                .to_string(),
+        );
+    }
+    for (index, entry) in manifest.entries.iter().enumerate() {
+        if !entry.accepted {
+            errors.push(format!("entries[{index}].accepted must be true"));
+        }
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].acceptance_root"),
+            &entry.acceptance_root,
+            &operator_acceptance_entry_root(
+                entry,
+                &manifest.launch_bundle_root,
+                &manifest.operator_handoff_root,
+                manifest.accepted_at_unix_ms,
+            ),
+        );
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].signature.signature_sha3_256"),
+            &entry.signature.signature_sha3_256,
+            &operator_acceptance_signature_root(entry),
+        );
+        if !entry.signature.verified {
+            errors.push(format!("entries[{index}].signature.verified must be true"));
+        }
+    }
+    require_root(
+        &mut errors,
+        "root",
+        &manifest.root,
+        &operator_acceptance_manifest_root(&manifest),
+    );
+    if manifest.root != expected.root {
+        errors.push(format!(
+            "operator acceptance root does not match expected root {}",
+            expected.root
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    let accepted_operators = manifest
+        .entries
+        .iter()
+        .map(|entry| entry.operator_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let accepted_validators = manifest
+        .entries
+        .iter()
+        .map(|entry| entry.validator_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    Ok(OperatorAcceptanceReport {
+        operator_acceptance_ready: true,
+        level: "operator-acceptance-attested",
+        operator_acceptance_root: manifest.root,
+        operator_handoff_root: manifest.operator_handoff_root,
+        accepted_operator_count: accepted_operators.len(),
+        accepted_validator_count: accepted_validators.len(),
+        accepted_at_unix_ms: manifest.accepted_at_unix_ms,
     })
 }
 
@@ -4286,6 +4492,122 @@ fn operator_handoff_manifest_root(manifest: &OperatorHandoffManifest) -> String 
     }))
 }
 
+fn operator_acceptance_manifest(
+    handoff: &OperatorHandoffManifest,
+    attestation: &DeploymentAttestation,
+    accepted_at_unix_ms: u128,
+) -> OperatorAcceptanceManifest {
+    let operator_keys_by_id = attestation
+        .operators
+        .iter()
+        .map(|operator| (operator.operator_id.as_str(), operator.public_key.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let mut entries = handoff
+        .entries
+        .iter()
+        .map(|handoff_entry| {
+            let operator_public_key = operator_keys_by_id
+                .get(handoff_entry.operator_id.as_str())
+                .copied()
+                .unwrap_or_default()
+                .to_string();
+            let mut entry = OperatorAcceptanceEntry {
+                operator_id: handoff_entry.operator_id.clone(),
+                validator_id: handoff_entry.validator_id.clone(),
+                node_id: handoff_entry.node_id.clone(),
+                accepted_handoff_root: handoff_entry.handoff_root.clone(),
+                operator_public_key,
+                accepted: true,
+                acceptance_root: String::new(),
+                signature: SignatureVerification {
+                    algorithm: "ed25519-testnet-operator-acceptance".to_string(),
+                    public_key: String::new(),
+                    signature_sha3_256: String::new(),
+                    verified: true,
+                },
+            };
+            entry.signature.public_key = entry.operator_public_key.clone();
+            entry.acceptance_root = operator_acceptance_entry_root(
+                &entry,
+                &handoff.launch_bundle_root,
+                &handoff.root,
+                accepted_at_unix_ms,
+            );
+            entry.signature.signature_sha3_256 = operator_acceptance_signature_root(&entry);
+            entry
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        (
+            left.operator_id.as_str(),
+            left.validator_id.as_str(),
+            left.node_id.as_str(),
+        )
+            .cmp(&(
+                right.operator_id.as_str(),
+                right.validator_id.as_str(),
+                right.node_id.as_str(),
+            ))
+    });
+
+    let mut manifest = OperatorAcceptanceManifest {
+        chain_id: handoff.chain_id.clone(),
+        runtime_version: handoff.runtime_version.clone(),
+        launch_bundle_root: handoff.launch_bundle_root.clone(),
+        operator_handoff_root: handoff.root.clone(),
+        accepted_at_unix_ms,
+        entries,
+        root: String::new(),
+    };
+    manifest.root = operator_acceptance_manifest_root(&manifest);
+    manifest
+}
+
+fn operator_acceptance_entry_root(
+    entry: &OperatorAcceptanceEntry,
+    launch_bundle_root: &str,
+    operator_handoff_root: &str,
+    accepted_at_unix_ms: u128,
+) -> String {
+    stable_root(&json!({
+        "acceptance_entry_domain": "nebula-operator-acceptance-entry-v1",
+        "launch_bundle_root": launch_bundle_root,
+        "operator_handoff_root": operator_handoff_root,
+        "accepted_at_unix_ms": accepted_at_unix_ms,
+        "operator_id": entry.operator_id,
+        "validator_id": entry.validator_id,
+        "node_id": entry.node_id,
+        "accepted_handoff_root": entry.accepted_handoff_root,
+        "operator_public_key": entry.operator_public_key,
+        "accepted": entry.accepted,
+    }))
+}
+
+fn operator_acceptance_signature_root(entry: &OperatorAcceptanceEntry) -> String {
+    stable_root(&json!({
+        "signature_domain": "nebula-operator-acceptance-signature-v1",
+        "algorithm": entry.signature.algorithm,
+        "operator_id": entry.operator_id,
+        "validator_id": entry.validator_id,
+        "node_id": entry.node_id,
+        "public_key": entry.signature.public_key,
+        "acceptance_root": entry.acceptance_root,
+        "accepted": entry.accepted,
+    }))
+}
+
+fn operator_acceptance_manifest_root(manifest: &OperatorAcceptanceManifest) -> String {
+    stable_root(&json!({
+        "acceptance_domain": "nebula-operator-acceptance-v1",
+        "chain_id": manifest.chain_id,
+        "runtime_version": manifest.runtime_version,
+        "launch_bundle_root": manifest.launch_bundle_root,
+        "operator_handoff_root": manifest.operator_handoff_root,
+        "accepted_at_unix_ms": manifest.accepted_at_unix_ms,
+        "entries": manifest.entries,
+    }))
+}
+
 fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
     stable_root(&json!({
         "chain_id": manifest.chain_id,
@@ -6311,6 +6633,57 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "operator handoff entries do not match verified deployment and validator set"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn operator_acceptance_builds_from_verified_handoff() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+
+        let report =
+            verify_operator_acceptance_jsons(&acceptance, &handoff, &deployment, &validators)
+                .unwrap();
+
+        assert!(report.operator_acceptance_ready);
+        assert_eq!(report.level, "operator-acceptance-attested");
+        assert_eq!(report.operator_acceptance_root.len(), 64);
+        assert_eq!(report.operator_handoff_root.len(), 64);
+        assert_eq!(report.accepted_operator_count, 2);
+        assert_eq!(report.accepted_validator_count, 2);
+    }
+
+    #[test]
+    fn operator_acceptance_rejects_unaccepted_entry() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let mut acceptance = serde_json::from_str::<Value>(
+            &build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        acceptance["entries"][0]["accepted"] = json!(false);
+
+        let error = verify_operator_acceptance_jsons(
+            &acceptance.to_string(),
+            &handoff,
+            &deployment,
+            &validators,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "entries[0].accepted must be true"));
+                assert!(errors.iter().any(|error| error
+                    == "operator acceptance entries do not match verified operator handoff and deployment"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
