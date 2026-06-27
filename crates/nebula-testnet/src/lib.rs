@@ -641,6 +641,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "public_endpoint_authority_required": true,
                 "unique_tls_cert_pins_required": true,
                 "unique_tls_public_key_pins_required": true,
+                "tls_cert_public_key_pin_domains_disjoint": true,
                 "unique_bootstrap_node_ids_required": true,
                 "unique_bootstrap_endpoints_required": true,
                 "bootstrap_endpoint_authority_required": true,
@@ -1826,6 +1827,21 @@ fn verify_public_endpoint(
             &format!("public_endpoint.tls_pins[{index}].public_key_sha256"),
             &pin.public_key_sha256,
         );
+        if pin.cert_sha256 == pin.public_key_sha256 {
+            errors.push(format!(
+                "public_endpoint.tls_pins[{index}].public_key_sha256 must differ from cert_sha256"
+            ));
+        }
+        if public_key_pins.contains(&pin.cert_sha256) {
+            errors.push(format!(
+                "public_endpoint.tls_pins[{index}].cert_sha256 must not reuse a public_key_sha256"
+            ));
+        }
+        if cert_pins.contains(&pin.public_key_sha256) {
+            errors.push(format!(
+                "public_endpoint.tls_pins[{index}].public_key_sha256 must not reuse a cert_sha256"
+            ));
+        }
         insert_unique(
             errors,
             &mut cert_pins,
@@ -3401,6 +3417,26 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "public_endpoint.tls_pins[1].public_key_sha256 must be unique"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_tls_public_key_pin_reused_as_cert_pin() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["public_endpoint"]["tls_pins"][1]["public_key_sha256"] =
+            value["public_endpoint"]["tls_pins"][0]["cert_sha256"].clone();
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "public_endpoint.tls_pins[1].public_key_sha256 must not reuse a cert_sha256"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

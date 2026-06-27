@@ -40,8 +40,9 @@ shared witness root for the launch bundle, public status, HTTPS endpoint/TLS
 pins, policy claim, and public probe. Operator and observer signature roots must
 bind their signer identity and that witness root. Bootstrap node IDs/endpoints,
 operator IDs/keys, observer IDs/keys, and TLS certificate/public-key pins must
-be unique. Operator and observer public keys must be 64-character hex values,
-and observer keys must not reuse operator keys.
+be unique. TLS certificate pins and public-key pins must not reuse each other.
+Operator and observer public keys must be 64-character hex values, and observer
+keys must not reuse operator keys.
 Public status, probe, and bootstrap HTTPS endpoints must include a host. Bootstrap
 nodes must match their attested operator region. Bootstrap
 nodes, operator quorums, and observer quorums must each cover at least two
