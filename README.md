@@ -42,7 +42,8 @@ The target architecture is:
 - a Base-style public testnet phase where a sequencer produces deterministic
   sub-second blocks after launch package verification, while followers persist
   local state and continuously sync Ed25519-signed, verified snapshots from the
-  sequencer or an upstream peer
+  sequencer or an upstream peer, with public RPC nodes enforcing request-size
+  and per-client rate limits
 - public status and public probe surfaces that are bound into deployment
   evidence before operators can label the testnet public
 - bootstrap nodes, operators, and observers tied to one deployment witness root
@@ -120,14 +121,17 @@ evidence is absent or stale.
     matching `--sequencer-secret-key` only on the sequencer, run followers that
     persist `nebula-runtime-snapshot.json`, import a verified startup snapshot
     with `--bootstrap-rpc`, and continuously sync newer verified snapshots with
-    `--sync-rpc`.
+    `--sync-rpc`. Configure public RPC abuse-resistance with
+    `--max-request-bytes` and `--max-requests-per-minute`.
 12. Confirm the sequencer/follower public-testnet RPC surfaces before launch.
     `/health`, `/status`, `/snapshot`, and JSON-RPC `/rpc` must agree on chain
     head, genesis identity, activation height, fee policy, validator identity,
     state root, snapshot root, and sequencer public key. Every snapshot block
     must commit to the producer public key and verify its Ed25519 signature
     before a follower treats the peer as ready; exported snapshots must never
-    include the sequencer secret key.
+    include the sequencer secret key. Public RPC nodes must reject oversized
+    requests and throttle per-client request bursts before launch observers
+    treat the endpoint as ready.
 13. Build and verify validator activation receipts that bind every admitted
     validator to the verified launch-package bundle, activation root, reward
     account, P2P endpoint, consensus key, network key, and operator acceptance
@@ -170,12 +174,14 @@ continuously sync signed, verified snapshots from a peer. It targets `250 ms`
 blocks by default, enforces a public-testnet block target below one second,
 exposes health/status JSON, accepts transfer transactions, and accounts for
 `NBLA` gas, `nXMR` gas, nXMR-funded NBLA buybacks/backing, and validator
-rewards.
+rewards. Public RPC nodes enforce a maximum request body size and per-client
+request rate limit; tune rehearsal limits with `--max-request-bytes` and
+`--max-requests-per-minute`.
 
 Run a local persistent sequencer:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a --max-request-bytes 1048576 --max-requests-per-minute 600
 ```
 
 The default dev sequencer key is only for throwaway local rehearsals. Public
@@ -193,7 +199,7 @@ signature does not verify against the expected sequencer public key.
 A follower can import once from an ahead peer before it starts serving RPC:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
 ```
 
 `--bootstrap-rpc` performs that one-time startup import. To keep following a
@@ -201,7 +207,7 @@ sequencer or upstream peer, run with `--sync-rpc <http://peer/snapshot>`; the
 follower continuously fetches, verifies, imports, and persists newer snapshots:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --sync-rpc http://127.0.0.1:9944/snapshot
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --sync-rpc http://127.0.0.1:9944/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
 ```
 
 HTTP surfaces:

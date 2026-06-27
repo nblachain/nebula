@@ -92,6 +92,8 @@ jobs:
           assert status["validator_reward_account"] == "validator:ci-validator"
           assert len(status["sequencer_public_key_hex"]) == 64
           assert len(status["current_state_root"]) == 64
+          assert status["rpc_max_request_bytes"] == 1048576
+          assert status["rpc_max_requests_per_minute"] == 600
           assert snapshot["snapshot_version"] == 2
           assert len(snapshot["root"]) == 64
           assert snapshot["config"]["sequencer_public_key_hex"] == status["sequencer_public_key_hex"]
@@ -110,6 +112,8 @@ jobs:
           assert status_b["node_role"] == "follower"
           assert status_b["block_production_enabled"] is False
           assert status_b["sequencer_public_key_hex"] == status["sequencer_public_key_hex"]
+          assert status_b["rpc_max_request_bytes"] == 1048576
+          assert status_b["rpc_max_requests_per_minute"] == 600
           assert status_b["latest_height"] >= snapshot["blocks"][-1]["height"]
           assert status_b_after["latest_height"] >= status_after["latest_height"] - 2
           PY

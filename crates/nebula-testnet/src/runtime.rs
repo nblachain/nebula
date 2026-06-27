@@ -28,15 +28,33 @@ pub const VALIDATOR_REWARD_ACCOUNT_PREFIX: &str = "validator:";
 pub const RUNTIME_SNAPSHOT_FILE: &str = "nebula-runtime-snapshot.json";
 pub const RUNTIME_SNAPSHOT_VERSION: u32 = 2;
 pub const DEFAULT_PEER_SYNC_MS: u64 = 100;
+pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
+pub const DEFAULT_MAX_REQUESTS_PER_MINUTE: u32 = 600;
+const RPC_RATE_LIMIT_WINDOW_MS: u128 = 60_000;
 pub const DEFAULT_DEV_SEQUENCER_SECRET_KEY_HEX: &str =
     "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RuntimeNodeOptions {
     pub data_dir: Option<String>,
     pub bootstrap_rpc_url: Option<String>,
     pub sync_rpc_url: Option<String>,
     pub sequencer_secret_key_hex: Option<String>,
+    pub max_request_bytes: usize,
+    pub max_requests_per_minute: u32,
+}
+
+impl Default for RuntimeNodeOptions {
+    fn default() -> Self {
+        Self {
+            data_dir: None,
+            bootstrap_rpc_url: None,
+            sync_rpc_url: None,
+            sequencer_secret_key_hex: None,
+            max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
+            max_requests_per_minute: DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -325,6 +343,20 @@ pub struct RuntimeStorage {
 struct RuntimeRpcState {
     runtime: Arc<Mutex<NebulaRuntime>>,
     storage: Option<RuntimeStorage>,
+    rpc_limits: RuntimeRpcLimits,
+    rate_limits: Arc<Mutex<BTreeMap<String, RuntimeRateLimitBucket>>>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+struct RuntimeRpcLimits {
+    max_request_bytes: usize,
+    max_requests_per_minute: u32,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeRateLimitBucket {
+    window_start_unix_ms: u128,
+    request_count: u32,
 }
 
 impl RuntimeRpcState {
@@ -337,6 +369,78 @@ impl RuntimeRpcState {
             .lock()
             .map_err(|_| "runtime mutex poisoned".to_string())?;
         storage.save_runtime(&runtime)
+    }
+
+    fn check_request_allowed(&self, client_id: &str) -> Result<(), String> {
+        if self.rpc_limits.max_requests_per_minute == 0 {
+            return Err("max_requests_per_minute must be greater than zero".to_string());
+        }
+        let now = unix_ms();
+        let mut buckets = self
+            .rate_limits
+            .lock()
+            .map_err(|_| "rate limit mutex poisoned".to_string())?;
+        let bucket =
+            buckets
+                .entry(client_id.to_string())
+                .or_insert_with(|| RuntimeRateLimitBucket {
+                    window_start_unix_ms: now,
+                    request_count: 0,
+                });
+        if now.saturating_sub(bucket.window_start_unix_ms) >= RPC_RATE_LIMIT_WINDOW_MS {
+            bucket.window_start_unix_ms = now;
+            bucket.request_count = 0;
+        }
+        if bucket.request_count >= self.rpc_limits.max_requests_per_minute {
+            return Err(format!(
+                "rate limit exceeded for {client_id}: max {} requests per minute",
+                self.rpc_limits.max_requests_per_minute
+            ));
+        }
+        bucket.request_count = bucket
+            .request_count
+            .checked_add(1)
+            .ok_or_else(|| "rate limit counter overflowed".to_string())?;
+        Ok(())
+    }
+
+    fn status_json(&self) -> Result<Value, String> {
+        let status = {
+            let runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "runtime mutex poisoned".to_string())?;
+            runtime.status()
+        };
+        let mut status = serde_json::to_value(status)
+            .map_err(|error| format!("status serialization failed: {error}"))?;
+        let Value::Object(fields) = &mut status else {
+            return Err("runtime status did not serialize as an object".to_string());
+        };
+        fields.insert(
+            "rpc_max_request_bytes".to_string(),
+            json!(self.rpc_limits.max_request_bytes),
+        );
+        fields.insert(
+            "rpc_max_requests_per_minute".to_string(),
+            json!(self.rpc_limits.max_requests_per_minute),
+        );
+        Ok(status)
+    }
+}
+
+impl RuntimeRpcLimits {
+    fn from_options(options: &RuntimeNodeOptions) -> Result<Self, String> {
+        if options.max_request_bytes == 0 {
+            return Err("max_request_bytes must be greater than zero".to_string());
+        }
+        if options.max_requests_per_minute == 0 {
+            return Err("max_requests_per_minute must be greater than zero".to_string());
+        }
+        Ok(Self {
+            max_request_bytes: options.max_request_bytes,
+            max_requests_per_minute: options.max_requests_per_minute,
+        })
     }
 }
 
@@ -973,6 +1077,7 @@ pub fn serve_runtime_rpc_with_options(
     config: RuntimeConfig,
     options: RuntimeNodeOptions,
 ) -> std::io::Result<()> {
+    let rpc_limits = RuntimeRpcLimits::from_options(&options).map_err(std::io::Error::other)?;
     let storage = options.data_dir.as_ref().map(RuntimeStorage::from_data_dir);
     let bootstrap_url = options
         .bootstrap_rpc_url
@@ -995,6 +1100,8 @@ pub fn serve_runtime_rpc_with_options(
     let state = RuntimeRpcState {
         runtime: Arc::new(Mutex::new(runtime)),
         storage,
+        rpc_limits,
+        rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
     };
     let produce_blocks = state
         .runtime
@@ -1165,6 +1272,15 @@ fn parse_http_url(url: &str) -> Result<(String, String), String> {
 
 fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std::io::Result<()> {
     let _ = stream.set_read_timeout(Some(Duration::from_millis(750)));
+    let client_id = stream
+        .peer_addr()
+        .map(|address| address.ip().to_string())
+        .unwrap_or_else(|_| "unknown-peer".to_string());
+    if let Err(error) = state.check_request_allowed(&client_id) {
+        write_json_response(&mut stream, 429, &json!({"error": error}))?;
+        return Ok(());
+    }
+
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 4096];
     loop {
@@ -1172,16 +1288,19 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
             Ok(0) => break,
             Ok(read) => {
                 buffer.extend_from_slice(&chunk[..read]);
-                if request_complete(&buffer) {
-                    break;
-                }
-                if buffer.len() > 1_048_576 {
+                if request_size_exceeds_limit(&buffer, state.rpc_limits.max_request_bytes) {
                     write_json_response(
                         &mut stream,
                         413,
-                        &json!({"error": "request body too large"}),
+                        &json!({
+                            "error": "request body too large",
+                            "max_request_bytes": state.rpc_limits.max_request_bytes,
+                        }),
                     )?;
                     return Ok(());
+                }
+                if request_complete(&buffer) {
+                    break;
                 }
             }
             Err(error)
@@ -1215,16 +1334,16 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
         ("GET", "/health") => write_json_response(
             &mut stream,
             200,
-            &json!({"ok": true, "service": "nebula-testnet-rpc"}),
+            &json!({
+                "ok": true,
+                "service": "nebula-testnet-rpc",
+                "rpc_limits": state.rpc_limits,
+            }),
         )?,
-        ("GET", "/status") => {
-            let status = state
-                .runtime
-                .lock()
-                .expect("runtime mutex poisoned")
-                .status();
-            write_json_response(&mut stream, 200, &json!(status))?;
-        }
+        ("GET", "/status") => match state.status_json() {
+            Ok(status) => write_json_response(&mut stream, 200, &status)?,
+            Err(error) => write_json_response(&mut stream, 500, &json!({"error": error}))?,
+        },
         ("GET", "/snapshot") => {
             let snapshot = state
                 .runtime
@@ -1277,10 +1396,7 @@ fn dispatch_json_rpc_method(
     params: Value,
 ) -> Result<Value, String> {
     let result = match method {
-        "nebula_status" => {
-            let runtime = state.runtime.lock().expect("runtime mutex poisoned");
-            Ok(json!(runtime.status()))
-        }
+        "nebula_status" => state.status_json(),
         "nebula_chainHead" => {
             let runtime = state.runtime.lock().expect("runtime mutex poisoned");
             Ok(json!(runtime.latest_block()))
@@ -1439,6 +1555,8 @@ fn write_json_response(stream: &mut TcpStream, status: u16, body: &Value) -> std
         400 => "Bad Request",
         404 => "Not Found",
         413 => "Payload Too Large",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
         _ => "Error",
     };
     let body = serde_json::to_string_pretty(body).expect("JSON response serializes");
@@ -1455,7 +1573,26 @@ fn request_complete(buffer: &[u8]) -> bool {
         return false;
     };
     let headers = String::from_utf8_lossy(&buffer[..header_end]);
-    let content_length = headers
+    let content_length = content_length_from_headers(&headers).unwrap_or(0);
+    buffer.len() >= header_end + 4 + content_length
+}
+
+fn request_size_exceeds_limit(buffer: &[u8], max_request_bytes: usize) -> bool {
+    if buffer.len() > max_request_bytes {
+        return true;
+    }
+    let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return false;
+    };
+    let headers = String::from_utf8_lossy(&buffer[..header_end]);
+    match content_length_from_headers(&headers) {
+        Some(content_length) => header_end + 4 + content_length > max_request_bytes,
+        None => false,
+    }
+}
+
+fn content_length_from_headers(headers: &str) -> Option<usize> {
+    headers
         .lines()
         .find_map(|line| line.strip_prefix("Content-Length:"))
         .or_else(|| {
@@ -1464,8 +1601,6 @@ fn request_complete(buffer: &[u8]) -> bool {
                 .find_map(|line| line.strip_prefix("content-length:"))
         })
         .and_then(|value| value.trim().parse::<usize>().ok())
-        .unwrap_or(0);
-    buffer.len() >= header_end + 4 + content_length
 }
 
 fn validate_transaction_shape(tx: &RuntimeTransaction) -> Result<(), String> {
@@ -1943,6 +2078,22 @@ fn unix_ms() -> u128 {
 mod tests {
     use super::*;
 
+    fn test_rpc_state_with_limits(
+        runtime: NebulaRuntime,
+        max_request_bytes: usize,
+        max_requests_per_minute: u32,
+    ) -> RuntimeRpcState {
+        RuntimeRpcState {
+            runtime: Arc::new(Mutex::new(runtime)),
+            storage: None,
+            rpc_limits: RuntimeRpcLimits {
+                max_request_bytes,
+                max_requests_per_minute,
+            },
+            rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
     #[test]
     fn public_testnet_runtime_uses_sub_second_blocks() {
         let config = RuntimeConfig::public_testnet_default();
@@ -1951,6 +2102,81 @@ mod tests {
         let status = runtime.status();
         assert!(status.sub_second_blocks);
         assert_eq!(status.block_target_ms, DEFAULT_SUBSECOND_BLOCK_MS);
+    }
+
+    #[test]
+    fn runtime_node_options_default_to_public_rpc_limits() {
+        let options = RuntimeNodeOptions::default();
+        let limits = RuntimeRpcLimits::from_options(&options).unwrap();
+
+        assert_eq!(limits.max_request_bytes, DEFAULT_MAX_REQUEST_BYTES);
+        assert_eq!(
+            limits.max_requests_per_minute,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE
+        );
+
+        let options = RuntimeNodeOptions {
+            max_request_bytes: 0,
+            ..RuntimeNodeOptions::default()
+        };
+        assert!(RuntimeRpcLimits::from_options(&options)
+            .unwrap_err()
+            .contains("max_request_bytes"));
+
+        let options = RuntimeNodeOptions {
+            max_requests_per_minute: 0,
+            ..RuntimeNodeOptions::default()
+        };
+        assert!(RuntimeRpcLimits::from_options(&options)
+            .unwrap_err()
+            .contains("max_requests_per_minute"));
+    }
+
+    #[test]
+    fn runtime_rpc_status_reports_public_rpc_limits() {
+        let runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let state = test_rpc_state_with_limits(runtime, 2048, 7);
+        let status = state.status_json().unwrap();
+
+        assert_eq!(status["rpc_max_request_bytes"], 2048);
+        assert_eq!(status["rpc_max_requests_per_minute"], 7);
+        assert_eq!(
+            dispatch_json_rpc_method(&state, "nebula_status", json!({})).unwrap()
+                ["rpc_max_requests_per_minute"],
+            7
+        );
+    }
+
+    #[test]
+    fn runtime_rpc_rate_limit_rejects_over_quota_client() {
+        let runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let state = test_rpc_state_with_limits(runtime, DEFAULT_MAX_REQUEST_BYTES, 1);
+
+        state.check_request_allowed("127.0.0.1").unwrap();
+        assert!(state
+            .check_request_allowed("127.0.0.1")
+            .unwrap_err()
+            .contains("rate limit exceeded"));
+        state.check_request_allowed("127.0.0.2").unwrap();
+    }
+
+    #[test]
+    fn runtime_rpc_request_size_limit_checks_buffer_and_declared_body() {
+        let complete_request =
+            b"POST /rpc HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{}";
+        assert!(request_complete(complete_request));
+        assert!(!request_size_exceeds_limit(
+            complete_request,
+            complete_request.len()
+        ));
+        assert!(request_size_exceeds_limit(
+            complete_request,
+            complete_request.len() - 1
+        ));
+
+        let declared_large =
+            b"POST /rpc HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4096\r\n\r\n{}";
+        assert!(request_size_exceeds_limit(declared_large, 1024));
     }
 
     #[test]
@@ -2265,10 +2491,11 @@ mod tests {
         let mut config = RuntimeConfig::public_testnet_default();
         config.produce_blocks = false;
         let runtime = NebulaRuntime::new(config).unwrap();
-        let state = RuntimeRpcState {
-            runtime: Arc::new(Mutex::new(runtime)),
-            storage: None,
-        };
+        let state = test_rpc_state_with_limits(
+            runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
 
         assert!(
             dispatch_json_rpc_method(&state, "nebula_faucet", json!({"account": "alice"}))

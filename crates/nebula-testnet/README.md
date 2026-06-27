@@ -57,7 +57,8 @@ The public launch sequence for this crate is:
    `--sync-rpc`, and expose matching `/health`, `/status`, `/snapshot`, and
    JSON-RPC `/rpc` views. Each snapshot block must commit to the expected
    sequencer public key and verify its Ed25519 signature before accepting the
-   follower.
+   follower. Public RPC nodes enforce request-size and per-client rate limits;
+   tune them with `--max-request-bytes` and `--max-requests-per-minute`.
 9. Build and verify validator activation receipts, validator join receipts,
    operator join confirmations, public observer confirmations, and the public
    testnet launch-candidate certificate against the same deployment,
@@ -75,9 +76,9 @@ Run a local Base-style public-testnet rehearsal with one sequencer and
 persisted followers:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --sync-rpc http://127.0.0.1:9944/snapshot
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --sync-rpc http://127.0.0.1:9944/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
 ```
 
 The sequencer produces sub-second blocks. Followers do not produce blocks; they
@@ -85,6 +86,11 @@ persist `nebula-runtime-snapshot.json` under `--data-dir`. `--bootstrap-rpc`
 imports one verified snapshot at startup. `--sync-rpc <http://peer/snapshot>`
 keeps fetching, verifying, importing, and persisting newer snapshots from the
 peer.
+
+Public RPC nodes enforce a maximum request body size and per-client request
+rate limit before dispatching JSON-RPC work. Use `--max-request-bytes <bytes>`
+and `--max-requests-per-minute <count>` to tune rehearsals or public endpoint
+hardening.
 
 The default dev sequencer key is only for throwaway local rehearsals. Public
 rehearsals should pass `--sequencer-public-key <hex>` to all nodes and pass the
@@ -105,8 +111,8 @@ for
 cargo fmt --manifest-path crates/nebula-testnet/Cargo.toml -- --check
 cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
 cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --sync-rpc http://127.0.0.1:9944/snapshot
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --sync-rpc http://127.0.0.1:9944/snapshot --max-request-bytes 1048576 --max-requests-per-minute 600
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > /tmp/nebula-public-status.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-status /tmp/nebula-public-status.json --json
