@@ -82,6 +82,8 @@ time, and recovery-point root.
 It also reports a deterministic deployment-validity root over attestation
 generation and expiry times, public endpoint URL, launch bundle root, validity
 policy constants, and TLS pin expiry evidence.
+It also reports a deterministic deployment-quorum root over the required and
+actual bootstrap, operator, observer, and deployment-region coverage.
 
 Preflight and runbook receipt verifiers let operators prove launch steps before
 wrapping those receipts in deployment evidence. Receipt phase names must be
@@ -124,7 +126,7 @@ admission into the root artifact used to start a public testnet at activation
 height `1` with validator-set epoch `0`. Genesis deployment, validator-set,
 public-surface, operator-approval, observer-confirmation, bootstrap-roster,
 rollback-readiness, deployment-validity, operator-roster, reward-ledger,
-fee-policy, and operational-evidence roots must be disjoint from
+deployment-quorum, fee-policy, and operational-evidence roots must be disjoint from
 validator-admission roots, and initial validator, operator, and region counts
 must match the verified validator set.
 Genesis manifests older than `24` hours are rejected. The final launch-package
@@ -139,7 +141,7 @@ deployment region count, public-surface root, operator-approval root,
 observer-confirmation root, bootstrap-roster root, operator-roster root,
 matched reward-account count, reward-ledger root, rollback-readiness root,
 deployment-validity root, operational-evidence root, and the genesis fee token
-identities. It also rejects validator
+identities. It also reports the deployment-quorum root and rejects validator
 consensus/network keys that reuse deployment witness keys, admitted validators
 that do not map to
 attested deployment operators and bootstrap nodes, validator P2P hosts that do
