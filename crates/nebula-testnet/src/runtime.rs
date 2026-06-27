@@ -828,6 +828,163 @@ impl RuntimeRpcState {
         manifest.backup_root = backup_manifest_root(&manifest);
         Ok(manifest)
     }
+
+    fn metrics_text(&self) -> Result<String, String> {
+        let ops_status = self.ops_status()?;
+        let status = {
+            let runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "runtime mutex poisoned".to_string())?;
+            runtime.status()
+        };
+        let mut output = String::new();
+        push_metric(
+            &mut output,
+            "nebula_latest_height",
+            "Latest accepted block height.",
+            status.latest_height,
+        );
+        push_metric(
+            &mut output,
+            "nebula_latest_block_age_ms",
+            "Age of the latest block according to the ops surface.",
+            ops_status.latest_block_age_ms,
+        );
+        push_metric(
+            &mut output,
+            "nebula_block_target_ms",
+            "Configured block target in milliseconds.",
+            status.block_target_ms,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_sub_second_blocks",
+            "Whether the block target is below one second.",
+            status.sub_second_blocks,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_block_production_enabled",
+            "Whether this node is configured to produce blocks.",
+            status.block_production_enabled,
+        );
+        push_metric(
+            &mut output,
+            "nebula_mempool_size",
+            "Transactions currently waiting in the mempool.",
+            status.mempool_size,
+        );
+        push_metric(
+            &mut output,
+            "nebula_mempool_capacity_remaining",
+            "Remaining mempool admission capacity.",
+            status.mempool_capacity_remaining,
+        );
+        push_metric(
+            &mut output,
+            "nebula_mempool_full_rejection_count",
+            "Transactions rejected because the mempool was full.",
+            status.mempool_full_rejection_count,
+        );
+        push_metric(
+            &mut output,
+            "nebula_rpc_max_request_bytes",
+            "Maximum accepted HTTP request body size.",
+            self.rpc_limits.max_request_bytes,
+        );
+        push_metric(
+            &mut output,
+            "nebula_rpc_max_requests_per_minute",
+            "Per-client RPC request budget per minute.",
+            self.rpc_limits.max_requests_per_minute,
+        );
+        push_metric(
+            &mut output,
+            "nebula_sync_peer_count",
+            "Configured continuous snapshot sync peers.",
+            self.sync_peers.sync_peer_urls.len(),
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_admin_rpc_enabled",
+            "Whether admin RPC methods require a configured token.",
+            self.admin_token.is_some(),
+        );
+        push_metric(
+            &mut output,
+            "nebula_bridge_deposit_count",
+            "Observed bridge deposits credited into nXMR.",
+            status.bridge_deposit_count,
+        );
+        push_metric(
+            &mut output,
+            "nebula_withdrawal_request_count",
+            "Withdrawal requests accepted by the runtime.",
+            status.withdrawal_request_count,
+        );
+        push_metric(
+            &mut output,
+            "nebula_finalized_withdrawal_count",
+            "Withdrawals finalized by operator evidence.",
+            status.finalized_withdrawal_count,
+        );
+        push_metric(
+            &mut output,
+            "nebula_total_nxmr_fees_units",
+            "Total nXMR fee units collected for NBLA buybacks.",
+            status.total_nxmr_fees_units,
+        );
+        push_metric(
+            &mut output,
+            "nebula_buyback_pool_nebulai",
+            "NBLA-denominated buyback pool accumulated from nXMR gas.",
+            status.buyback_pool_nebulai,
+        );
+        push_metric(
+            &mut output,
+            "nebula_validator_reward_nebulai",
+            "NBLA rewards accrued to the local validator account.",
+            status.validator_reward_nebulai,
+        );
+        push_metric(
+            &mut output,
+            "nebula_accountability_report_count",
+            "Open sequencer accountability reports.",
+            status.accountability_report_count,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_sequencer_accountability_clean",
+            "Whether sequencer accountability evidence is clear.",
+            status.sequencer_accountability_clean,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_storage_snapshot_present",
+            "Whether a persisted runtime snapshot is present.",
+            ops_status.storage_snapshot_present,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_storage_snapshot_matches_runtime",
+            "Whether persisted snapshot evidence matches runtime state.",
+            ops_status.storage_snapshot_matches_runtime,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_public_ops_ready",
+            "Whether public operational evidence is currently ready.",
+            ops_status.public_ops_ready,
+        );
+        push_metric(
+            &mut output,
+            "nebula_public_ops_blocking_gap_count",
+            "Number of public ops readiness blocking gaps.",
+            ops_status.blocking_gaps.len(),
+        );
+        Ok(output)
+    }
 }
 
 impl RuntimeRpcLimits {
@@ -2246,6 +2403,15 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
             Ok(manifest) => write_json_response(&mut stream, 200, &json!(manifest))?,
             Err(error) => write_json_response(&mut stream, 500, &json!({"error": error}))?,
         },
+        ("GET", "/metrics") => match state.metrics_text() {
+            Ok(metrics) => write_text_response(
+                &mut stream,
+                200,
+                "text/plain; version=0.0.4; charset=utf-8",
+                &metrics,
+            )?,
+            Err(error) => write_json_response(&mut stream, 500, &json!({"error": error}))?,
+        },
         ("GET", "/snapshot") => {
             let snapshot = state
                 .runtime
@@ -2572,6 +2738,25 @@ fn write_json_response(stream: &mut TcpStream, status: u16, body: &Value) -> std
     write!(
         stream,
         "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+}
+
+fn write_text_response(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &str,
+) -> std::io::Result<()> {
+    let reason = match status {
+        200 => "OK",
+        500 => "Internal Server Error",
+        _ => "Error",
+    };
+    write!(
+        stream,
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
         body
     )
@@ -3327,6 +3512,25 @@ fn value_to_u128(value: &Value, name: &str) -> Result<u128, String> {
     Err(format!("invalid u128 param {name}"))
 }
 
+fn push_metric<T: std::fmt::Display>(output: &mut String, name: &str, help: &str, value: T) {
+    output.push_str("# HELP ");
+    output.push_str(name);
+    output.push(' ');
+    output.push_str(help);
+    output.push('\n');
+    output.push_str("# TYPE ");
+    output.push_str(name);
+    output.push_str(" gauge\n");
+    output.push_str(name);
+    output.push(' ');
+    output.push_str(&value.to_string());
+    output.push('\n');
+}
+
+fn push_metric_bool(output: &mut String, name: &str, help: &str, value: bool) {
+    push_metric(output, name, help, u8::from(value));
+}
+
 fn transaction_root(transactions: &[RuntimeTransaction], rejected_tx_ids: &[String]) -> String {
     let tx_ids = transactions
         .iter()
@@ -3890,6 +4094,26 @@ mod tests {
         assert!(ops
             .blocking_gaps
             .contains(&"mempool-at-capacity".to_string()));
+    }
+
+    #[test]
+    fn runtime_metrics_text_exposes_public_ops_and_bridge_gauges() {
+        let runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let state = test_rpc_state_with_limits(runtime, 2048, 7);
+
+        let metrics = state.metrics_text().unwrap();
+
+        assert!(metrics.contains("# HELP nebula_latest_height"));
+        assert!(metrics.contains("nebula_sub_second_blocks 1"));
+        assert!(metrics.contains("nebula_rpc_max_request_bytes 2048"));
+        assert!(metrics.contains("nebula_rpc_max_requests_per_minute 7"));
+        assert!(metrics.contains("nebula_sync_peer_count 0"));
+        assert!(metrics.contains("nebula_admin_rpc_enabled 0"));
+        assert!(metrics.contains("nebula_bridge_deposit_count 0"));
+        assert!(metrics.contains("nebula_withdrawal_request_count 0"));
+        assert!(metrics.contains("nebula_sequencer_accountability_clean 1"));
+        assert!(metrics.contains("nebula_public_ops_ready 0"));
+        assert!(metrics.contains("nebula_public_ops_blocking_gap_count "));
     }
 
     #[test]

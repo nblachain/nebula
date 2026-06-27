@@ -40,12 +40,12 @@ Public spend paths require Ed25519 account signatures. For
 nonce)`, and accepted withdrawals consume the account nonce before burning
 nXMR into `operator_pending`.
 
-Operator ops and backup evidence is also a launch gate. The runtime surfaces
-`/ops`, `/backup`, `nebula_opsStatus`, and `nebula_backupManifest` are intended
-for public operators to verify block freshness, latest height/hash,
-state/snapshot roots, persisted snapshot path and presence, sync peer count, RPC
-limit policy, bridge policy root, and backup manifest root before opening an
-endpoint.
+Operator ops, backup, and metrics evidence is also a launch gate. The runtime
+surfaces `/ops`, `/backup`, `/metrics`, `nebula_opsStatus`, and
+`nebula_backupManifest` are intended for public operators to verify block
+freshness, latest height/hash, state/snapshot roots, persisted snapshot path and
+presence, sync peer count, RPC limit policy, bridge policy root, backup manifest
+root, and scrapeable public ops readiness gauges before opening an endpoint.
 
 Sequencer key rotation and operator accountability are launch gates too. Public
 operators must be able to discover the active sequencer key, key-rotation
@@ -107,15 +107,16 @@ The public launch sequence for this crate is:
    `bridge_min_deposit_confirmations`, `bridge_deposit_observer_quorum`,
    `bridge_withdrawal_operator_quorum`, `bridge_live_value_enabled`,
    `bridge_deposit_count`, and `withdrawal_request_count`.
-10. Exercise the operator ops and backup evidence gate. `/ops`, `/backup`,
-   `nebula_opsStatus`, and `nebula_backupManifest` must agree with `/health`,
-   `/status`, `/snapshot`, and `nebula_status` on block freshness, latest
-   height/hash, state root, snapshot root, persisted snapshot path and presence,
-   sync peer count, mempool cap/remaining capacity/full-rejection count, RPC
-   request-size and rate-limit policy, bridge policy root, and backup manifest
-   root. Stale blocks, missing persisted snapshots, mismatched backup roots,
-   missing bridge policy roots, full mempools, or unexpected sync/RPC limit
-   values keep the public endpoint launch-blocked.
+10. Exercise the operator ops, backup, and metrics evidence gate. `/ops`,
+   `/backup`, `/metrics`, `nebula_opsStatus`, and `nebula_backupManifest` must
+   agree with `/health`, `/status`, `/snapshot`, and `nebula_status` on block
+   freshness, latest height/hash, state root, snapshot root, persisted snapshot
+   path and presence, sync peer count, mempool cap/remaining capacity/full
+   rejection count, RPC request-size and rate-limit policy, bridge policy root,
+   backup manifest root, and public ops readiness gauges. Stale blocks, missing
+   persisted snapshots, mismatched backup roots, missing bridge policy roots,
+   full mempools, or unexpected sync/RPC limit values keep the public endpoint
+   launch-blocked.
 11. Exercise sequencer key rotation and operator accountability. `/health`,
    `/status`, and `nebula_status` must expose the current sequencer public key,
    key-rotation history/root, accountability evidence root, equivocation
@@ -187,18 +188,21 @@ confirmation floor, observer quorum, withdrawal operator quorum, live-value
 disabled state, deposit count, withdrawal count, finalized withdrawal count,
 and replay cache count before advertising `nXMR` gas.
 
-Operator ops and backup evidence is exposed through `GET /ops`, `GET /backup`,
-JSON-RPC `nebula_opsStatus`, and JSON-RPC `nebula_backupManifest`. Before
-advertising a public endpoint, operators should compare those reports with
-`/health`, `/status`, `/snapshot`, and `nebula_status` and verify block
+Operator ops, backup, and metrics evidence is exposed through `GET /ops`,
+`GET /backup`, `GET /metrics`, JSON-RPC `nebula_opsStatus`, and JSON-RPC
+`nebula_backupManifest`. Before advertising a public endpoint, operators should
+compare those reports with `/health`, `/status`, `/snapshot`, and
+`nebula_status` and verify block
 freshness, latest height/hash, state root, snapshot root, persisted snapshot
 path and presence, configured sync peer count, mempool cap/remaining capacity,
 full-rejection count, RPC max-request/rate-limit policy, admin RPC state, bridge
-policy root, and backup manifest root. Backup manifests must bind the node role,
-validator ID, latest chain head, state/snapshot roots, persisted snapshot
-location, sync peer coverage, mempool capacity policy, RPC limit policy, admin
-RPC state, and bridge policy root without exporting sequencer secret key
-material.
+policy root, and backup manifest root. The metrics scrape must expose matching
+block freshness, mempool pressure, RPC limit, peer count, bridge counter,
+storage snapshot, accountability, and public ops readiness gauges. Backup
+manifests must bind the node role, validator ID, latest chain head,
+state/snapshot roots, persisted snapshot location, sync peer coverage, mempool
+capacity policy, RPC limit policy, admin RPC state, and bridge policy root
+without exporting sequencer secret key material.
 
 The default dev sequencer key is only for throwaway local rehearsals. Public
 rehearsals should pass `--sequencer-public-key <hex>` to all nodes and pass the
@@ -218,8 +222,8 @@ approval root, and rotation root. Equivocation RPC parameters are `height`,
 `admin_token`; unresolved evidence halts block production and state mutations
 while status/ops evidence remains visible.
 
-Each node exposes `/health`, `/status`, `/snapshot`, `/ops`, `/backup`, and
-JSON-RPC 2.0 on `/rpc` for
+Each node exposes `/health`, `/status`, `/snapshot`, `/ops`, `/backup`,
+`/metrics`, and JSON-RPC 2.0 on `/rpc` for
 `nebula_status`, `nebula_chainHead`, `nebula_getBlockByHeight`,
 `nebula_getAccount`, `nebula_getReceipt`, `nebula_exportSnapshot`,
 `nebula_importSnapshot`, `nebula_feeQuote`, `nebula_faucet`,

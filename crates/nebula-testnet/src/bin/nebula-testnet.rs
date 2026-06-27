@@ -2037,13 +2037,14 @@ RPC BRIDGE POLICY:
     finalization_proof_root, and operator_approval_roots. /health, /status,
     and nebula_status expose bridge policy readiness.
 
-RPC OPERATOR OPS AND BACKUP:
+RPC OPERATOR OPS, BACKUP, AND METRICS:
     Operator ops discovery uses /ops and nebula_opsStatus. Backup discovery
-    uses /backup and nebula_backupManifest. Public operators must verify block
-    freshness, latest height/hash, state and snapshot roots, persisted snapshot
-    path and presence, sync peer count, mempool capacity, RPC
-    request-size/rate-limit policy, admin RPC state, bridge policy root, and
-    backup manifest root before opening a public testnet endpoint.
+    uses /backup and nebula_backupManifest. Scrapeable monitoring uses
+    /metrics. Public operators must verify block freshness, latest height/hash,
+    state and snapshot roots, persisted snapshot path and presence, sync peer
+    count, mempool capacity, RPC request-size/rate-limit policy, admin RPC
+    state, bridge policy root, backup manifest root, and public ops readiness
+    gauges before opening a public testnet endpoint.
 
 RPC ADMIN BOUNDARY:
     Public RPC methods remain callable without an admin token. Operator-only

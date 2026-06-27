@@ -61,7 +61,8 @@ The target architecture is:
 - Ed25519 account signatures for public spend paths: `nebula_sendTransaction`
   transactions must be signed by `tx.from`, and `nebula_requestWithdrawal`
   must bind account, destination, amount, nonce, and signature before nXMR burns
-- operator ops and backup evidence through `/ops`, `/backup`,
+- operator ops, backup, and scrapeable metrics evidence through `/ops`, `/backup`,
+  `/metrics`,
   `nebula_opsStatus`, and `nebula_backupManifest` so public operators can
   verify block freshness, chain head, state/snapshot roots, persisted snapshot
   state, sync peers, RPC limits, admin RPC state, bridge policy root, and
@@ -163,13 +164,15 @@ evidence is absent or stale.
     `bridge_min_deposit_confirmations`, `bridge_deposit_observer_quorum`,
     `bridge_withdrawal_operator_quorum`, `bridge_live_value_enabled`,
     `bridge_deposit_count`, and `withdrawal_request_count`.
-14. Gate operator ops and backup evidence before public endpoint exposure.
-    `/ops`, `/backup`, `nebula_opsStatus`, and `nebula_backupManifest` must
-    agree with `/health`, `/status`, and `nebula_status` on block freshness,
+14. Gate operator ops, backup, and metrics evidence before public endpoint
+    exposure. `/ops`, `/backup`, `/metrics`, `nebula_opsStatus`, and
+    `nebula_backupManifest` must agree with `/health`, `/status`, and
+    `nebula_status` on block freshness,
     latest height/hash, state root, snapshot root, persisted snapshot path and
     presence, sync peer count, mempool cap/remaining capacity/rejection count,
     RPC request-size and rate-limit policy, admin RPC state, bridge policy root,
-    and backup manifest root. Operators must treat stale blocks, missing
+    backup manifest root, and public ops readiness gauges. Operators must treat
+    stale blocks, missing
     persisted snapshots, mismatched backup roots, missing bridge policy roots,
     full mempools, disabled or unexpected admin RPC state, or unexpected
     sync/RPC-limit values as public-launch blockers.
@@ -226,7 +229,7 @@ It supports the Base-style public testnet phase: a sequencer produces
 deterministic sub-second blocks, while follower nodes persist local state and
 continuously sync signed, verified snapshots from a configured peer set. It
 targets `250 ms` blocks by default, enforces a public-testnet block target below
-one second, exposes health/status JSON, accepts transfer transactions, and
+one second, exposes health/status JSON and scrapeable metrics, accepts transfer transactions, and
 accounts for `NBLA` gas, `nXMR` gas, nXMR-funded NBLA buybacks/backing, and
 validator rewards. Public RPC nodes enforce a bounded mempool, maximum request
 body size, and per-client request rate limit; tune rehearsal limits with
@@ -291,15 +294,18 @@ supplies `withdrawal_id`,
 `operator_approval_roots`. `/health`, `/status`, and `nebula_status` are the
 operator-facing surfaces for bridge policy visibility.
 
-Operator ops and backup evidence uses the runtime surfaces public operators
-need during launch rehearsals: `GET /ops`, `GET /backup`, JSON-RPC
+Operator ops, backup, and metrics evidence uses the runtime surfaces public
+operators need during launch rehearsals: `GET /ops`, `GET /backup`,
+`GET /metrics`, JSON-RPC
 `nebula_opsStatus`, and JSON-RPC `nebula_backupManifest`. Before opening a
 public testnet endpoint, operators must compare those reports with `/health`,
 `/status`, `/snapshot`, and `nebula_status` and verify block freshness, latest
 height/hash, state root, snapshot root, persisted snapshot path and presence,
 configured sync peer count, mempool cap/remaining capacity/rejection count, RPC
 max-request/rate-limit policy, admin RPC state, bridge policy root, and backup
-manifest root. A valid backup manifest must bind the node role, validator ID,
+manifest root. The `/metrics` scrape must expose the same block freshness,
+mempool pressure, RPC limit, peer count, bridge counter, storage snapshot, and
+accountability gauges. A valid backup manifest must bind the node role, validator ID,
 latest chain head, state/snapshot roots, persisted snapshot location, sync peer
 coverage, mempool capacity policy, RPC limit policy, admin RPC state, and
 bridge policy root without exporting any sequencer secret key material.
@@ -334,6 +340,7 @@ HTTP surfaces:
 - `GET /snapshot`
 - `GET /ops`
 - `GET /backup`
+- `GET /metrics`
 
 RPC methods are JSON-RPC 2.0 over `POST /rpc`:
 
@@ -361,6 +368,7 @@ Example trial:
 
 ```bash
 curl -s http://127.0.0.1:9944/status
+curl -s http://127.0.0.1:9944/metrics
 curl -s -X POST http://127.0.0.1:9944/rpc -d '{"jsonrpc":"2.0","id":1,"method":"nebula_faucet","params":{"account":"alice"}}'
 curl -s -X POST http://127.0.0.1:9944/rpc -d '{"jsonrpc":"2.0","id":2,"method":"nebula_sendTransaction","params":{"tx":{"from":"alice","to":"bob","amount_nebulai":100,"gas_units":100,"gas_price_nebulai":10,"fee_asset":"nXMR","nonce":0,"memo":"first nXMR gas transfer"}}}'
 curl -s -X POST http://127.0.0.1:9944/rpc -d '{"jsonrpc":"2.0","id":3,"method":"nebula_getAccount","params":{"account":"bob"}}'

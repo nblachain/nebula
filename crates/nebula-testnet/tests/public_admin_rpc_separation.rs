@@ -101,6 +101,24 @@ fn public_rpc_methods_remain_callable_without_admin_token() {
 }
 
 #[test]
+fn metrics_endpoint_exposes_public_rpc_operational_gauges() {
+    let rpc_addr = start_rpc_server(Some(ADMIN_TOKEN));
+
+    let (headers, body) =
+        http_text(&rpc_addr, "GET", "/metrics", None).expect("metrics endpoint responds");
+
+    assert!(headers.contains("Content-Type: text/plain; version=0.0.4; charset=utf-8"));
+    assert!(body.contains("# HELP nebula_latest_height"));
+    assert!(body.contains("nebula_sub_second_blocks 1"));
+    assert!(body.contains("nebula_rpc_max_request_bytes "));
+    assert!(body.contains("nebula_rpc_max_requests_per_minute 10000"));
+    assert!(body.contains("nebula_admin_rpc_enabled 1"));
+    assert!(body.contains("nebula_bridge_deposit_count 0"));
+    assert!(body.contains("nebula_sequencer_accountability_clean 1"));
+    assert!(body.contains("nebula_public_ops_ready "));
+}
+
+#[test]
 fn accountability_evidence_closes_admin_producer_mutations_but_remains_visible() {
     let rpc_addr = start_rpc_server(Some(ADMIN_TOKEN));
 
@@ -252,6 +270,41 @@ fn http_json(
         return Err(format!("{status_line}: {body}"));
     }
     serde_json::from_str(body.trim()).map_err(|error| format!("parse response JSON: {error}"))
+}
+
+fn http_text(
+    rpc_addr: &str,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> Result<(String, String), String> {
+    let mut stream =
+        TcpStream::connect(rpc_addr).map_err(|error| format!("connect {rpc_addr}: {error}"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| format!("set read timeout: {error}"))?;
+
+    let body = body.map(|value| value.to_string()).unwrap_or_default();
+    write!(
+        stream,
+        "{method} {path} HTTP/1.1\r\nHost: {rpc_addr}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+    .map_err(|error| format!("write request: {error}"))?;
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| format!("read response: {error}"))?;
+    let Some((head, body)) = response.split_once("\r\n\r\n") else {
+        return Err(format!("malformed HTTP response: {response}"));
+    };
+    let status_line = head.lines().next().unwrap_or_default();
+    if !status_line.contains(" 200 ") {
+        return Err(format!("{status_line}: {body}"));
+    }
+    Ok((head.to_string(), body.to_string()))
 }
 
 fn rpc_result(response: &Value) -> &Value {
