@@ -458,6 +458,50 @@ pub struct LaunchPackageReport {
     pub bridged_fee_token: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchPackageBundleManifest {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub generated_at_unix_ms: u128,
+    pub deployment_attestation_root: String,
+    pub deployment_attestation_sha3_256: String,
+    pub public_status_manifest_root: String,
+    pub public_status_sha3_256: String,
+    pub public_probe_root: String,
+    pub public_probe_sha3_256: String,
+    pub validator_set_root: String,
+    pub validator_set_sha3_256: String,
+    pub operator_handoff_root: String,
+    pub operator_handoff_sha3_256: String,
+    pub operator_acceptance_root: String,
+    pub operator_acceptance_sha3_256: String,
+    pub genesis_root: String,
+    pub genesis_manifest_sha3_256: String,
+    pub launch_package_root: String,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LaunchPackageBundleReport {
+    pub launch_package_bundle_ready: bool,
+    pub level: &'static str,
+    pub launch_package_bundle_root: String,
+    pub launch_package_root: String,
+    pub generated_at_unix_ms: u128,
+    pub artifact_count: usize,
+    pub deployment_attestation_root: String,
+    pub public_status_manifest_root: String,
+    pub public_probe_root: String,
+    pub validator_set_root: String,
+    pub operator_handoff_root: String,
+    pub operator_acceptance_root: String,
+    pub genesis_root: String,
+    pub validator_count: usize,
+    pub matched_operator_count: usize,
+    pub matched_region_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct OperatorHandoffManifest {
@@ -2340,6 +2384,232 @@ pub fn verify_launch_package_with_operator_acceptance_jsons(
     }
 
     Ok(launch_report)
+}
+
+pub fn build_launch_package_bundle_json_pretty(
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<String, AttestationError> {
+    let launch_report = verify_launch_package_with_operator_acceptance_jsons(
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let acceptance_report = verify_operator_acceptance_jsons(
+        operator_acceptance_json,
+        operator_handoff_json,
+        deployment_attestation_json,
+        validator_set_json,
+    )?;
+    let mut manifest = launch_package_bundle_manifest(
+        unix_ms(),
+        &launch_report,
+        &acceptance_report,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    );
+    manifest.root = launch_package_bundle_root(&manifest);
+
+    serde_json::to_string_pretty(&manifest)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+pub fn verify_launch_package_bundle_jsons(
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<LaunchPackageBundleReport, AttestationError> {
+    let manifest = serde_json::from_str::<LaunchPackageBundleManifest>(
+        launch_package_bundle_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let launch_report = verify_launch_package_with_operator_acceptance_jsons(
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let acceptance_report = verify_operator_acceptance_jsons(
+        operator_acceptance_json,
+        operator_handoff_json,
+        deployment_attestation_json,
+        validator_set_json,
+    )?;
+    let expected = launch_package_bundle_manifest(
+        manifest.generated_at_unix_ms,
+        &launch_report,
+        &acceptance_report,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    );
+    let now = unix_ms();
+    let mut errors = Vec::new();
+
+    if manifest.generated_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
+        errors.push("generated_at_unix_ms is more than five minutes in the future".to_string());
+    }
+    if manifest.generated_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("generated_at_unix_ms is older than 24 hours".to_string());
+    }
+    require_eq(&mut errors, "chain_id", &manifest.chain_id, CHAIN_ID);
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &manifest.runtime_version,
+        VERSION,
+    );
+    require_eq(
+        &mut errors,
+        "deployment_attestation_root",
+        &manifest.deployment_attestation_root,
+        &expected.deployment_attestation_root,
+    );
+    require_root(
+        &mut errors,
+        "deployment_attestation_sha3_256",
+        &manifest.deployment_attestation_sha3_256,
+        &expected.deployment_attestation_sha3_256,
+    );
+    require_eq(
+        &mut errors,
+        "public_status_manifest_root",
+        &manifest.public_status_manifest_root,
+        &expected.public_status_manifest_root,
+    );
+    require_root(
+        &mut errors,
+        "public_status_sha3_256",
+        &manifest.public_status_sha3_256,
+        &expected.public_status_sha3_256,
+    );
+    require_eq(
+        &mut errors,
+        "public_probe_root",
+        &manifest.public_probe_root,
+        &expected.public_probe_root,
+    );
+    require_root(
+        &mut errors,
+        "public_probe_sha3_256",
+        &manifest.public_probe_sha3_256,
+        &expected.public_probe_sha3_256,
+    );
+    require_eq(
+        &mut errors,
+        "validator_set_root",
+        &manifest.validator_set_root,
+        &expected.validator_set_root,
+    );
+    require_root(
+        &mut errors,
+        "validator_set_sha3_256",
+        &manifest.validator_set_sha3_256,
+        &expected.validator_set_sha3_256,
+    );
+    require_eq(
+        &mut errors,
+        "operator_handoff_root",
+        &manifest.operator_handoff_root,
+        &expected.operator_handoff_root,
+    );
+    require_root(
+        &mut errors,
+        "operator_handoff_sha3_256",
+        &manifest.operator_handoff_sha3_256,
+        &expected.operator_handoff_sha3_256,
+    );
+    require_eq(
+        &mut errors,
+        "operator_acceptance_root",
+        &manifest.operator_acceptance_root,
+        &expected.operator_acceptance_root,
+    );
+    require_root(
+        &mut errors,
+        "operator_acceptance_sha3_256",
+        &manifest.operator_acceptance_sha3_256,
+        &expected.operator_acceptance_sha3_256,
+    );
+    require_eq(
+        &mut errors,
+        "genesis_root",
+        &manifest.genesis_root,
+        &expected.genesis_root,
+    );
+    require_root(
+        &mut errors,
+        "genesis_manifest_sha3_256",
+        &manifest.genesis_manifest_sha3_256,
+        &expected.genesis_manifest_sha3_256,
+    );
+    require_root(
+        &mut errors,
+        "launch_package_root",
+        &manifest.launch_package_root,
+        &expected.launch_package_root,
+    );
+    require_root(
+        &mut errors,
+        "root",
+        &manifest.root,
+        &launch_package_bundle_root(&manifest),
+    );
+    if manifest.root != launch_package_bundle_root(&expected) {
+        errors.push(format!(
+            "root does not match expected launch package bundle root {}",
+            launch_package_bundle_root(&expected)
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    Ok(LaunchPackageBundleReport {
+        launch_package_bundle_ready: true,
+        level: "launch-package-bundle-attested",
+        launch_package_bundle_root: manifest.root,
+        launch_package_root: manifest.launch_package_root,
+        generated_at_unix_ms: manifest.generated_at_unix_ms,
+        artifact_count: 7,
+        deployment_attestation_root: manifest.deployment_attestation_root,
+        public_status_manifest_root: manifest.public_status_manifest_root,
+        public_probe_root: manifest.public_probe_root,
+        validator_set_root: manifest.validator_set_root,
+        operator_handoff_root: manifest.operator_handoff_root,
+        operator_acceptance_root: manifest.operator_acceptance_root,
+        genesis_root: manifest.genesis_root,
+        validator_count: launch_report.validator_count,
+        matched_operator_count: launch_report.matched_operator_count,
+        matched_region_count: launch_report.matched_region_count,
+    })
 }
 
 pub fn verify_deployment_attestation_json(
@@ -4672,6 +4942,96 @@ fn operator_acceptance_manifest_root(manifest: &OperatorAcceptanceManifest) -> S
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn launch_package_bundle_manifest(
+    generated_at_unix_ms: u128,
+    launch_report: &LaunchPackageReport,
+    acceptance_report: &OperatorAcceptanceReport,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> LaunchPackageBundleManifest {
+    LaunchPackageBundleManifest {
+        chain_id: CHAIN_ID.to_string(),
+        runtime_version: VERSION.to_string(),
+        generated_at_unix_ms,
+        deployment_attestation_root: launch_report.deployment_attestation_root.clone(),
+        deployment_attestation_sha3_256: json_artifact_sha3_256(deployment_attestation_json),
+        public_status_manifest_root: launch_report.public_status_manifest_root.clone(),
+        public_status_sha3_256: json_artifact_sha3_256(public_status_json),
+        public_probe_root: launch_report.public_probe_root.clone(),
+        public_probe_sha3_256: json_artifact_sha3_256(public_probe_json),
+        validator_set_root: launch_report.validator_set_root.clone(),
+        validator_set_sha3_256: json_artifact_sha3_256(validator_set_json),
+        operator_handoff_root: launch_report.operator_handoff_root.clone(),
+        operator_handoff_sha3_256: json_artifact_sha3_256(operator_handoff_json),
+        operator_acceptance_root: acceptance_report.operator_acceptance_root.clone(),
+        operator_acceptance_sha3_256: json_artifact_sha3_256(operator_acceptance_json),
+        genesis_root: launch_report.genesis_root.clone(),
+        genesis_manifest_sha3_256: json_artifact_sha3_256(genesis_manifest_json),
+        launch_package_root: launch_package_summary_root(launch_report, acceptance_report),
+        root: String::new(),
+    }
+}
+
+fn launch_package_summary_root(
+    launch_report: &LaunchPackageReport,
+    acceptance_report: &OperatorAcceptanceReport,
+) -> String {
+    stable_root(&json!({
+        "launch_package_domain": "nebula-launch-package-v1",
+        "chain_id": CHAIN_ID,
+        "runtime_version": VERSION,
+        "deployment_attestation_root": launch_report.deployment_attestation_root,
+        "public_status_manifest_root": launch_report.public_status_manifest_root,
+        "public_probe_root": launch_report.public_probe_root,
+        "validator_set_root": launch_report.validator_set_root,
+        "operator_handoff_root": launch_report.operator_handoff_root,
+        "operator_acceptance_root": acceptance_report.operator_acceptance_root,
+        "genesis_root": launch_report.genesis_root,
+        "launch_bundle_root": launch_report.launch_bundle_root,
+        "fee_policy_root": launch_report.fee_policy_root,
+        "validator_deployment_binding_root": launch_report.validator_deployment_binding_root,
+        "matched_validator_count": launch_report.matched_validator_count,
+        "matched_operator_count": launch_report.matched_operator_count,
+        "matched_region_count": launch_report.matched_region_count,
+        "accepted_operator_count": acceptance_report.accepted_operator_count,
+        "accepted_validator_count": acceptance_report.accepted_validator_count,
+        "activation_height": launch_report.activation_height,
+        "native_fee_token": launch_report.native_fee_token,
+        "native_base_unit": launch_report.native_base_unit,
+        "bridged_fee_token": launch_report.bridged_fee_token,
+    }))
+}
+
+fn launch_package_bundle_root(manifest: &LaunchPackageBundleManifest) -> String {
+    stable_root(&json!({
+        "bundle_domain": "nebula-launch-package-bundle-v1",
+        "chain_id": manifest.chain_id,
+        "runtime_version": manifest.runtime_version,
+        "generated_at_unix_ms": manifest.generated_at_unix_ms,
+        "deployment_attestation_root": manifest.deployment_attestation_root,
+        "deployment_attestation_sha3_256": manifest.deployment_attestation_sha3_256,
+        "public_status_manifest_root": manifest.public_status_manifest_root,
+        "public_status_sha3_256": manifest.public_status_sha3_256,
+        "public_probe_root": manifest.public_probe_root,
+        "public_probe_sha3_256": manifest.public_probe_sha3_256,
+        "validator_set_root": manifest.validator_set_root,
+        "validator_set_sha3_256": manifest.validator_set_sha3_256,
+        "operator_handoff_root": manifest.operator_handoff_root,
+        "operator_handoff_sha3_256": manifest.operator_handoff_sha3_256,
+        "operator_acceptance_root": manifest.operator_acceptance_root,
+        "operator_acceptance_sha3_256": manifest.operator_acceptance_sha3_256,
+        "genesis_root": manifest.genesis_root,
+        "genesis_manifest_sha3_256": manifest.genesis_manifest_sha3_256,
+        "launch_package_root": manifest.launch_package_root,
+    }))
+}
+
 fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
     stable_root(&json!({
         "chain_id": manifest.chain_id,
@@ -4881,6 +5241,11 @@ fn hex_64(label: &str) -> String {
 fn stable_root(value: &Value) -> String {
     let bytes = serde_json::to_vec(value).expect("status root input serializes");
     let digest = Sha3_256::digest(bytes);
+    hex::encode(digest)
+}
+
+fn json_artifact_sha3_256(input: &str) -> String {
+    let digest = Sha3_256::digest(input.trim_start_matches('\u{feff}').as_bytes());
     hex::encode(digest)
 }
 
@@ -7032,6 +7397,97 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "entries[0].accepted must be true"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_bundle_verifies_artifact_hashes_and_roots() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        let report = verify_launch_package_bundle_jsons(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        assert!(report.launch_package_bundle_ready);
+        assert_eq!(report.level, "launch-package-bundle-attested");
+        assert_eq!(report.launch_package_bundle_root.len(), 64);
+        assert_eq!(report.launch_package_root.len(), 64);
+        assert_eq!(report.operator_acceptance_root.len(), 64);
+        assert_eq!(report.artifact_count, 7);
+        assert_eq!(report.validator_count, 2);
+        assert_eq!(report.matched_operator_count, 2);
+        assert_eq!(report.matched_region_count, 2);
+    }
+
+    #[test]
+    fn launch_package_bundle_rejects_tampered_artifact_hash() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let mut bundle = serde_json::from_str::<Value>(
+            &build_launch_package_bundle_json_pretty(
+                &deployment,
+                &public_status,
+                &public_probe,
+                &validators,
+                &handoff,
+                &acceptance,
+                &genesis,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        bundle["public_probe_sha3_256"] = json!(hex_64("wrong-public-probe-artifact"));
+
+        let error = verify_launch_package_bundle_jsons(
+            &bundle.to_string(),
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error.starts_with("public_probe_sha3_256 does not match")));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }

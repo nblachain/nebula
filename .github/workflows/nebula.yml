@@ -211,6 +211,7 @@ jobs:
           handoff="$(mktemp)"
           acceptance="$(mktemp)"
           genesis="$(mktemp)"
+          bundle="$(mktemp)"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > "$attestation"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > "$public_status"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-probe > "$public_probe"
@@ -219,11 +220,14 @@ jobs:
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-operator-acceptance --operator-handoff "$handoff" --deployment-attestation "$attestation" --validator-set "$validators" > "$acceptance"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation "$attestation" --validator-set "$validators" > "$genesis"
           output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
-          NEBULA_LAUNCH_PACKAGE_JSON="$output" python3 - <<'PY'
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-launch-package-bundle --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" > "$bundle"
+          bundle_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
+          NEBULA_LAUNCH_PACKAGE_JSON="$output" NEBULA_LAUNCH_PACKAGE_BUNDLE_JSON="$bundle_output" python3 - <<'PY'
           import json
           import os
 
           payload = json.loads(os.environ["NEBULA_LAUNCH_PACKAGE_JSON"])
+          bundle = json.loads(os.environ["NEBULA_LAUNCH_PACKAGE_BUNDLE_JSON"])
           assert payload["launch_package_ready"] is True
           assert payload["level"] == "launch-package-attested"
           assert len(payload["deployment_attestation_root"]) == 64
@@ -242,6 +246,13 @@ jobs:
           assert payload["validator_count"] >= 2
           assert payload["total_genesis_power"] > 0
           assert payload["activation_height"] > 0
+          assert bundle["launch_package_bundle_ready"] is True
+          assert bundle["level"] == "launch-package-bundle-attested"
+          assert len(bundle["launch_package_bundle_root"]) == 64
+          assert len(bundle["launch_package_root"]) == 64
+          assert len(bundle["operator_acceptance_root"]) == 64
+          assert bundle["artifact_count"] == 7
+          assert bundle["validator_count"] == payload["validator_count"]
           PY
 
       - name: Verify Nebula guide mirror
