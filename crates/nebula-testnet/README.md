@@ -274,6 +274,12 @@ captures, split durable `/status` versus JSON-RPC views, invalid snapshot roots,
 mismatched ops/backup roots, missing public ops readiness, and durable metrics
 drift. Fast-moving sync attempt/import counters remain exposed as telemetry but
 are not durable equality fields across separately captured live surfaces.
+For public launch evidence, use `--capture-public-runtime-surface` with the
+deployment attestation instead of hand-assembling files. It fetches the attested
+HTTPS `/status` origin plus sibling runtime surfaces, refuses redirects, and
+requires every response leaf certificate SHA-256, SPKI SHA-256, and
+`not_after_unix_ms` to match an attested `tls_pins` row before emitting
+`external-public-endpoint` evidence.
 The metrics scrape must expose matching block freshness, mempool pressure, RPC
 limit, peer count/quorum, sync quorum, bridge counter, storage snapshot, accountability, bridge
 custody, and public ops readiness gauges.
@@ -326,6 +332,8 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-public-probe --endpoint-url https://testnet.nebula.example/status > /tmp/nebula-public-probe.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-deployment-attestation --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --preflight-receipt /tmp/nebula-preflight.json --runbook-receipt /tmp/nebula-runbook.json --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms> --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms> --bootstrap-node <node_id,operator_id,region,endpoint> --bootstrap-node <node_id,operator_id,region,endpoint> --operator <operator_id,region,public_key> --operator <operator_id,region,public_key> --observer <observer_id,region,public_key> --observer <observer_id,region,public_key> --rollback-plan-sha3-256 <hex> --rollback-recovery-root <hex> > /tmp/nebula-attestation.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-deployment-attestation /tmp/nebula-attestation.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --capture-public-runtime-surface --deployment-attestation /tmp/nebula-attestation.json --endpoint-url https://testnet.nebula.example/status > /tmp/nebula-external-runtime-surface.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-runtime-surface-evidence /tmp/nebula-external-runtime-surface.json --json
 ```
 
 ## Commands

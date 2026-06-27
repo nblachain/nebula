@@ -2,8 +2,19 @@ use serde::de::DeserializeOwned;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
+use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::process;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use rustls::pki_types::ServerName;
+use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
+use sha2::{Digest, Sha256};
+use x509_parser::prelude::parse_x509_certificate;
+
+const DEFAULT_PUBLIC_CAPTURE_TIMEOUT_MS: u64 = 5_000;
+const MAX_PUBLIC_CAPTURE_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -51,6 +62,9 @@ fn main() {
     let wants_build_runtime_surface_evidence = args
         .iter()
         .any(|arg| arg == "--build-runtime-surface-evidence");
+    let wants_capture_public_runtime_surface = args
+        .iter()
+        .any(|arg| arg == "--capture-public-runtime-surface");
     let wants_build_live_rpc_devnet_runtime_surface = args
         .iter()
         .any(|arg| arg == "--build-live-rpc-devnet-runtime-surface");
@@ -85,6 +99,8 @@ fn main() {
         build_public_probe(&args, wants_json);
     } else if wants_build_runtime_surface_evidence {
         build_runtime_surface_evidence(&args, wants_json);
+    } else if wants_capture_public_runtime_surface {
+        capture_public_runtime_surface(&args, wants_json);
     } else if wants_build_live_rpc_devnet_runtime_surface {
         build_live_rpc_devnet_runtime_surface(&args, wants_json);
     } else if wants_sign_bridge_observer_evidence {
@@ -735,6 +751,577 @@ fn build_runtime_surface_evidence(args: &[String], wants_json: bool) {
             print_runtime_surface_evidence_error(wants_json, &errors);
             process::exit(1);
         }
+    }
+}
+
+fn capture_public_runtime_surface(args: &[String], wants_json: bool) {
+    let deployment_attestation_json =
+        read_required_public_capture_input(args, "--deployment-attestation", wants_json);
+    match nebula_testnet::verify_deployment_attestation_json(&deployment_attestation_json) {
+        Ok(_) => {}
+        Err(nebula_testnet::AttestationError::MalformedJson(error)) => {
+            print_runtime_surface_evidence_error(
+                wants_json,
+                &[format!("deployment attestation is malformed: {error}")],
+            );
+            process::exit(1);
+        }
+        Err(nebula_testnet::AttestationError::Invalid(errors)) => {
+            print_runtime_surface_evidence_error(wants_json, &errors);
+            process::exit(1);
+        }
+    }
+    let attestation = serde_json::from_str::<nebula_testnet::DeploymentAttestation>(
+        deployment_attestation_json.trim_start_matches('\u{feff}'),
+    )
+    .unwrap_or_else(|error| {
+        print_runtime_surface_evidence_error(
+            wants_json,
+            &[format!("deployment attestation is malformed: {error}")],
+        );
+        process::exit(1);
+    });
+    if let Some(endpoint_url) = arg_value(args, "--endpoint-url") {
+        if endpoint_url != attestation.public_endpoint.url {
+            print_runtime_surface_evidence_error(
+                wants_json,
+                &[format!(
+                    "--endpoint-url expected {} but got {endpoint_url}",
+                    attestation.public_endpoint.url
+                )],
+            );
+            process::exit(1);
+        }
+    }
+
+    let timeout = Duration::from_millis(parse_public_capture_timeout_ms(args, wants_json));
+    let origin =
+        parse_public_runtime_status_url(&attestation.public_endpoint.url).unwrap_or_else(|error| {
+            print_runtime_surface_evidence_error(wants_json, &[error]);
+            process::exit(1);
+        });
+    let capture =
+        fetch_public_runtime_surface(&origin, &attestation.public_endpoint.tls_pins, timeout)
+            .unwrap_or_else(|error| {
+                print_runtime_surface_evidence_error(wants_json, &[error]);
+                process::exit(1);
+            });
+    let input = nebula_testnet::RuntimeSurfaceEvidenceBuildInput {
+        endpoint_url: attestation.public_endpoint.url,
+        capture_mode: nebula_testnet::RUNTIME_SURFACE_CAPTURE_MODE_EXTERNAL_PUBLIC_ENDPOINT
+            .to_string(),
+        captured_at_unix_ms: current_unix_ms(),
+        health_json: capture.health_json,
+        status_json: capture.status_json,
+        snapshot_json: capture.snapshot_json,
+        ops_json: capture.ops_json,
+        backup_json: capture.backup_json,
+        rpc_status_json: capture.rpc_status_json,
+        rpc_ops_status_json: capture.rpc_ops_status_json,
+        rpc_backup_manifest_json: capture.rpc_backup_manifest_json,
+        metrics_text: capture.metrics_text,
+    };
+    match nebula_testnet::build_runtime_surface_evidence_json_pretty(input) {
+        Ok(output) => println!("{output}"),
+        Err(nebula_testnet::AttestationError::MalformedJson(error)) => {
+            print_runtime_surface_evidence_error(wants_json, &[error]);
+            process::exit(1);
+        }
+        Err(nebula_testnet::AttestationError::Invalid(errors)) => {
+            print_runtime_surface_evidence_error(wants_json, &errors);
+            process::exit(1);
+        }
+    }
+}
+
+fn read_required_public_capture_input(args: &[String], name: &str, wants_json: bool) -> String {
+    let Some(path) = arg_value(args, name) else {
+        print_runtime_surface_evidence_error(wants_json, &[format!("missing {name} <path>")]);
+        process::exit(1);
+    };
+
+    match read_text_file(path) {
+        Ok(input) => input,
+        Err(error) => {
+            print_runtime_surface_evidence_error(wants_json, &[error]);
+            process::exit(1);
+        }
+    }
+}
+
+fn parse_public_capture_timeout_ms(args: &[String], wants_json: bool) -> u64 {
+    let Some(value) = arg_value(args, "--timeout-ms") else {
+        return DEFAULT_PUBLIC_CAPTURE_TIMEOUT_MS;
+    };
+    value.parse::<u64>().unwrap_or_else(|error| {
+        print_runtime_surface_evidence_error(
+            wants_json,
+            &[format!("--timeout-ms must be an unsigned integer: {error}")],
+        );
+        process::exit(1);
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PublicRuntimeOrigin {
+    host: String,
+    port: u16,
+    host_header: String,
+    status_path: String,
+    base_path: String,
+}
+
+#[derive(Debug, Clone)]
+struct CapturedRuntimeSurface {
+    health_json: String,
+    status_json: String,
+    snapshot_json: String,
+    ops_json: String,
+    backup_json: String,
+    rpc_status_json: String,
+    rpc_ops_status_json: String,
+    rpc_backup_manifest_json: String,
+    metrics_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LiveTlsCertificateInfo {
+    cert_sha256: String,
+    public_key_sha256: String,
+    not_after_unix_ms: u128,
+}
+
+fn parse_public_runtime_status_url(url: &str) -> Result<PublicRuntimeOrigin, String> {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return Err("--capture-public-runtime-surface endpoint must use https://".to_string());
+    };
+    if rest.contains(['?', '#']) {
+        return Err(
+            "--capture-public-runtime-surface endpoint must not include query or fragment"
+                .to_string(),
+        );
+    }
+    let (authority, path) = rest
+        .split_once('/')
+        .map(|(authority, path)| (authority, format!("/{path}")))
+        .ok_or_else(|| {
+            "--capture-public-runtime-surface endpoint must include a /status path".to_string()
+        })?;
+    if authority.trim().is_empty() || authority.contains('@') {
+        return Err(
+            "--capture-public-runtime-surface endpoint must include a bare host".to_string(),
+        );
+    }
+    if authority.contains(char::is_whitespace) || path.contains(char::is_whitespace) {
+        return Err(
+            "--capture-public-runtime-surface endpoint must not contain whitespace".to_string(),
+        );
+    }
+    if !path.ends_with("/status") {
+        return Err(
+            "--capture-public-runtime-surface endpoint path must end with /status".to_string(),
+        );
+    }
+    let (host, port) = split_public_runtime_authority(authority)?;
+    let host_header = if port == 443 {
+        host.clone()
+    } else {
+        format!("{host}:{port}")
+    };
+    let base_path = path
+        .strip_suffix("/status")
+        .expect("path ending was checked")
+        .to_string();
+    Ok(PublicRuntimeOrigin {
+        host,
+        port,
+        host_header,
+        status_path: path,
+        base_path,
+    })
+}
+
+fn split_public_runtime_authority(authority: &str) -> Result<(String, u16), String> {
+    if authority.starts_with('[') || authority.contains(']') {
+        return Err(
+            "--capture-public-runtime-surface endpoint must use a DNS host, not an IPv6 literal"
+                .to_string(),
+        );
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port_text)) => {
+            if host.contains(':') || port_text.is_empty() {
+                return Err("--capture-public-runtime-surface endpoint port is invalid".to_string());
+            }
+            let port = port_text.parse::<u16>().map_err(|error| {
+                format!("--capture-public-runtime-surface endpoint port is invalid: {error}")
+            })?;
+            (host, port)
+        }
+        None => (authority, 443),
+    };
+    if host.is_empty() || host.contains(char::is_whitespace) {
+        return Err("--capture-public-runtime-surface endpoint host is invalid".to_string());
+    }
+    Ok((host.to_string(), port))
+}
+
+fn runtime_capture_path(origin: &PublicRuntimeOrigin, name: &str) -> String {
+    if origin.base_path.is_empty() {
+        format!("/{name}")
+    } else {
+        format!("{}/{}", origin.base_path.trim_end_matches('/'), name)
+    }
+}
+
+fn fetch_public_runtime_surface(
+    origin: &PublicRuntimeOrigin,
+    tls_pins: &[nebula_testnet::TlsEndpointPin],
+    timeout: Duration,
+) -> Result<CapturedRuntimeSurface, String> {
+    let config = Arc::new(public_runtime_tls_config()?);
+    Ok(CapturedRuntimeSurface {
+        health_json: https_get_text(
+            &config,
+            origin,
+            &runtime_capture_path(origin, "health"),
+            "application/json",
+            tls_pins,
+            timeout,
+        )?,
+        status_json: https_get_text(
+            &config,
+            origin,
+            &origin.status_path,
+            "application/json",
+            tls_pins,
+            timeout,
+        )?,
+        snapshot_json: https_get_text(
+            &config,
+            origin,
+            &runtime_capture_path(origin, "snapshot"),
+            "application/json",
+            tls_pins,
+            timeout,
+        )?,
+        ops_json: https_get_text(
+            &config,
+            origin,
+            &runtime_capture_path(origin, "ops"),
+            "application/json",
+            tls_pins,
+            timeout,
+        )?,
+        backup_json: https_get_text(
+            &config,
+            origin,
+            &runtime_capture_path(origin, "backup"),
+            "application/json",
+            tls_pins,
+            timeout,
+        )?,
+        rpc_status_json: https_post_json_rpc(&config, origin, "nebula_status", tls_pins, timeout)?,
+        rpc_ops_status_json: https_post_json_rpc(
+            &config,
+            origin,
+            "nebula_opsStatus",
+            tls_pins,
+            timeout,
+        )?,
+        rpc_backup_manifest_json: https_post_json_rpc(
+            &config,
+            origin,
+            "nebula_backupManifest",
+            tls_pins,
+            timeout,
+        )?,
+        metrics_text: https_get_text(
+            &config,
+            origin,
+            &runtime_capture_path(origin, "metrics"),
+            "text/plain",
+            tls_pins,
+            timeout,
+        )?,
+    })
+}
+
+fn public_runtime_tls_config() -> Result<ClientConfig, String> {
+    let root_store = RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    ClientConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
+        .with_safe_default_protocol_versions()
+        .map_err(|error| format!("failed to configure TLS protocol versions: {error}"))
+        .map(|builder| {
+            builder
+                .with_root_certificates(root_store)
+                .with_no_client_auth()
+        })
+}
+
+fn https_get_text(
+    config: &Arc<ClientConfig>,
+    origin: &PublicRuntimeOrigin,
+    path: &str,
+    accept: &str,
+    tls_pins: &[nebula_testnet::TlsEndpointPin],
+    timeout: Duration,
+) -> Result<String, String> {
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {}\r\nUser-Agent: nebula-testnet/{}\r\nAccept: {accept}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
+        origin.host_header,
+        env!("CARGO_PKG_VERSION")
+    );
+    https_request_text(config, origin, path, &request, tls_pins, timeout)
+}
+
+fn https_post_json_rpc(
+    config: &Arc<ClientConfig>,
+    origin: &PublicRuntimeOrigin,
+    method: &str,
+    tls_pins: &[nebula_testnet::TlsEndpointPin],
+    timeout: Duration,
+) -> Result<String, String> {
+    let path = runtime_capture_path(origin, "rpc");
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": method,
+        "method": method,
+        "params": {},
+    })
+    .to_string();
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {}\r\nUser-Agent: nebula-testnet/{}\r\nContent-Type: application/json\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        origin.host_header,
+        env!("CARGO_PKG_VERSION"),
+        body.len()
+    );
+    https_request_text(config, origin, &path, &request, tls_pins, timeout)
+}
+
+fn https_request_text(
+    config: &Arc<ClientConfig>,
+    origin: &PublicRuntimeOrigin,
+    path: &str,
+    request: &str,
+    tls_pins: &[nebula_testnet::TlsEndpointPin],
+    timeout: Duration,
+) -> Result<String, String> {
+    let mut tls = connect_public_runtime_tls(config, origin, timeout)
+        .map_err(|error| format!("{path} HTTPS connection failed: {error}"))?;
+    let certificates = tls
+        .conn
+        .peer_certificates()
+        .ok_or_else(|| format!("{path} TLS peer did not present certificates"))?;
+    let leaf = certificates
+        .first()
+        .ok_or_else(|| format!("{path} TLS peer certificate chain is empty"))?;
+    let tls_info = live_tls_certificate_info(leaf.as_ref())
+        .map_err(|error| format!("{path} TLS certificate parse failed: {error}"))?;
+    verify_live_tls_pin(path, tls_pins, &tls_info, current_unix_ms())?;
+
+    tls.write_all(request.as_bytes())
+        .map_err(|error| format!("{path} HTTPS request write failed: {error}"))?;
+    tls.flush()
+        .map_err(|error| format!("{path} HTTPS request flush failed: {error}"))?;
+    let mut response = Vec::new();
+    let mut limited = tls.take((MAX_PUBLIC_CAPTURE_RESPONSE_BYTES + 1) as u64);
+    limited
+        .read_to_end(&mut response)
+        .map_err(|error| format!("{path} HTTPS response read failed: {error}"))?;
+    if response.len() > MAX_PUBLIC_CAPTURE_RESPONSE_BYTES {
+        return Err(format!(
+            "{path} HTTPS response exceeded {MAX_PUBLIC_CAPTURE_RESPONSE_BYTES} bytes"
+        ));
+    }
+    parse_http_response_text(path, &response)
+}
+
+fn connect_public_runtime_tls(
+    config: &Arc<ClientConfig>,
+    origin: &PublicRuntimeOrigin,
+    timeout: Duration,
+) -> Result<StreamOwned<ClientConnection, TcpStream>, String> {
+    let server_name = ServerName::try_from(origin.host.clone())
+        .map_err(|error| format!("invalid TLS server name {}: {error}", origin.host))?;
+    let stream = connect_public_runtime_tcp(origin, timeout)?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|error| format!("failed to set read timeout: {error}"))?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|error| format!("failed to set write timeout: {error}"))?;
+    let connection = ClientConnection::new(config.clone(), server_name)
+        .map_err(|error| format!("failed to create TLS client: {error}"))?;
+    let mut tls = StreamOwned::new(connection, stream);
+    while tls.conn.is_handshaking() {
+        tls.conn
+            .complete_io(&mut tls.sock)
+            .map_err(|error| format!("TLS handshake failed: {error}"))?;
+    }
+    Ok(tls)
+}
+
+fn connect_public_runtime_tcp(
+    origin: &PublicRuntimeOrigin,
+    timeout: Duration,
+) -> Result<TcpStream, String> {
+    let addresses = (origin.host.as_str(), origin.port)
+        .to_socket_addrs()
+        .map_err(|error| format!("failed to resolve {}:{}: {error}", origin.host, origin.port))?;
+    let mut last_error = None;
+    for address in addresses {
+        match TcpStream::connect_timeout(&address, timeout) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(format!(
+        "failed to connect to {}:{}: {}",
+        origin.host,
+        origin.port,
+        last_error
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "no resolved addresses".to_string())
+    ))
+}
+
+fn live_tls_certificate_info(leaf_der: &[u8]) -> Result<LiveTlsCertificateInfo, String> {
+    let (_, certificate) = parse_x509_certificate(leaf_der)
+        .map_err(|error| format!("failed to parse leaf certificate DER: {error:?}"))?;
+    let not_after_seconds = certificate.validity().not_after.timestamp();
+    let not_after_unix_ms = u128::try_from(not_after_seconds)
+        .map_err(|_| "leaf certificate not_after is before UNIX epoch".to_string())?
+        .checked_mul(1_000)
+        .ok_or_else(|| "leaf certificate not_after overflows unix ms".to_string())?;
+    Ok(LiveTlsCertificateInfo {
+        cert_sha256: sha256_hex(leaf_der),
+        public_key_sha256: sha256_hex(certificate.public_key().raw),
+        not_after_unix_ms,
+    })
+}
+
+fn sha256_hex(input: &[u8]) -> String {
+    hex::encode(Sha256::digest(input))
+}
+
+fn verify_live_tls_pin(
+    path: &str,
+    tls_pins: &[nebula_testnet::TlsEndpointPin],
+    live: &LiveTlsCertificateInfo,
+    now_unix_ms: u128,
+) -> Result<(), String> {
+    if live.not_after_unix_ms <= now_unix_ms {
+        return Err(format!("{path} TLS leaf certificate is expired"));
+    }
+    if tls_pins.iter().any(|pin| {
+        pin.cert_sha256.eq_ignore_ascii_case(&live.cert_sha256)
+            && pin
+                .public_key_sha256
+                .eq_ignore_ascii_case(&live.public_key_sha256)
+            && pin.not_after_unix_ms == live.not_after_unix_ms
+    }) {
+        return Ok(());
+    }
+    Err(format!(
+        "{path} TLS pin mismatch: live cert_sha256={}, public_key_sha256={}, not_after_unix_ms={} did not match any deployment attestation tls_pins row",
+        live.cert_sha256, live.public_key_sha256, live.not_after_unix_ms
+    ))
+}
+
+fn parse_http_response_text(path: &str, response: &[u8]) -> Result<String, String> {
+    let header_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| format!("{path} HTTPS response was missing HTTP headers"))?;
+    let head = std::str::from_utf8(&response[..header_end])
+        .map_err(|error| format!("{path} HTTPS response headers were not UTF-8: {error}"))?;
+    let mut lines = head.lines();
+    let status_line = lines
+        .next()
+        .ok_or_else(|| format!("{path} HTTPS response was missing status line"))?;
+    let status_code = parse_http_status_code(status_line)
+        .ok_or_else(|| format!("{path} HTTPS response had invalid status line: {status_line}"))?;
+    let headers = lines
+        .filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.trim().to_string(), value.trim().to_string()))
+        .collect::<Vec<_>>();
+    if status_code != 200 {
+        return Err(format!("{path} HTTPS response returned {status_line}"));
+    }
+    let mut body = response[header_end + 4..].to_vec();
+    if header_value(&headers, "transfer-encoding")
+        .map(|value| {
+            value
+                .split(',')
+                .any(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"))
+        })
+        .unwrap_or(false)
+    {
+        body = decode_chunked_body(&body)
+            .map_err(|error| format!("{path} HTTPS response chunked body was invalid: {error}"))?;
+    } else if let Some(content_length) = header_value(&headers, "content-length") {
+        let expected = content_length
+            .parse::<usize>()
+            .map_err(|error| format!("{path} Content-Length was invalid: {error}"))?;
+        if body.len() < expected {
+            return Err(format!(
+                "{path} HTTPS response body was shorter than Content-Length {expected}"
+            ));
+        }
+        body.truncate(expected);
+    }
+    String::from_utf8(body)
+        .map_err(|error| format!("{path} HTTPS response body was not UTF-8: {error}"))
+}
+
+fn parse_http_status_code(status_line: &str) -> Option<u16> {
+    let mut parts = status_line.split_whitespace();
+    let version = parts.next()?;
+    if !version.starts_with("HTTP/") {
+        return None;
+    }
+    parts.next()?.parse::<u16>().ok()
+}
+
+fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+fn decode_chunked_body(body: &[u8]) -> Result<Vec<u8>, String> {
+    let mut decoded = Vec::new();
+    let mut cursor = 0;
+    loop {
+        let line_end = body[cursor..]
+            .windows(2)
+            .position(|window| window == b"\r\n")
+            .ok_or_else(|| "missing chunk-size line ending".to_string())?;
+        let line = std::str::from_utf8(&body[cursor..cursor + line_end])
+            .map_err(|error| format!("chunk-size line was not UTF-8: {error}"))?;
+        let size_text = line.split(';').next().unwrap_or_default().trim();
+        let size = usize::from_str_radix(size_text, 16)
+            .map_err(|error| format!("chunk-size was not hex: {error}"))?;
+        cursor += line_end + 2;
+        if size == 0 {
+            return Ok(decoded);
+        }
+        let end = cursor
+            .checked_add(size)
+            .ok_or_else(|| "chunk-size overflowed response length".to_string())?;
+        if end > body.len() {
+            return Err("chunk data exceeded response length".to_string());
+        }
+        decoded.extend_from_slice(&body[cursor..end]);
+        cursor = end;
+        if body.get(cursor..cursor + 2) != Some(b"\r\n") {
+            return Err("chunk data was not followed by CRLF".to_string());
+        }
+        cursor += 2;
     }
 }
 
@@ -3072,7 +3659,114 @@ LIVE RPC RUNTIME SURFACE:
     --build-live-rpc-devnet-runtime-surface starts loopback launch-bound
     sequencer and follower RPC nodes from a verified launch package and emits
     runtime-surface evidence suitable for the final launch certificate.
+    --capture-public-runtime-surface fetches the deployment attestation's
+    HTTPS /status origin, captures /health, /status, /snapshot, /ops, /backup,
+    /metrics, and JSON-RPC mirrors, and requires each response TLS leaf cert,
+    SPKI, and not_after to match an attested tls_pins row before emitting
+    external-public-endpoint runtime-surface evidence.
+    Usage: nebula-testnet --capture-public-runtime-surface
+    --deployment-attestation <path> [--endpoint-url <url>] [--timeout-ms <ms>]
 
 OPTIONS:\n    --mainnet-readiness              Emit the public launch readiness contract\n    --prove-local-public-testnet     Build and verify the local launch rehearsal chain\n    --prove-live-rpc-devnet          Start loopback RPC nodes and prove live devnet behavior\n    --run-rpc                        Run the public-testnet RPC node with bridge and ops/backup status\n    --sequencer                      Produce sub-second blocks locally (default)\n    --follower                       Disable local production and follow a sequencer peer set\n    --rpc-bind                       RPC bind address, default 127.0.0.1:9944\n    --block-ms                       Block target in ms; public testnet requires < 1000\n    --validator-id                   Local validator producer ID for block rewards\n    --sequencer-public-key           Expected Ed25519 sequencer public key for signed blocks\n    --sequencer-secret-key           Local Ed25519 sequencer signing seed; never exported in snapshots\n    --admin-token <token>            Enables operator-only JSON-RPC methods; never printed\n    --data-dir                       Persist node snapshots under this directory\n    --bootstrap-rpc                  Import an ahead peer snapshot before serving\n    --sync-rpc                       Repeatable snapshot peer for continuous follower sync/failover\n    --sync-peer-quorum               Matching sync peer snapshots required before follower import\n    --max-mempool-transactions       Maximum pending transactions admitted to local mempool\n    --max-request-bytes              Maximum accepted HTTP request body size in bytes\n    --max-requests-per-minute        Per-client RPC request budget per minute\n    --build-public-status            Build public status for a real endpoint URL\n    --build-public-probe             Build public probe evidence for a real endpoint URL\n    --build-runtime-surface-evidence Build root-bound evidence from captured live RPC surfaces\n    --verify-runtime-surface-evidence Verify captured runtime-surface evidence\n    --health                         Captured GET /health JSON for runtime-surface evidence\n    --status                         Captured GET /status JSON for runtime-surface evidence\n    --snapshot                       Captured GET /snapshot JSON for runtime-surface evidence\n    --ops                            Captured GET /ops JSON for runtime-surface evidence\n    --backup                         Captured GET /backup JSON for runtime-surface evidence\n    --rpc-status                     Captured nebula_status JSON-RPC response\n    --rpc-ops-status                 Captured nebula_opsStatus JSON-RPC response\n    --rpc-backup-manifest            Captured nebula_backupManifest JSON-RPC response\n    --metrics                        Captured GET /metrics text for runtime-surface evidence\n    --captured-at-unix-ms            Override runtime-surface evidence capture time\n    --runtime-surface-evidence       Runtime surface evidence input for launch certificate\n    --build-deployment-attestation   Build deployment evidence from public surface and receipt files\n    --endpoint-url                   HTTPS public status/probe/runtime endpoint URL for builders\n    --artifact-sha3-256              64-hex package artifact hash for builder identity\n    --cargo-lock-sha3-256            64-hex Cargo.lock hash for builder identity\n    --preflight-receipt              Preflight receipt input for deployment-attestation builder\n    --runbook-receipt                Runbook receipt input for deployment-attestation builder\n    --tls-pin                        Repeatable cert_sha256,public_key_sha256,not_after_unix_ms row\n    --bootstrap-node                 Repeatable node_id,operator_id,region,endpoint row\n    --operator                       Repeatable operator_id,region,public_key row\n    --observer                       Repeatable observer_id,region,public_key row\n    --rollback-plan-sha3-256         64-hex rollback plan hash for deployment evidence\n    --rollback-recovery-root         64-hex recovery point root for deployment evidence\n    --rollback-last-drill-unix-ms    Rollback drill completion time for deployment evidence\n    --generated-at-unix-ms           Override generated time for deployment evidence\n    --expires-at-unix-ms             Override expiry time for deployment evidence\n    --sample-public-status           Emit a public status manifest sample\n    --verify-public-status           Verify a public status manifest file\n    --sample-public-probe            Emit a public probe sample\n    --verify-public-probe            Verify a public probe file\n    --sample-preflight-receipt       Emit a preflight receipt sample\n    --verify-preflight-receipt       Verify a preflight receipt file\n    --sample-runbook-receipt         Emit a runbook receipt sample\n    --verify-runbook-receipt         Verify a runbook receipt file\n    --sample-deployment-attestation  Emit a fillable deployment attestation sample\n    --verify-deployment-attestation  Verify a deployment attestation file\n    --sample-validator-set           Emit a fillable validator-set manifest sample\n    --verify-validator-set           Verify a validator-set manifest file\n    --sample-operator-handoff        Emit a sample operator handoff manifest\n    --build-operator-handoff         Build operator handoff from attestation and validator set\n    --verify-operator-handoff        Verify an operator handoff manifest file\n    --sample-operator-acceptance     Emit a sample operator acceptance manifest\n    --build-operator-acceptance      Build operator acceptance from handoff, attestation, and validator set\n    --verify-operator-acceptance     Verify an operator acceptance manifest file\n    --operator-handoff               Operator handoff input for acceptance/package verification\n    --operator-acceptance            Operator acceptance input for launch package verification\n    --sample-genesis-manifest        Emit a sample genesis manifest built from samples\n    --build-genesis-manifest         Build genesis manifest from attestation and validator set\n    --deployment-attestation         Deployment attestation input for genesis build/package verification\n    --public-status                  Public status manifest input for launch package verification\n    --public-probe                   Public probe input for launch package verification\n    --validator-set                  Validator-set input for genesis build/package verification\n    --genesis-manifest               Genesis manifest input for launch package verification\n    --verify-genesis-manifest        Verify a genesis manifest file\n    --verify-launch-package          Verify deployment, public surface, validator set, genesis, handoff, and acceptance agree\n    --build-launch-package-bundle    Build the external validator launch-package bundle manifest\n    --verify-launch-package-bundle   Verify launch-package bundle hashes and roots against the artifact files\n    --launch-package-bundle          Launch-package bundle input for validator activation/join\n    --validator-activation           Validator activation input for join receipt verification\n    --validator-join                 Validator join input for operator confirmation\n    --operator-join-confirmation     Operator join confirmation input for public observer confirmation\n    --public-observer-confirmation   Public observer confirmation input for launch certificate\n    --build-validator-activation     Build validator activation from a verified launch-package bundle\n    --verify-validator-activation    Verify validators activated against the launch-package bundle\n    --build-validator-join           Build validator join receipt from activation and bundle evidence\n    --verify-validator-join          Verify validators joined at/after activation height\n    --build-operator-join-confirmation  Build operator confirmation from joined validators\n    --verify-operator-join-confirmation Verify operators confirmed the validator join receipt\n    --build-public-observer-confirmation Build observer confirmation from public endpoint evidence\n    --verify-public-observer-confirmation Verify observers confirmed the public endpoint post-join\n    --build-public-testnet-launch-certificate Build the final public testnet launch-candidate certificate\n    --verify-public-testnet-launch-certificate Verify the final launch-candidate certificate\n    --json                           Emit JSON output\n    -h, --help                       Show this help"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tls_pin(
+        cert_sha256: &str,
+        public_key_sha256: &str,
+        not_after_unix_ms: u128,
+    ) -> nebula_testnet::TlsEndpointPin {
+        nebula_testnet::TlsEndpointPin {
+            cert_sha256: cert_sha256.to_string(),
+            public_key_sha256: public_key_sha256.to_string(),
+            not_after_unix_ms,
+        }
+    }
+
+    #[test]
+    fn public_runtime_status_url_derives_sibling_paths() {
+        let origin =
+            parse_public_runtime_status_url("https://testnet.nebula.example:9443/rpc/status")
+                .expect("status URL parses");
+
+        assert_eq!(origin.host, "testnet.nebula.example");
+        assert_eq!(origin.port, 9443);
+        assert_eq!(origin.host_header, "testnet.nebula.example:9443");
+        assert_eq!(origin.status_path, "/rpc/status");
+        assert_eq!(runtime_capture_path(&origin, "health"), "/rpc/health");
+        assert_eq!(runtime_capture_path(&origin, "metrics"), "/rpc/metrics");
+    }
+
+    #[test]
+    fn public_runtime_status_url_rejects_ambiguous_paths() {
+        let error = parse_public_runtime_status_url("https://testnet.nebula.example/ready")
+            .expect_err("non-status paths are rejected");
+        assert!(error.contains("must end with /status"));
+
+        let error = parse_public_runtime_status_url("https://testnet.nebula.example/status?x=1")
+            .expect_err("query strings are rejected");
+        assert!(error.contains("query or fragment"));
+    }
+
+    #[test]
+    fn chunked_http_response_decodes_extensions() {
+        let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5;foo=bar\r\nhello\r\n6\r\n world\r\n0\r\n\r\n";
+
+        let body = parse_http_response_text("/metrics", response).expect("chunked body decodes");
+
+        assert_eq!(body, "hello world");
+    }
+
+    #[test]
+    fn http_response_rejects_redirects() {
+        let response = b"HTTP/1.1 302 Found\r\nLocation: https://other.example/status\r\nContent-Length: 0\r\n\r\n";
+
+        let error =
+            parse_http_response_text("/status", response).expect_err("redirects are rejected");
+
+        assert!(error.contains("302 Found"));
+    }
+
+    #[test]
+    fn live_tls_pin_requires_cert_key_and_expiry_match() {
+        let live = LiveTlsCertificateInfo {
+            cert_sha256: "aa".repeat(32),
+            public_key_sha256: "bb".repeat(32),
+            not_after_unix_ms: 2_000,
+        };
+        let pins = vec![tls_pin(
+            &live.cert_sha256,
+            &live.public_key_sha256,
+            live.not_after_unix_ms,
+        )];
+
+        verify_live_tls_pin("/status", &pins, &live, 1_000).expect("matching pin verifies");
+
+        let wrong_cert = vec![tls_pin(
+            "cc",
+            &live.public_key_sha256,
+            live.not_after_unix_ms,
+        )];
+        let error = verify_live_tls_pin("/status", &wrong_cert, &live, 1_000)
+            .expect_err("cert mismatch rejects");
+        assert!(error.contains("TLS pin mismatch"));
+
+        let wrong_key = vec![tls_pin(&live.cert_sha256, "dd", live.not_after_unix_ms)];
+        let error = verify_live_tls_pin("/status", &wrong_key, &live, 1_000)
+            .expect_err("key mismatch rejects");
+        assert!(error.contains("TLS pin mismatch"));
+
+        let wrong_expiry = vec![tls_pin(&live.cert_sha256, &live.public_key_sha256, 3_000)];
+        let error = verify_live_tls_pin("/status", &wrong_expiry, &live, 1_000)
+            .expect_err("expiry mismatch rejects");
+        assert!(error.contains("TLS pin mismatch"));
+
+        let error =
+            verify_live_tls_pin("/status", &pins, &live, 2_001).expect_err("expired cert rejects");
+        assert!(error.contains("expired"));
+    }
 }
