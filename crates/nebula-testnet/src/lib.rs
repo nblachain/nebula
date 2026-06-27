@@ -638,6 +638,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "validator_set_root_required": true,
                 "fee_policy_root_required": true,
                 "validator_admission_root_required": true,
+                "artifact_root_domains_disjoint": true,
                 "genesis_time_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
                 "activation_height": PUBLIC_TESTNET_ACTIVATION_HEIGHT,
                 "native_fee_token": NBLA_SYMBOL,
@@ -1285,6 +1286,7 @@ pub fn verify_genesis_manifest_json(
         &manifest.validator_admission_root,
         validator_admission_root,
     );
+    verify_genesis_root_domains(&mut errors, &manifest);
     if manifest.initial_validator_count < MIN_PUBLIC_TESTNET_VALIDATORS {
         errors.push(format!(
             "initial_validator_count must be at least {MIN_PUBLIC_TESTNET_VALIDATORS}"
@@ -1332,6 +1334,26 @@ pub fn verify_genesis_manifest_json(
         initial_total_power: manifest.initial_total_power,
         activation_height: manifest.activation_height,
     })
+}
+
+fn verify_genesis_root_domains(errors: &mut Vec<String>, manifest: &GenesisManifest) {
+    let mut roots_by_value = BTreeMap::new();
+    for (label, root) in [
+        (
+            "deployment_attestation_root",
+            manifest.deployment_attestation_root.as_str(),
+        ),
+        ("validator_set_root", manifest.validator_set_root.as_str()),
+        ("fee_policy_root", manifest.fee_policy_root.as_str()),
+        (
+            "validator_admission_root",
+            manifest.validator_admission_root.as_str(),
+        ),
+    ] {
+        if let Some(previous_label) = roots_by_value.insert(root, label) {
+            errors.push(format!("{label} must differ from {previous_label}"));
+        }
+    }
 }
 
 pub fn verify_launch_package_jsons(
@@ -4983,6 +5005,26 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "genesis_time_unix_ms is older than 24 hours"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn genesis_manifest_rejects_reused_artifact_roots() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_genesis_manifest_json_pretty()).unwrap();
+        value["validator_set_root"] = value["deployment_attestation_root"].clone();
+        value["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(value.clone()).unwrap()
+        ));
+
+        let error = verify_genesis_manifest_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| error
+                    == "validator_set_root must differ from deployment_attestation_root"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
