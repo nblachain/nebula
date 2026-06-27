@@ -104,6 +104,7 @@ The public launch suite covers:
   concentration, and region-spread validation
 - genesis manifest root binding across deployment evidence, validator set, and
   fee policy
+- genesis manifest freshness validation
 - genesis timestamp binding to the deployment attestation validity window
 - launch package coherence across deployment attestation, public surface,
   validator set, and genesis manifest artifacts
@@ -275,8 +276,8 @@ a deployment attestation and validator-set manifest that already pass their
 verifiers. The manifest binds the deployment evidence root, validator-set root,
 fee-policy root, validator-admission root, initial validator count, total genesis
 power, fixed activation height `1`, and fee token identities. The final
-launch-package check requires the genesis timestamp to fall inside the
-deployment attestation validity window.
+launch-package check requires the genesis timestamp to be fresh and to fall
+inside the deployment attestation validity window.
 
 Operators can build and verify the launch manifest with:
 

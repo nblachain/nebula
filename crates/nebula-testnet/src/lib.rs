@@ -638,6 +638,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "validator_set_root_required": true,
                 "fee_policy_root_required": true,
                 "validator_admission_root_required": true,
+                "genesis_time_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
                 "activation_height": PUBLIC_TESTNET_ACTIVATION_HEIGHT,
                 "native_fee_token": NBLA_SYMBOL,
                 "native_base_unit": NEBULAI_UNIT,
@@ -1253,6 +1254,9 @@ pub fn verify_genesis_manifest_json(
     );
     if manifest.genesis_time_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
         errors.push("genesis_time_unix_ms is more than five minutes in the future".to_string());
+    }
+    if manifest.genesis_time_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("genesis_time_unix_ms is older than 24 hours".to_string());
     }
     if manifest.activation_height != PUBLIC_TESTNET_ACTIVATION_HEIGHT {
         errors.push(format!(
@@ -4958,6 +4962,27 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "activation_height must be 1"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn genesis_manifest_rejects_stale_genesis_time() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_genesis_manifest_json_pretty()).unwrap();
+        value["genesis_time_unix_ms"] = json!(0);
+        value["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(value.clone()).unwrap()
+        ));
+
+        let error = verify_genesis_manifest_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "genesis_time_unix_ms is older than 24 hours"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
