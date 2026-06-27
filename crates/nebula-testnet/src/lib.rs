@@ -666,6 +666,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "public_probe_binds_deployment_attestation": true,
                 "validator_set_binds_deployment_operators": true,
                 "validator_set_binds_bootstrap_nodes": true,
+                "validator_p2p_host_binds_bootstrap_endpoint": true,
                 "all_deployment_operators_admitted": true,
                 "all_bootstrap_nodes_admitted": true,
                 "genesis_binds_deployment_attestation_root": true,
@@ -2408,6 +2409,17 @@ fn verify_validator_deployment_binding(
                     &node.region,
                     &validator.region,
                 );
+                if let (Some(validator_host), Some(bootstrap_host)) = (
+                    endpoint_host(&validator.p2p_endpoint, "tcp://"),
+                    endpoint_host(&node.endpoint, "https://"),
+                ) {
+                    require_eq(
+                        errors,
+                        &format!("validators[{index}].p2p_endpoint.host"),
+                        validator_host,
+                        bootstrap_host,
+                    );
+                }
             }
             None => errors.push(format!(
                 "validators[{index}].node_id {} is not present in deployment bootstrap_nodes",
@@ -2901,6 +2913,23 @@ fn require_endpoint_authority<'a>(
     if authority.trim().is_empty() || authority.chars().any(char::is_whitespace) {
         errors.push(format!("{label} must include a host after {scheme}"));
         return None;
+    }
+    Some(authority)
+}
+
+fn endpoint_host<'a>(endpoint: &'a str, scheme: &str) -> Option<&'a str> {
+    let authority = endpoint
+        .strip_prefix(scheme)?
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    if scheme == "tcp://" {
+        return authority.rsplit_once(':').map(|(host, _port)| host);
+    }
+    if let Some((host, port)) = authority.rsplit_once(':') {
+        if !host.is_empty() && port.chars().all(|character| character.is_ascii_digit()) {
+            return Some(host);
+        }
     }
     Some(authority)
 }
@@ -4284,6 +4313,38 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error
                         == "validators[0].node_id bootstrap-ap-south-1 is not present in deployment bootstrap_nodes"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_rejects_validator_p2p_host_mismatched_bootstrap_endpoint() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let mut validators =
+            serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        validators["validators"][0]["p2p_endpoint"] =
+            json!("tcp://other-bootstrap.testnet.nebula.example:26656");
+        refresh_validator_manifest_root(&mut validators, 0);
+        let genesis =
+            build_genesis_manifest_json_pretty(&deployment, &validators.to_string()).unwrap();
+
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators.to_string(),
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "validators[0].p2p_endpoint.host expected bootstrap-a.testnet.nebula.example but got other-bootstrap.testnet.nebula.example"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
