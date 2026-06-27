@@ -190,11 +190,12 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 Public testnet admission also requires a validator-set manifest. The verifier
 requires at least two validators, two operators, and two regions. Validator IDs,
 node IDs, consensus keys, network keys, and P2P endpoints must be unique.
-Genesis power must be positive, commission must be at or below `10000` basis
-points, reward accounts must use the `nbla-reward-` prefix, and rewards must be
-denominated in `nebulai`. Each validator admission signature root must bind the
-validator identity, keys, reward account, commission, genesis power, reward unit,
-and fee-policy root.
+Genesis power must be positive, no single validator may hold more than `5000`
+basis points of total genesis power, commission must be at or below `10000`
+basis points, reward accounts must use the `nbla-reward-` prefix, and rewards
+must be denominated in `nebulai`. Each validator admission signature root must
+bind the validator identity, keys, reward account, commission, genesis power,
+reward unit, and fee-policy root.
 
 Operators can generate the required shape and verify a filled validator set
 with:

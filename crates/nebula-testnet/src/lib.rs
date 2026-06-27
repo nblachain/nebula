@@ -24,6 +24,7 @@ pub const MIN_PUBLIC_TESTNET_VALIDATORS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_OPERATORS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_OBSERVERS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_REGIONS: usize = 2;
+pub const MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS: u128 = 5_000;
 pub const FUTURE_CLOCK_SKEW_MS: u128 = 300_000;
 pub const PUBLIC_ATTESTATION_MAX_AGE_MS: u128 = 86_400_000;
 pub const PUBLIC_ATTESTATION_MAX_TTL_MS: u128 = 604_800_000;
@@ -1080,6 +1081,7 @@ pub fn verify_validator_set_json(input: &str) -> Result<ValidatorSetReport, Atte
             manifest.minimum_region_count
         ));
     }
+    verify_validator_power_concentration(&mut errors, &manifest.validators, total_genesis_power);
 
     if !errors.is_empty() {
         return Err(AttestationError::Invalid(errors));
@@ -2358,6 +2360,26 @@ fn verify_validator_admission(
     regions.insert(validator.region.clone());
 }
 
+fn verify_validator_power_concentration(
+    errors: &mut Vec<String>,
+    validators: &[ValidatorAdmission],
+    total_genesis_power: u64,
+) {
+    if total_genesis_power == 0 {
+        return;
+    }
+    let total = u128::from(total_genesis_power);
+    for (index, validator) in validators.iter().enumerate() {
+        let validator_power_bps =
+            u128::from(validator.genesis_power).saturating_mul(FEE_BASIS_POINTS) / total;
+        if validator_power_bps > MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS {
+            errors.push(format!(
+                "validators[{index}].genesis_power must not exceed {MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS} bps of total genesis power"
+            ));
+        }
+    }
+}
+
 fn verify_rollback_evidence(
     errors: &mut Vec<String>,
     rollback_evidence: &RollbackEvidence,
@@ -3055,6 +3077,25 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "validators[1].consensus_public_key must be unique"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_concentrated_genesis_power() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["genesis_power"] = json!(3);
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "validators[0].genesis_power must not exceed 5000 bps of total genesis power"
+                }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
