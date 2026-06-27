@@ -11,8 +11,9 @@ block slots, native `NBLA` gas, bridged Monero gas as `nXMR`, and public launch
 artifacts that bind deployment evidence before the network is treated as
 public. The runtime starts from validator-set epoch `0` and activation height
 `1`, then admits only validators whose deployment, operator handoff, operator
-acceptance, genesis, launch-package bundle, activation, join, observer, and
-launch-certificate artifacts all verify against the same roots.
+acceptance, genesis, launch-package bundle, public-testnet peer manifest,
+activation, join, observer, and launch-certificate artifacts all verify against
+the same roots.
 
 In the Base-style public testnet phase, a sequencer produces deterministic
 sub-second blocks, while followers persist their own local state and
@@ -66,8 +67,8 @@ The public launch sequence for this crate is:
 1. Prove local readiness with formatting, build, tests, the readiness contract,
    and generated sample artifacts for public status, public probe, preflight,
    runbook, deployment, validator-set, operator handoff, operator acceptance,
-   genesis, launch package, launch-package bundle, activation, join, observer,
-   and launch-certificate gates.
+   genesis, launch package, launch-package bundle, public-testnet peer manifest,
+   activation, join, observer, and launch-certificate gates.
    The compact command is
    `nebula-testnet --prove-local-public-testnet --json`; it verifies that full
    local artifact chain in one pass while keeping the public launch gate blocked
@@ -91,7 +92,10 @@ The public launch sequence for this crate is:
 6. Build and verify operator handoff, operator acceptance, and the genesis
    manifest for activation height `1`.
 7. Verify the strict launch package, then build and verify the launch-package
-   bundle that external validators compare before joining.
+   bundle and public-testnet peer manifest that external validators compare
+   before joining. The peer manifest binds the public endpoint, validator set,
+   launch-package bundle root, sync-peer quorum, and each validator's RPC,
+   status, snapshot, bootstrap, and P2P endpoints.
 8. Rehearse the Base-style RPC devnet with one persistent sequencer and
    persisted followers. The sequencer must use an explicit non-dev
    `--sequencer-public-key`/`--sequencer-secret-key` pair and expose
@@ -99,7 +103,8 @@ The public launch sequence for this crate is:
    protected by `--admin-token`; the public `/rpc` listener must reject admin
    methods even when a valid token is supplied. Followers must import a verified startup snapshot with
    `--bootstrap-rpc`, continuously sync newer verified snapshots from a
-   repeatable `--sync-rpc` peer set, and expose matching `/health`, `/status`,
+   repeatable `--sync-rpc` peer set derived from the verified peer manifest's
+   snapshot URLs, and expose matching `/health`, `/status`,
    `/snapshot`, and JSON-RPC `/rpc` views. Each snapshot block must commit to
    the expected sequencer public key and verify its Ed25519 signature before
    accepting the follower. `/health`, `/status`, and `nebula_status` must expose
@@ -230,6 +235,8 @@ For a public RPC testnet candidate, start every sequencer and follower with the
 verified launch package artifacts: `--deployment-attestation`, `--public-status`,
 `--public-probe`, `--validator-set`, `--operator-handoff`,
 `--operator-acceptance`, `--genesis-manifest`, and `--launch-package-bundle`.
+Build and verify `--build-public-testnet-peer-manifest` from that same bundle
+before choosing the public follower `--sync-rpc` peers.
 `--run-rpc` verifies those artifacts, confirms `--validator-id` is admitted in
 the validator set, binds the live status/ops/backup surfaces to their roots, and
 rejects imported snapshots whose embedded launch binding differs. Nodes without
@@ -419,6 +426,8 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-launch-package-bundle --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json > /tmp/nebula-launch-package-bundle.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-public-testnet-peer-manifest --launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json > /tmp/nebula-peer-manifest.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-testnet-peer-manifest /tmp/nebula-peer-manifest.json --launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-validator-activation --launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json > /tmp/nebula-validator-activation.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-activation /tmp/nebula-validator-activation.json --launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-validator-join --validator-activation /tmp/nebula-validator-activation.json --launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json > /tmp/nebula-validator-join.json
@@ -596,6 +605,12 @@ The launch-package bundle builder emits the compact manifest external
 validators should compare before joining. It binds the seven launch artifact
 SHA3-256 digests, the verified artifact roots, the operator acceptance root,
 the deterministic launch-package root, and the bundle root.
+
+The public-testnet peer manifest builder emits the launch-bound RPC peer list
+external validators and followers should compare before choosing sync peers. It
+binds the public endpoint URL, launch-package bundle root, validator-set root,
+sync-peer quorum, and each validator's bootstrap, RPC, status, snapshot, P2P,
+key, reward-account, and bootstrap-attestation evidence into one root.
 
 The validator activation builder records one activated entry per admitted
 validator after bundle verification. Each entry binds the validator identity,

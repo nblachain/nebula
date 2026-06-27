@@ -520,6 +520,64 @@ pub struct LaunchPackageBundleReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct PublicTestnetPeerManifest {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub generated_at_unix_ms: u128,
+    pub endpoint_url: String,
+    pub launch_package_bundle_root: String,
+    pub launch_package_root: String,
+    pub deployment_attestation_root: String,
+    pub validator_set_root: String,
+    pub operator_handoff_root: String,
+    pub operator_acceptance_root: String,
+    pub genesis_root: String,
+    pub sync_peer_quorum: usize,
+    pub peers: Vec<PublicTestnetPeer>,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PublicTestnetPeer {
+    pub validator_id: String,
+    pub operator_id: String,
+    pub node_id: String,
+    pub region: String,
+    pub p2p_endpoint: String,
+    pub bootstrap_endpoint: String,
+    pub rpc_url: String,
+    pub status_url: String,
+    pub snapshot_url: String,
+    pub consensus_public_key: String,
+    pub network_public_key: String,
+    pub reward_account: String,
+    pub bootstrap_attestation_root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PublicTestnetPeerManifestReport {
+    pub public_testnet_peer_manifest_ready: bool,
+    pub level: &'static str,
+    pub public_testnet_peer_manifest_root: String,
+    pub launch_package_bundle_root: String,
+    pub launch_package_root: String,
+    pub deployment_attestation_root: String,
+    pub validator_set_root: String,
+    pub operator_handoff_root: String,
+    pub operator_acceptance_root: String,
+    pub genesis_root: String,
+    pub endpoint_url: String,
+    pub sync_peer_quorum: usize,
+    pub peer_count: usize,
+    pub operator_count: usize,
+    pub region_count: usize,
+    pub rpc_peer_urls: Vec<String>,
+    pub snapshot_peer_urls: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ValidatorActivationManifest {
     pub chain_id: String,
     pub runtime_version: String,
@@ -798,6 +856,7 @@ pub struct LocalPublicTestnetRehearsalReport {
     pub verified_artifact_count: usize,
     pub verified_artifacts: Vec<LocalPublicTestnetRehearsalArtifact>,
     pub public_testnet_launch_certificate_root: String,
+    pub public_testnet_peer_manifest_root: String,
     pub launch_package_bundle_root: String,
     pub launch_package_root: String,
     pub validator_activation_root: String,
@@ -1450,6 +1509,15 @@ pub fn readiness_report() -> NebulaReadiness {
                 "operator_acceptance_root_required": true,
                 "artifact_count": 7,
             })),
+            "public_testnet_peer_manifest": stable_root(&json!({
+                "launch_package_bundle_root_required": true,
+                "validator_set_root_required": true,
+                "deployment_bootstrap_roster_required": true,
+                "one_peer_per_admitted_validator": true,
+                "rpc_status_snapshot_urls_reported": true,
+                "sync_peer_quorum_reported": true,
+                "peer_regions_and_operator_coverage_required": true,
+            })),
             "validator_activation": stable_root(&json!({
                 "launch_package_bundle_root_required": true,
                 "launch_package_root_required": true,
@@ -1725,6 +1793,27 @@ pub fn prove_local_public_testnet_rehearsal(
         &operator_acceptance_json,
         &genesis_manifest_json,
     )?;
+    let public_testnet_peer_manifest_json = build_public_testnet_peer_manifest_json_pretty(
+        &launch_package_bundle_json,
+        &deployment_attestation_json,
+        &public_status_json,
+        &public_probe_json,
+        &validator_set_json,
+        &operator_handoff_json,
+        &operator_acceptance_json,
+        &genesis_manifest_json,
+    )?;
+    let public_testnet_peer_manifest_report = verify_public_testnet_peer_manifest_jsons(
+        &public_testnet_peer_manifest_json,
+        &launch_package_bundle_json,
+        &deployment_attestation_json,
+        &public_status_json,
+        &public_probe_json,
+        &validator_set_json,
+        &operator_handoff_json,
+        &operator_acceptance_json,
+        &genesis_manifest_json,
+    )?;
     let sequencer_binding = build_runtime_launch_binding_from_jsons(
         &deployment_attestation_json,
         &public_status_json,
@@ -1940,6 +2029,13 @@ pub fn prove_local_public_testnet_rehearsal(
                 .clone(),
         ),
         local_rehearsal_artifact(
+            "public_testnet_peer_manifest",
+            public_testnet_peer_manifest_report.level,
+            public_testnet_peer_manifest_report
+                .public_testnet_peer_manifest_root
+                .clone(),
+        ),
+        local_rehearsal_artifact(
             "validator_activation",
             validator_activation_report.level,
             validator_activation_report
@@ -1990,6 +2086,8 @@ pub fn prove_local_public_testnet_rehearsal(
         verified_artifacts,
         public_testnet_launch_certificate_root: public_testnet_launch_certificate_report
             .public_testnet_launch_certificate_root,
+        public_testnet_peer_manifest_root: public_testnet_peer_manifest_report
+            .public_testnet_peer_manifest_root,
         launch_package_bundle_root: launch_package_bundle_report.launch_package_bundle_root,
         launch_package_root: launch_package_bundle_report.launch_package_root,
         validator_activation_root: validator_activation_report.validator_activation_root,
@@ -4671,6 +4769,295 @@ pub fn verify_launch_package_bundle_jsons(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub fn build_public_testnet_peer_manifest_json_pretty(
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<String, AttestationError> {
+    let manifest = public_testnet_peer_manifest_from_jsons(
+        unix_ms(),
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    serde_json::to_string_pretty(&manifest)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_public_testnet_peer_manifest_jsons(
+    public_testnet_peer_manifest_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<PublicTestnetPeerManifestReport, AttestationError> {
+    let manifest = serde_json::from_str::<PublicTestnetPeerManifest>(
+        public_testnet_peer_manifest_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let expected = public_testnet_peer_manifest_from_jsons(
+        manifest.generated_at_unix_ms,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let mut errors = Vec::new();
+    let now = unix_ms();
+
+    if manifest.generated_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
+        errors.push("generated_at_unix_ms is more than five minutes in the future".to_string());
+    }
+    if manifest.generated_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("generated_at_unix_ms is older than 24 hours".to_string());
+    }
+    require_eq(&mut errors, "chain_id", &manifest.chain_id, CHAIN_ID);
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &manifest.runtime_version,
+        VERSION,
+    );
+    require_eq(
+        &mut errors,
+        "endpoint_url",
+        &manifest.endpoint_url,
+        &expected.endpoint_url,
+    );
+    require_root(
+        &mut errors,
+        "launch_package_bundle_root",
+        &manifest.launch_package_bundle_root,
+        &expected.launch_package_bundle_root,
+    );
+    require_root(
+        &mut errors,
+        "launch_package_root",
+        &manifest.launch_package_root,
+        &expected.launch_package_root,
+    );
+    require_root(
+        &mut errors,
+        "deployment_attestation_root",
+        &manifest.deployment_attestation_root,
+        &expected.deployment_attestation_root,
+    );
+    require_root(
+        &mut errors,
+        "validator_set_root",
+        &manifest.validator_set_root,
+        &expected.validator_set_root,
+    );
+    require_root(
+        &mut errors,
+        "operator_handoff_root",
+        &manifest.operator_handoff_root,
+        &expected.operator_handoff_root,
+    );
+    require_root(
+        &mut errors,
+        "operator_acceptance_root",
+        &manifest.operator_acceptance_root,
+        &expected.operator_acceptance_root,
+    );
+    require_root(
+        &mut errors,
+        "genesis_root",
+        &manifest.genesis_root,
+        &expected.genesis_root,
+    );
+    if manifest.sync_peer_quorum == 0 {
+        errors.push("sync_peer_quorum must be greater than zero".to_string());
+    }
+    let max_sync_quorum = manifest.peers.len().saturating_sub(1).max(1);
+    if manifest.sync_peer_quorum > max_sync_quorum {
+        errors.push(format!(
+            "sync_peer_quorum must be <= {max_sync_quorum} for {} peers",
+            manifest.peers.len()
+        ));
+    }
+    if manifest.peers != expected.peers {
+        errors.push(
+            "peers do not match verified launch validator and bootstrap artifacts".to_string(),
+        );
+    }
+    require_root(
+        &mut errors,
+        "root",
+        &manifest.root,
+        &public_testnet_peer_manifest_root(&manifest),
+    );
+    if manifest.root != public_testnet_peer_manifest_root(&expected) {
+        errors.push(format!(
+            "root does not match expected public testnet peer manifest root {}",
+            public_testnet_peer_manifest_root(&expected)
+        ));
+    }
+
+    let mut validator_ids = BTreeSet::new();
+    let mut node_ids = BTreeSet::new();
+    let mut operators = BTreeSet::new();
+    let mut regions = BTreeSet::new();
+    let mut p2p_endpoints = BTreeSet::new();
+    let mut bootstrap_endpoints = BTreeSet::new();
+    let mut rpc_urls = BTreeSet::new();
+    let mut status_urls = BTreeSet::new();
+    let mut snapshot_urls = BTreeSet::new();
+    for (index, peer) in manifest.peers.iter().enumerate() {
+        insert_unique(
+            &mut errors,
+            &mut validator_ids,
+            &format!("peers[{index}].validator_id"),
+            &peer.validator_id,
+        );
+        insert_unique(
+            &mut errors,
+            &mut node_ids,
+            &format!("peers[{index}].node_id"),
+            &peer.node_id,
+        );
+        operators.insert(peer.operator_id.clone());
+        regions.insert(peer.region.clone());
+        require_tcp_endpoint_with_port(
+            &mut errors,
+            &format!("peers[{index}].p2p_endpoint"),
+            &peer.p2p_endpoint,
+        );
+        require_https_endpoint_without_path(
+            &mut errors,
+            &format!("peers[{index}].bootstrap_endpoint"),
+            &peer.bootstrap_endpoint,
+        );
+        require_https_endpoint(
+            &mut errors,
+            &format!("peers[{index}].rpc_url"),
+            &peer.rpc_url,
+        );
+        require_https_endpoint(
+            &mut errors,
+            &format!("peers[{index}].status_url"),
+            &peer.status_url,
+        );
+        require_https_endpoint(
+            &mut errors,
+            &format!("peers[{index}].snapshot_url"),
+            &peer.snapshot_url,
+        );
+        require_hex_value(
+            &mut errors,
+            &format!("peers[{index}].consensus_public_key"),
+            &peer.consensus_public_key,
+        );
+        require_hex_value(
+            &mut errors,
+            &format!("peers[{index}].network_public_key"),
+            &peer.network_public_key,
+        );
+        require_hex_root(
+            &mut errors,
+            &format!("peers[{index}].bootstrap_attestation_root"),
+            &peer.bootstrap_attestation_root,
+        );
+        insert_unique(
+            &mut errors,
+            &mut p2p_endpoints,
+            &format!("peers[{index}].p2p_endpoint"),
+            &peer.p2p_endpoint,
+        );
+        insert_unique(
+            &mut errors,
+            &mut bootstrap_endpoints,
+            &format!("peers[{index}].bootstrap_endpoint"),
+            &peer.bootstrap_endpoint,
+        );
+        insert_unique(
+            &mut errors,
+            &mut rpc_urls,
+            &format!("peers[{index}].rpc_url"),
+            &peer.rpc_url,
+        );
+        insert_unique(
+            &mut errors,
+            &mut status_urls,
+            &format!("peers[{index}].status_url"),
+            &peer.status_url,
+        );
+        insert_unique(
+            &mut errors,
+            &mut snapshot_urls,
+            &format!("peers[{index}].snapshot_url"),
+            &peer.snapshot_url,
+        );
+    }
+    if manifest.peers.len() < MIN_PUBLIC_TESTNET_VALIDATORS {
+        errors.push(format!(
+            "peers must include at least {MIN_PUBLIC_TESTNET_VALIDATORS} validators"
+        ));
+    }
+    if operators.len() < MIN_PUBLIC_TESTNET_OPERATORS {
+        errors.push(format!(
+            "peers must cover at least {MIN_PUBLIC_TESTNET_OPERATORS} operators"
+        ));
+    }
+    if regions.len() < MIN_PUBLIC_TESTNET_REGIONS {
+        errors.push(format!(
+            "peers must cover at least {MIN_PUBLIC_TESTNET_REGIONS} regions"
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    Ok(PublicTestnetPeerManifestReport {
+        public_testnet_peer_manifest_ready: true,
+        level: "public-testnet-peer-manifest-attested",
+        public_testnet_peer_manifest_root: manifest.root,
+        launch_package_bundle_root: manifest.launch_package_bundle_root,
+        launch_package_root: manifest.launch_package_root,
+        deployment_attestation_root: manifest.deployment_attestation_root,
+        validator_set_root: manifest.validator_set_root,
+        operator_handoff_root: manifest.operator_handoff_root,
+        operator_acceptance_root: manifest.operator_acceptance_root,
+        genesis_root: manifest.genesis_root,
+        endpoint_url: manifest.endpoint_url,
+        sync_peer_quorum: manifest.sync_peer_quorum,
+        peer_count: manifest.peers.len(),
+        operator_count: operators.len(),
+        region_count: regions.len(),
+        rpc_peer_urls: manifest
+            .peers
+            .iter()
+            .map(|peer| peer.rpc_url.clone())
+            .collect(),
+        snapshot_peer_urls: manifest
+            .peers
+            .iter()
+            .map(|peer| peer.snapshot_url.clone())
+            .collect(),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn build_runtime_launch_binding_from_jsons(
     deployment_attestation_json: &str,
     public_status_json: &str,
@@ -6458,6 +6845,7 @@ fn local_public_testnet_rehearsal_root(report: &LocalPublicTestnetRehearsalRepor
         "verified_artifact_count": report.verified_artifact_count,
         "verified_artifacts": report.verified_artifacts,
         "public_testnet_launch_certificate_root": report.public_testnet_launch_certificate_root,
+        "public_testnet_peer_manifest_root": report.public_testnet_peer_manifest_root,
         "launch_package_bundle_root": report.launch_package_bundle_root,
         "launch_package_root": report.launch_package_root,
         "validator_activation_root": report.validator_activation_root,
@@ -10237,6 +10625,130 @@ fn launch_package_bundle_root(manifest: &LaunchPackageBundleManifest) -> String 
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn public_testnet_peer_manifest_from_jsons(
+    generated_at_unix_ms: u128,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<PublicTestnetPeerManifest, AttestationError> {
+    let launch_report = verify_launch_package_with_operator_acceptance_jsons(
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let bundle_report = verify_launch_package_bundle_jsons(
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let deployment_attestation =
+        verified_deployment_attestation_manifest(deployment_attestation_json)?;
+    let validator_set = verified_validator_set_manifest(validator_set_json)?;
+    let bootstrap_nodes_by_id = deployment_attestation
+        .bootstrap_nodes
+        .iter()
+        .map(|node| (node.node_id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let mut errors = Vec::new();
+    let mut peers = Vec::new();
+
+    for validator in &validator_set.validators {
+        let Some(bootstrap_node) = bootstrap_nodes_by_id.get(validator.node_id.as_str()) else {
+            errors.push(format!(
+                "validator {} node_id {} is not present in deployment bootstrap_nodes",
+                validator.validator_id, validator.node_id
+            ));
+            continue;
+        };
+        let bootstrap_endpoint = bootstrap_node.endpoint.trim_end_matches('/');
+        peers.push(PublicTestnetPeer {
+            validator_id: validator.validator_id.clone(),
+            operator_id: validator.operator_id.clone(),
+            node_id: validator.node_id.clone(),
+            region: validator.region.clone(),
+            p2p_endpoint: validator.p2p_endpoint.clone(),
+            bootstrap_endpoint: bootstrap_node.endpoint.clone(),
+            rpc_url: format!("{bootstrap_endpoint}/rpc"),
+            status_url: format!("{bootstrap_endpoint}/status"),
+            snapshot_url: format!("{bootstrap_endpoint}/snapshot"),
+            consensus_public_key: validator.consensus_public_key.clone(),
+            network_public_key: validator.network_public_key.clone(),
+            reward_account: validator.reward_account.clone(),
+            bootstrap_attestation_root: bootstrap_node.attestation_root.clone(),
+        });
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    peers.sort_by(|left, right| {
+        (
+            left.operator_id.as_str(),
+            left.validator_id.as_str(),
+            left.node_id.as_str(),
+        )
+            .cmp(&(
+                right.operator_id.as_str(),
+                right.validator_id.as_str(),
+                right.node_id.as_str(),
+            ))
+    });
+    let sync_peer_quorum = peers.len().saturating_sub(1).max(1);
+    let mut manifest = PublicTestnetPeerManifest {
+        chain_id: CHAIN_ID.to_string(),
+        runtime_version: VERSION.to_string(),
+        generated_at_unix_ms,
+        endpoint_url: launch_report.endpoint_url,
+        launch_package_bundle_root: bundle_report.launch_package_bundle_root,
+        launch_package_root: bundle_report.launch_package_root,
+        deployment_attestation_root: bundle_report.deployment_attestation_root,
+        validator_set_root: bundle_report.validator_set_root,
+        operator_handoff_root: bundle_report.operator_handoff_root,
+        operator_acceptance_root: bundle_report.operator_acceptance_root,
+        genesis_root: bundle_report.genesis_root,
+        sync_peer_quorum,
+        peers,
+        root: String::new(),
+    };
+    manifest.root = public_testnet_peer_manifest_root(&manifest);
+    Ok(manifest)
+}
+
+fn public_testnet_peer_manifest_root(manifest: &PublicTestnetPeerManifest) -> String {
+    stable_root(&json!({
+        "peer_manifest_domain": "nebula-public-testnet-peer-manifest-v1",
+        "chain_id": manifest.chain_id,
+        "runtime_version": manifest.runtime_version,
+        "generated_at_unix_ms": manifest.generated_at_unix_ms,
+        "endpoint_url": manifest.endpoint_url,
+        "launch_package_bundle_root": manifest.launch_package_bundle_root,
+        "launch_package_root": manifest.launch_package_root,
+        "deployment_attestation_root": manifest.deployment_attestation_root,
+        "validator_set_root": manifest.validator_set_root,
+        "operator_handoff_root": manifest.operator_handoff_root,
+        "operator_acceptance_root": manifest.operator_acceptance_root,
+        "genesis_root": manifest.genesis_root,
+        "sync_peer_quorum": manifest.sync_peer_quorum,
+        "peers": manifest.peers,
+    }))
+}
+
 fn validator_activation_manifest(
     bundle_report: &LaunchPackageBundleReport,
     acceptance_report: &OperatorAcceptanceReport,
@@ -11601,6 +12113,49 @@ mod public_launch {
             .join("\n")
     }
 
+    struct SampleLaunchArtifacts {
+        deployment: String,
+        public_status: String,
+        public_probe: String,
+        validators: String,
+        handoff: String,
+        acceptance: String,
+        genesis: String,
+        bundle: String,
+    }
+
+    fn sample_launch_artifacts() -> SampleLaunchArtifacts {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        SampleLaunchArtifacts {
+            deployment,
+            public_status,
+            public_probe,
+            validators,
+            handoff,
+            acceptance,
+            genesis,
+            bundle,
+        }
+    }
+
     #[test]
     fn public_launch_blocks_without_deployment_attestation() {
         let report = readiness_report();
@@ -11654,6 +12209,7 @@ mod public_launch {
 
         for root_name in [
             "launch_package_bundle",
+            "public_testnet_peer_manifest",
             "validator_activation",
             "validator_join",
             "operator_join_confirmation",
@@ -13987,6 +14543,162 @@ mod public_launch {
         assert_eq!(report.validator_count, 2);
         assert_eq!(report.matched_operator_count, 2);
         assert_eq!(report.matched_region_count, 2);
+    }
+
+    #[test]
+    fn public_testnet_peer_manifest_builds_launch_bound_peer_roster() {
+        let artifacts = sample_launch_artifacts();
+        let manifest_json = build_public_testnet_peer_manifest_json_pretty(
+            &artifacts.bundle,
+            &artifacts.deployment,
+            &artifacts.public_status,
+            &artifacts.public_probe,
+            &artifacts.validators,
+            &artifacts.handoff,
+            &artifacts.acceptance,
+            &artifacts.genesis,
+        )
+        .unwrap();
+
+        let manifest = serde_json::from_str::<PublicTestnetPeerManifest>(&manifest_json).unwrap();
+        let report = verify_public_testnet_peer_manifest_jsons(
+            &manifest_json,
+            &artifacts.bundle,
+            &artifacts.deployment,
+            &artifacts.public_status,
+            &artifacts.public_probe,
+            &artifacts.validators,
+            &artifacts.handoff,
+            &artifacts.acceptance,
+            &artifacts.genesis,
+        )
+        .unwrap();
+
+        assert!(report.public_testnet_peer_manifest_ready);
+        assert_eq!(report.level, "public-testnet-peer-manifest-attested");
+        assert_eq!(report.public_testnet_peer_manifest_root, manifest.root);
+        assert_eq!(
+            report.launch_package_bundle_root,
+            manifest.launch_package_bundle_root
+        );
+        assert_eq!(report.validator_set_root, manifest.validator_set_root);
+        assert_eq!(report.endpoint_url, "https://testnet.nebula.example/status");
+        assert_eq!(report.sync_peer_quorum, 1);
+        assert_eq!(report.peer_count, 2);
+        assert_eq!(report.operator_count, 2);
+        assert_eq!(report.region_count, 2);
+        assert_eq!(report.rpc_peer_urls.len(), 2);
+        assert_eq!(report.snapshot_peer_urls.len(), 2);
+        assert_eq!(manifest.peers.len(), 2);
+        assert_eq!(
+            manifest.peers[0].bootstrap_endpoint,
+            "https://bootstrap-a.testnet.nebula.example"
+        );
+        assert_eq!(
+            manifest.peers[0].rpc_url,
+            "https://bootstrap-a.testnet.nebula.example/rpc"
+        );
+        assert_eq!(
+            manifest.peers[0].status_url,
+            "https://bootstrap-a.testnet.nebula.example/status"
+        );
+        assert_eq!(
+            manifest.peers[0].snapshot_url,
+            "https://bootstrap-a.testnet.nebula.example/snapshot"
+        );
+        assert_eq!(
+            manifest.peers[1].rpc_url,
+            "https://bootstrap-b.testnet.nebula.example/rpc"
+        );
+    }
+
+    #[test]
+    fn public_testnet_peer_manifest_rejects_tampered_peer_urls() {
+        let artifacts = sample_launch_artifacts();
+        let manifest_json = build_public_testnet_peer_manifest_json_pretty(
+            &artifacts.bundle,
+            &artifacts.deployment,
+            &artifacts.public_status,
+            &artifacts.public_probe,
+            &artifacts.validators,
+            &artifacts.handoff,
+            &artifacts.acceptance,
+            &artifacts.genesis,
+        )
+        .unwrap();
+        let mut manifest =
+            serde_json::from_str::<PublicTestnetPeerManifest>(&manifest_json).unwrap();
+        manifest.peers[0].rpc_url = "https://evil.testnet.nebula.example/rpc".to_string();
+        manifest.root = public_testnet_peer_manifest_root(&manifest);
+        let tampered_json = serde_json::to_string(&manifest).unwrap();
+
+        let error = verify_public_testnet_peer_manifest_jsons(
+            &tampered_json,
+            &artifacts.bundle,
+            &artifacts.deployment,
+            &artifacts.public_status,
+            &artifacts.public_probe,
+            &artifacts.validators,
+            &artifacts.handoff,
+            &artifacts.acceptance,
+            &artifacts.genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "peers do not match verified launch validator and bootstrap artifacts"
+                }));
+                assert!(errors.iter().any(|error| {
+                    error.starts_with(
+                        "root does not match expected public testnet peer manifest root",
+                    )
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn public_testnet_peer_manifest_rejects_impossible_sync_quorum() {
+        let artifacts = sample_launch_artifacts();
+        let manifest_json = build_public_testnet_peer_manifest_json_pretty(
+            &artifacts.bundle,
+            &artifacts.deployment,
+            &artifacts.public_status,
+            &artifacts.public_probe,
+            &artifacts.validators,
+            &artifacts.handoff,
+            &artifacts.acceptance,
+            &artifacts.genesis,
+        )
+        .unwrap();
+        let mut manifest =
+            serde_json::from_str::<PublicTestnetPeerManifest>(&manifest_json).unwrap();
+        manifest.sync_peer_quorum = 2;
+        manifest.root = public_testnet_peer_manifest_root(&manifest);
+        let tampered_json = serde_json::to_string(&manifest).unwrap();
+
+        let error = verify_public_testnet_peer_manifest_jsons(
+            &tampered_json,
+            &artifacts.bundle,
+            &artifacts.deployment,
+            &artifacts.public_status,
+            &artifacts.public_probe,
+            &artifacts.validators,
+            &artifacts.handoff,
+            &artifacts.acceptance,
+            &artifacts.genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => assert!(errors
+                .iter()
+                .any(|error| error == "sync_peer_quorum must be <= 1 for 2 peers")),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
     }
 
     #[test]
