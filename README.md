@@ -91,6 +91,7 @@ The public launch suite covers:
 - preflight/runbook receipt evidence separation
 - preflight/runbook receipt completion before deployment generation
 - rollback drill completion before deployment generation
+- distinct rollback plan and recovery-point roots
 - policy claim and public probe body exact-shape validation
 - preflight and runbook receipt exact-shape validation
 - bootstrap node/operator and observer attestation exact-shape validation
@@ -185,6 +186,7 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - runbook receipt evidence roots that reuse preflight receipt evidence
 - preflight/runbook receipts completed after deployment attestation generation
 - rollback drills completed after deployment attestation generation
+- rollback recovery roots that reuse rollback plan roots
 
 Until an operator provides fresh deployment evidence that satisfies those rules,
 `public_launch_ready` must remain `false`.

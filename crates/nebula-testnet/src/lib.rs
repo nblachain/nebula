@@ -640,6 +640,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "preflight_runbook_evidence_domains_disjoint": true,
                 "receipts_complete_before_deployment_generation": true,
                 "rollback_drill_before_deployment_generation": true,
+                "rollback_plan_recovery_roots_disjoint": true,
                 "deployment_witness_root_verified": true,
                 "public_https_endpoint_required": true,
                 "public_endpoint_authority_required": true,
@@ -2739,6 +2740,12 @@ fn verify_rollback_evidence(
         "rollback_evidence.recovery_point_root",
         &rollback_evidence.recovery_point_root,
     );
+    if rollback_evidence.rollback_plan_sha3_256 == rollback_evidence.recovery_point_root {
+        errors.push(
+            "rollback_evidence.recovery_point_root must differ from rollback_plan_sha3_256"
+                .to_string(),
+        );
+    }
 }
 
 fn package_identity_root(package_identity: &PackageIdentity) -> String {
@@ -3651,6 +3658,26 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error
                         == "rollback_evidence.last_drill_unix_ms must be at or before generated_at_unix_ms"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_reused_rollback_recovery_root() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["rollback_evidence"]["recovery_point_root"] =
+            value["rollback_evidence"]["rollback_plan_sha3_256"].clone();
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "rollback_evidence.recovery_point_root must differ from rollback_plan_sha3_256"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

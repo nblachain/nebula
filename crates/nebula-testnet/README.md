@@ -49,7 +49,8 @@ nodes, operator quorums, and observer quorums must each cover at least two
 regions. Deployment evidence must be generated within `24` hours, expire after
 its generation time and within `7` days, carry TLS pins with at least `7` days
 remaining, and include a rollback drill from the last `7` days that completed
-before deployment evidence was generated.
+before deployment evidence was generated. Rollback recovery roots must differ
+from rollback plan roots.
 
 Preflight and runbook receipt verifiers let operators prove launch steps before
 wrapping those receipts in deployment evidence. Receipt phase names must be
