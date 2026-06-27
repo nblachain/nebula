@@ -624,6 +624,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "reward_account_operator_binding_required": true,
                 "unique_p2p_endpoints_required": true,
                 "p2p_endpoint_host_port_required": true,
+                "p2p_endpoint_path_forbidden": true,
                 "p2p_endpoint_userinfo_forbidden": true,
                 "p2p_endpoint_query_fragment_forbidden": true,
                 "max_single_validator_genesis_power_bps": MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS,
@@ -3060,6 +3061,11 @@ fn require_tcp_endpoint_with_port(errors: &mut Vec<String>, label: &str, endpoin
     let Some(authority) = require_endpoint_authority(errors, label, endpoint, scheme) else {
         return;
     };
+    let remainder = endpoint.strip_prefix(scheme).unwrap_or_default();
+    if remainder.contains('/') {
+        errors.push(format!("{label} must not include a path"));
+        return;
+    }
     let Some((host, port)) = authority.rsplit_once(':') else {
         errors.push(format!("{label} must include a numeric port"));
         return;
@@ -4548,6 +4554,25 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error == "validators[0].p2p_endpoint must not include query or fragment"
                 }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_p2p_endpoint_with_path() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][0]["p2p_endpoint"] =
+            json!("tcp://bootstrap-a.testnet.nebula.example:26656/p2p");
+        refresh_validator_manifest_root(&mut value, 0);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "validators[0].p2p_endpoint must not include a path"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }

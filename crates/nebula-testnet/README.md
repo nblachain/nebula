@@ -78,7 +78,7 @@ total genesis power. Operator contacts must use `mailto:` or `https://`.
 `mailto:` contacts must include exactly one email address with no
 query/fragment components, `https://` contacts must include a host and no
 userinfo/query/fragment components, and P2P endpoints must use
-`tcp://host:port` with no userinfo/query/fragment components.
+`tcp://host:port` with no path/userinfo/query/fragment components.
 Validator admission reward accounts must use
 `nbla-reward-{operator_id}` and rewards are denominated in `nebulai`. Each
 signed admission root must bind the validator identity, operator contact, keys,
