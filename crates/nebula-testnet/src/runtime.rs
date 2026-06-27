@@ -1517,6 +1517,21 @@ impl RuntimeRpcState {
         {
             blocking_gaps.push("follower-sync-quorum-not-met".to_string());
         }
+        if status.node_role == "follower" && !self.sync_peers.sync_peer_urls.is_empty() {
+            if sync_telemetry.import_count == 0 {
+                blocking_gaps.push("follower-no-imported-sync-snapshot".to_string());
+            }
+            if sync_telemetry.last_import_height != Some(status.latest_height) {
+                blocking_gaps.push("follower-import-not-at-served-head".to_string());
+            }
+            if sync_telemetry.quorum_height != Some(status.latest_height)
+                || sync_telemetry.quorum_latest_hash.as_deref() != Some(status.latest_hash.as_str())
+                || sync_telemetry.quorum_state_root.as_deref()
+                    != Some(status.current_state_root.as_str())
+            {
+                blocking_gaps.push("follower-quorum-tip-mismatch".to_string());
+            }
+        }
         if bridge_policy().live_value_enabled {
             blocking_gaps.push("bridge-live-value-enabled".to_string());
         }
@@ -2549,6 +2564,24 @@ impl NebulaRuntime {
         })
     }
 
+    pub fn seed_local_rehearsal_nbla(
+        &mut self,
+        account: &str,
+        amount_nebulai: u128,
+    ) -> Result<RuntimeAccount, String> {
+        self.ensure_accountability_clean()?;
+        validate_account_id(account)?;
+        let state = self
+            .accounts
+            .entry(account.to_string())
+            .or_insert_with(RuntimeAccount::empty);
+        state.nbla_nebulai = state
+            .nbla_nebulai
+            .checked_add(amount_nebulai)
+            .ok_or_else(|| "local rehearsal NBLA credit overflowed".to_string())?;
+        Ok(state.clone())
+    }
+
     pub fn account(&self, account: &str) -> Option<RuntimeAccount> {
         self.accounts.get(account).cloned()
     }
@@ -3097,7 +3130,7 @@ impl NebulaRuntime {
                 .ok_or_else(|| "nXMR fee accounting overflowed".to_string())?;
             self.buyback_pool_nebulai = self
                 .buyback_pool_nebulai
-                .checked_add(plan.quote.reserve_backing_nebulai)
+                .checked_add(plan.quote.buyback_nebulai)
                 .ok_or_else(|| "NBLA buyback accounting overflowed".to_string())?;
         }
 
@@ -3135,7 +3168,7 @@ impl NebulaRuntime {
             fee_asset: tx.fee_asset.clone(),
             paid_amount_units: plan.quote.paid_amount_units,
             validator_reward_nebulai: plan.quote.validator_reward_nebulai,
-            buyback_nebulai: plan.quote.reserve_backing_nebulai,
+            buyback_nebulai: plan.quote.buyback_nebulai,
             error: None,
         })
     }
@@ -6698,7 +6731,7 @@ mod tests {
             .record_sync_peer_success("http://127.0.0.1:9945/snapshot", &snapshot, 1)
             .unwrap();
         let ops = state.ops_status().unwrap();
-        assert!(ops.public_ops_ready, "{:?}", ops.blocking_gaps);
+        assert!(!ops.public_ops_ready);
         assert_eq!(ops.sync_successful_peer_count, 1);
         assert!(ops.sync_quorum_met);
         assert_eq!(ops.sync_quorum_peer_count, 1);
@@ -6711,7 +6744,45 @@ mod tests {
             ops.sync_quorum_state_root,
             Some(snapshot.state_root.clone())
         );
+        assert!(ops
+            .blocking_gaps
+            .contains(&"follower-no-imported-sync-snapshot".to_string()));
+        assert!(ops
+            .blocking_gaps
+            .contains(&"follower-import-not-at-served-head".to_string()));
+        assert_eq!(ops.sync_import_count, 0);
         assert_eq!(ops.sync_peer_telemetry[0].success_count, 1);
+
+        sequencer.produce_block();
+        let ahead_snapshot = sequencer.export_snapshot();
+        state
+            .record_sync_peer_success("http://127.0.0.1:9945/snapshot", &ahead_snapshot, 1)
+            .unwrap();
+        {
+            let mut runtime = state.runtime.lock().unwrap();
+            runtime.import_snapshot(ahead_snapshot.clone()).unwrap();
+        }
+        state
+            .record_sync_peer_import("http://127.0.0.1:9945/snapshot", &ahead_snapshot)
+            .unwrap();
+        state.persist().unwrap();
+
+        let ops = state.ops_status().unwrap();
+        assert!(ops.public_ops_ready, "{:?}", ops.blocking_gaps);
+        assert_eq!(ops.latest_height, ahead_snapshot.latest_height());
+        assert_eq!(ops.latest_hash, ahead_snapshot.latest_block_hash().unwrap());
+        assert_eq!(ops.current_state_root, ahead_snapshot.state_root);
+        assert_eq!(ops.sync_import_count, 1);
+        assert_eq!(ops.sync_last_import_height, Some(ops.latest_height));
+        assert_eq!(ops.sync_quorum_height, Some(ops.latest_height));
+        assert_eq!(
+            ops.sync_quorum_latest_hash.as_deref(),
+            Some(ops.latest_hash.as_str())
+        );
+        assert_eq!(
+            ops.sync_quorum_state_root.as_deref(),
+            Some(ops.current_state_root.as_str())
+        );
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -6761,7 +6832,7 @@ mod tests {
             .record_sync_peer_success("http://127.0.0.1:9946/snapshot", &snapshot, 1)
             .unwrap();
         let ops = state.ops_status().unwrap();
-        assert!(ops.public_ops_ready, "{:?}", ops.blocking_gaps);
+        assert!(!ops.public_ops_ready);
         assert!(ops.sync_quorum_met);
         assert_eq!(ops.sync_quorum_peer_count, 2);
         assert_eq!(ops.sync_quorum_height, Some(snapshot.latest_height()));
@@ -6770,6 +6841,9 @@ mod tests {
             snapshot.latest_block_hash()
         );
         assert_eq!(ops.sync_quorum_state_root, Some(snapshot.state_root));
+        assert!(ops
+            .blocking_gaps
+            .contains(&"follower-no-imported-sync-snapshot".to_string()));
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -7595,12 +7669,17 @@ mod tests {
         let receipt = runtime.receipt(&tx_id).unwrap();
         assert_eq!(receipt.status, TransactionStatus::Included);
         assert_eq!(receipt.paid_amount_units, 1_000);
-        assert_eq!(receipt.buyback_nebulai, 900);
-        assert_eq!(receipt.validator_reward_nebulai, 100);
+        assert_eq!(receipt.buyback_nebulai, 1_000);
+        assert_eq!(receipt.validator_reward_nebulai, 1_000);
         let status = runtime.status();
         assert_eq!(status.total_nxmr_fees_units, 1_000);
-        assert_eq!(status.buyback_pool_nebulai, 900);
-        assert_eq!(status.validator_reward_nebulai, 100);
+        assert_eq!(status.buyback_pool_nebulai, 1_000);
+        assert_eq!(status.validator_reward_nebulai, 1_000);
+        let reward_account = runtime
+            .account(&runtime.config().validator_reward_account())
+            .unwrap();
+        assert_eq!(reward_account.nbla_nebulai, 1_000);
+        assert_eq!(reward_account.validator_points, 1_000);
     }
 
     #[test]

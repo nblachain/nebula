@@ -29,8 +29,9 @@ pub const TARGET_NXMR_BASE_UNITS_PER_NXMR: u128 =
     NEBULAI_PER_NBLA * NBLA_TARGET_NXMR_DENOMINATOR / NBLA_TARGET_NXMR_NUMERATOR;
 pub const TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT: u128 = 1;
 pub const FEE_BASIS_POINTS: u128 = 10_000;
-pub const NXMR_RESERVE_BACKING_BPS: u128 = 9_000;
-pub const NXMR_VALIDATOR_REWARD_BPS: u128 = 1_000;
+pub const NXMR_BUYBACK_BPS: u128 = FEE_BASIS_POINTS;
+pub const NXMR_RESERVE_BACKING_BPS: u128 = 0;
+pub const NXMR_VALIDATOR_REWARD_BPS: u128 = FEE_BASIS_POINTS;
 pub const TESTNET_POINTS_PER_NEBULAI: u128 = 1;
 pub const MIN_PUBLIC_TESTNET_VALIDATORS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_OPERATORS: usize = 2;
@@ -102,6 +103,7 @@ pub struct HybridFeePolicy {
     pub target_nxmr_base_units_per_nxmr: u128,
     pub target_nxmr_to_nbla_rate_nebulai_per_unit: u128,
     pub bridged_fee_conversion: &'static str,
+    pub nxmr_buyback_bps: u128,
     pub nxmr_reserve_backing_bps: u128,
     pub nxmr_validator_reward_bps: u128,
     pub nbla_validator_reward_bps: u128,
@@ -118,6 +120,7 @@ pub struct HybridFeeQuote {
     pub nxmr_to_nbla_rate_nebulai_per_unit: Option<u128>,
     pub paid_amount_units: u128,
     pub converted_nbla_nebulai: u128,
+    pub buyback_nebulai: u128,
     pub reserve_backing_nebulai: u128,
     pub validator_reward_nebulai: u128,
     pub validator_points: u128,
@@ -821,6 +824,9 @@ pub struct LiveRpcDevnetRehearsalReport {
     pub latest_height: u64,
     pub sync_quorum_met: bool,
     pub sync_successful_peer_count: u64,
+    pub sync_import_count: u64,
+    pub sync_last_import_height: u64,
+    pub sync_quorum_height: u64,
     pub bridge_deposit_count: u64,
     pub withdrawal_request_count: u64,
     pub finalized_withdrawal_count: u64,
@@ -1099,7 +1105,9 @@ pub fn hybrid_fee_policy() -> HybridFeePolicy {
         target_nxmr_per_nbla_denominator: NBLA_TARGET_NXMR_DENOMINATOR,
         target_nxmr_base_units_per_nxmr: TARGET_NXMR_BASE_UNITS_PER_NXMR,
         target_nxmr_to_nbla_rate_nebulai_per_unit: TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT,
-        bridged_fee_conversion: "nXMR fees are converted into NBLA accounting value before split",
+        bridged_fee_conversion:
+            "nXMR fees fund NBLA buybacks at the target rate, and bought NBLA rewards validators",
+        nxmr_buyback_bps: NXMR_BUYBACK_BPS,
         nxmr_reserve_backing_bps: NXMR_RESERVE_BACKING_BPS,
         nxmr_validator_reward_bps: NXMR_VALIDATOR_REWARD_BPS,
         nbla_validator_reward_bps: FEE_BASIS_POINTS,
@@ -1134,6 +1142,7 @@ pub fn quote_hybrid_fee(
             nxmr_to_nbla_rate_nebulai_per_unit: None,
             paid_amount_units: required_fee_nebulai,
             converted_nbla_nebulai: required_fee_nebulai,
+            buyback_nebulai: 0,
             reserve_backing_nebulai: 0,
             validator_reward_nebulai: required_fee_nebulai,
             validator_points: required_fee_nebulai
@@ -1151,9 +1160,11 @@ pub fn quote_hybrid_fee(
             let converted_nbla_nebulai = paid_amount_units
                 .checked_mul(rate)
                 .ok_or(FeeError::ArithmeticOverflow)?;
+            let buyback_nebulai = split_basis_points(converted_nbla_nebulai, NXMR_BUYBACK_BPS)?;
             let reserve_backing_nebulai =
                 split_basis_points(converted_nbla_nebulai, NXMR_RESERVE_BACKING_BPS)?;
-            let validator_reward_nebulai = converted_nbla_nebulai - reserve_backing_nebulai;
+            let validator_reward_nebulai =
+                split_basis_points(converted_nbla_nebulai, NXMR_VALIDATOR_REWARD_BPS)?;
 
             Ok(HybridFeeQuote {
                 payment_asset,
@@ -1164,13 +1175,14 @@ pub fn quote_hybrid_fee(
                 nxmr_to_nbla_rate_nebulai_per_unit: Some(rate),
                 paid_amount_units,
                 converted_nbla_nebulai,
+                buyback_nebulai,
                 reserve_backing_nebulai,
                 validator_reward_nebulai,
                 validator_points: validator_reward_nebulai
                     .checked_mul(TESTNET_POINTS_PER_NEBULAI)
                     .ok_or(FeeError::ArithmeticOverflow)?,
                 settlement_note:
-                    "nXMR gas is converted to NBLA value: 90% backs NBLA, 10% rewards validators",
+                    "nXMR gas funds NBLA buybacks at 0.001 XMR/NBLA; bought NBLA rewards validators",
             })
         }
     }
@@ -1244,6 +1256,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "target_nxmr_per_nbla": "0.001",
                 "target_nxmr_base_units_per_nxmr": TARGET_NXMR_BASE_UNITS_PER_NXMR,
                 "target_nxmr_to_nbla_rate_nebulai_per_unit": TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT,
+                "nxmr_buyback_bps": NXMR_BUYBACK_BPS,
                 "nxmr_reserve_backing_bps": NXMR_RESERVE_BACKING_BPS,
                 "nxmr_validator_reward_bps": NXMR_VALIDATOR_REWARD_BPS,
                 "testnet_reward_unit": "non-transferable validator points",
@@ -2053,6 +2066,8 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
         .unwrap_or_else(|| "none".to_string());
     let endpoint_url = sequencer_binding.endpoint_url.clone();
     let block_millis = runtime::DEFAULT_SUBSECOND_BLOCK_MS;
+    let bridge_account_seed = 0x46;
+    let bridge_account = live_account_id(bridge_account_seed);
 
     let mut sequencer_config = runtime::RuntimeConfig::public_testnet_default();
     sequencer_config.block_target_ms = block_millis;
@@ -2061,12 +2076,30 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
     sequencer_config.faucet_nbla_nebulai = 0;
     let initial_sequencer_secret_key_hex = "3c".repeat(32);
     sequencer_config.sequencer_public_key_hex = live_account_id(0x3c);
+    let sequencer_data_dir = live_temp_data_dir("sequencer");
+    let sequencer_storage = runtime::RuntimeStorage::from_data_dir(&sequencer_data_dir);
+    let mut seeded_runtime = runtime::NebulaRuntime::with_sequencer_secret(
+        sequencer_config.clone(),
+        Some(initial_sequencer_secret_key_hex.clone()),
+    )
+    .map_err(|error| live_rehearsal_invalid(format!("failed to seed sequencer: {error}")))?;
+    seeded_runtime
+        .seed_local_rehearsal_nbla(&bridge_account, 10_000)
+        .map_err(|error| live_rehearsal_invalid(format!("failed to seed NBLA balance: {error}")))?;
+    seeded_runtime.try_produce_block().map_err(|error| {
+        live_rehearsal_invalid(format!("failed to commit seeded NBLA: {error}"))
+    })?;
+    sequencer_storage
+        .save_runtime(&seeded_runtime)
+        .map_err(|error| {
+            live_rehearsal_invalid(format!("failed to persist seeded sequencer: {error}"))
+        })?;
     let (sequencer_rpc_addr, sequencer_admin_addr) = live_rpc_start_server_with_admin(
         sequencer_config,
         runtime::RuntimeNodeOptions {
             admin_token: Some(ADMIN_TOKEN.to_string()),
             sequencer_secret_key_hex: Some(initial_sequencer_secret_key_hex),
-            data_dir: Some(live_temp_data_dir("sequencer")),
+            data_dir: Some(sequencer_data_dir),
             auto_produce_blocks: false,
             max_requests_per_minute: 10_000,
             ..runtime::RuntimeNodeOptions::default()
@@ -2115,8 +2148,6 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
         .ok_or_else(|| live_rehearsal_invalid("sequencer rotation response missing public key"))?
         .to_string();
 
-    let bridge_account_seed = 0x46;
-    let bridge_account = live_account_id(bridge_account_seed);
     let disabled_faucet = live_rpc_call(
         &sequencer_rpc_addr,
         "nebula_faucet",
@@ -2148,6 +2179,98 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
         ));
     }
 
+    let nbla_tx = live_signed_transaction_with_fee_asset(
+        bridge_account_seed,
+        0,
+        "live-nbla-gas-recipient",
+        10,
+        5,
+        2,
+        NBLA_SYMBOL,
+    );
+    let nbla_submission = live_rpc_call(
+        &sequencer_rpc_addr,
+        "nebula_sendTransaction",
+        json!({ "tx": nbla_tx }),
+    )?;
+    let nbla_submission = live_rpc_result(&nbla_submission)?;
+    if nbla_submission["accepted_to_mempool"] != true {
+        return Err(live_rehearsal_invalid(
+            "NBLA gas transaction was not accepted to mempool",
+        ));
+    }
+    let nbla_tx_id = nbla_submission["tx_id"]
+        .as_str()
+        .ok_or_else(|| live_rehearsal_invalid("NBLA gas transaction response missing tx_id"))?
+        .to_string();
+    live_rpc_call(
+        &sequencer_admin_addr,
+        "nebula_produceBlock",
+        json!({ "admin_token": ADMIN_TOKEN }),
+    )?;
+    let nbla_receipt = live_rpc_call(
+        &sequencer_rpc_addr,
+        "nebula_getReceipt",
+        json!({ "tx_id": nbla_tx_id }),
+    )?;
+    let nbla_receipt = live_rpc_result(&nbla_receipt)?;
+    if nbla_receipt["status"].as_str() != Some("included")
+        || nbla_receipt["fee_asset"].as_str() != Some(NBLA_SYMBOL)
+        || live_value_u128(nbla_receipt, "paid_amount_units")? != 10
+        || live_value_u128(nbla_receipt, "buyback_nebulai")? != 0
+        || live_value_u128(nbla_receipt, "validator_reward_nebulai")? != 10
+    {
+        return Err(live_rehearsal_invalid(format!(
+            "NBLA gas receipt did not credit validator rewards directly: {nbla_receipt}"
+        )));
+    }
+
+    let nxmr_tx = live_signed_transaction_with_fee_asset(
+        bridge_account_seed,
+        1,
+        "live-nxmr-gas-recipient",
+        100,
+        100,
+        10,
+        NXMR_SYMBOL,
+    );
+    let nxmr_submission = live_rpc_call(
+        &sequencer_rpc_addr,
+        "nebula_sendTransaction",
+        json!({ "tx": nxmr_tx }),
+    )?;
+    let nxmr_submission = live_rpc_result(&nxmr_submission)?;
+    if nxmr_submission["accepted_to_mempool"] != true {
+        return Err(live_rehearsal_invalid(
+            "nXMR gas transaction was not accepted to mempool",
+        ));
+    }
+    let nxmr_tx_id = nxmr_submission["tx_id"]
+        .as_str()
+        .ok_or_else(|| live_rehearsal_invalid("nXMR gas transaction response missing tx_id"))?
+        .to_string();
+    live_rpc_call(
+        &sequencer_admin_addr,
+        "nebula_produceBlock",
+        json!({ "admin_token": ADMIN_TOKEN }),
+    )?;
+    let nxmr_receipt = live_rpc_call(
+        &sequencer_rpc_addr,
+        "nebula_getReceipt",
+        json!({ "tx_id": nxmr_tx_id }),
+    )?;
+    let nxmr_receipt = live_rpc_result(&nxmr_receipt)?;
+    if nxmr_receipt["status"].as_str() != Some("included")
+        || nxmr_receipt["fee_asset"].as_str() != Some(NXMR_SYMBOL)
+        || live_value_u128(nxmr_receipt, "paid_amount_units")? != 1_000
+        || live_value_u128(nxmr_receipt, "buyback_nebulai")? != 1_000
+        || live_value_u128(nxmr_receipt, "validator_reward_nebulai")? != 1_000
+    {
+        return Err(live_rehearsal_invalid(format!(
+            "nXMR gas receipt did not fund NBLA buyback and validator rewards: {nxmr_receipt}"
+        )));
+    }
+
     let withdrawal = live_rpc_call(
         &sequencer_rpc_addr,
         "nebula_requestWithdrawal",
@@ -2155,12 +2278,12 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
             "account": bridge_account.clone(),
             "monero_address": "9xTestnetMoneroAddressForNebulaWithdrawals",
             "amount_nxmr_units": 2_000,
-            "nonce": 0,
+            "nonce": 2,
             "signature": live_withdrawal_signature(
                 bridge_account_seed,
                 "9xTestnetMoneroAddressForNebulaWithdrawals",
                 2_000,
-                0,
+                2,
             ),
         }),
     )?;
@@ -2215,9 +2338,9 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
                 && status["withdrawal_request_count"] == 1
                 && status["finalized_withdrawal_count"] == 1
                 && status["faucet_nbla_nebulai"] == 0
-                && status["total_nxmr_fees_units"] == 0
-                && status["buyback_pool_nebulai"] == 0
-                && status["validator_reward_nebulai"] == 0
+                && status["total_nxmr_fees_units"] == 1_000
+                && status["buyback_pool_nebulai"] == 1_000
+                && status["validator_reward_nebulai"] == 1_010
                 && status["bridge_custody_reconciled"] == true
         },
     )?;
@@ -2241,17 +2364,28 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
             ..runtime::RuntimeNodeOptions::default()
         },
     )?;
+    live_rpc_call(
+        &sequencer_admin_addr,
+        "nebula_produceBlock",
+        json!({ "admin_token": ADMIN_TOKEN }),
+    )?;
 
     let follower_ops = live_wait_for_json_condition(
         &follower_rpc_addr,
         "/ops",
         "follower public ops ready",
         |ops| {
+            let latest_height = ops["latest_height"].as_u64().unwrap_or(0);
             ops["public_ops_ready"] == true
                 && ops["node_role"] == "follower"
                 && ops["sync_quorum_met"] == true
                 && ops["sync_successful_peer_count"].as_u64().unwrap_or(0) >= 1
-                && ops["latest_height"].as_u64().unwrap_or(0) >= 2
+                && ops["sync_import_count"].as_u64().unwrap_or(0) >= 1
+                && ops["sync_last_import_height"].as_u64() == Some(latest_height)
+                && ops["sync_quorum_height"].as_u64() == Some(latest_height)
+                && ops["sync_quorum_latest_hash"] == ops["latest_hash"]
+                && ops["sync_quorum_state_root"] == ops["current_state_root"]
+                && latest_height >= 2
         },
     )?;
     let evidence = live_wait_for_runtime_surface_evidence(&follower_rpc_addr, &endpoint_url)?;
@@ -2287,6 +2421,9 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
         latest_height: runtime_surface_report.latest_height,
         sync_quorum_met: live_value_bool(&follower_ops, "sync_quorum_met")?,
         sync_successful_peer_count: live_value_u64(&follower_ops, "sync_successful_peer_count")?,
+        sync_import_count: live_value_u64(&follower_ops, "sync_import_count")?,
+        sync_last_import_height: live_value_u64(&follower_ops, "sync_last_import_height")?,
+        sync_quorum_height: live_value_u64(&follower_ops, "sync_quorum_height")?,
         bridge_deposit_count: live_value_u64(status, "bridge_deposit_count")?,
         withdrawal_request_count: live_value_u64(status, "withdrawal_request_count")?,
         finalized_withdrawal_count: live_value_u64(status, "finalized_withdrawal_count")?,
@@ -2319,6 +2456,22 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
     {
         return Err(live_rehearsal_invalid(
             "live RPC rehearsal did not reconcile nXMR custody",
+        ));
+    }
+    if report.sync_import_count == 0
+        || report.sync_last_import_height != report.latest_height
+        || report.sync_quorum_height != report.latest_height
+    {
+        return Err(live_rehearsal_invalid(
+            "live RPC rehearsal did not prove follower imported the served head",
+        ));
+    }
+    if report.total_nxmr_fees_units != 1_000
+        || report.buyback_pool_nebulai != 1_000
+        || report.validator_reward_nebulai != 1_010
+    {
+        return Err(live_rehearsal_invalid(
+            "live RPC rehearsal did not prove NBLA/nXMR gas economics",
         ));
     }
     report.rehearsal_root = live_rpc_devnet_rehearsal_root(&report);
@@ -6170,6 +6323,30 @@ fn live_sign_root(seed: u8, root: &str) -> String {
     hex::encode(live_signing_key(seed).sign(root.as_bytes()).to_bytes())
 }
 
+fn live_signed_transaction_with_fee_asset(
+    seed: u8,
+    nonce: u64,
+    to: &str,
+    amount_nebulai: u128,
+    gas_units: u128,
+    gas_price_nebulai: u128,
+    fee_asset: &str,
+) -> runtime::RuntimeTransaction {
+    let mut tx = runtime::RuntimeTransaction {
+        from: live_account_id(seed),
+        to: to.to_string(),
+        amount_nebulai,
+        gas_units,
+        gas_price_nebulai,
+        fee_asset: fee_asset.to_string(),
+        nonce,
+        signature: String::new(),
+        memo: None,
+    };
+    tx.signature = live_sign_root(seed, &tx.signing_root());
+    tx
+}
+
 fn live_withdrawal_signature(
     seed: u8,
     monero_address: &str,
@@ -6345,6 +6522,9 @@ fn live_rpc_devnet_rehearsal_root(report: &LiveRpcDevnetRehearsalReport) -> Stri
         "latest_height": report.latest_height,
         "sync_quorum_met": report.sync_quorum_met,
         "sync_successful_peer_count": report.sync_successful_peer_count,
+        "sync_import_count": report.sync_import_count,
+        "sync_last_import_height": report.sync_last_import_height,
+        "sync_quorum_height": report.sync_quorum_height,
         "bridge_deposit_count": report.bridge_deposit_count,
         "withdrawal_request_count": report.withdrawal_request_count,
         "finalized_withdrawal_count": report.finalized_withdrawal_count,
@@ -10567,8 +10747,9 @@ mod public_launch {
         assert_eq!(report.economics.nebulai_per_nbla, 1_000_000);
         assert_eq!(report.economics.target_nxmr_per_nbla_numerator, 1);
         assert_eq!(report.economics.target_nxmr_per_nbla_denominator, 1_000);
-        assert_eq!(report.economics.nxmr_reserve_backing_bps, 9_000);
-        assert_eq!(report.economics.nxmr_validator_reward_bps, 1_000);
+        assert_eq!(report.economics.nxmr_buyback_bps, 10_000);
+        assert_eq!(report.economics.nxmr_reserve_backing_bps, 0);
+        assert_eq!(report.economics.nxmr_validator_reward_bps, 10_000);
     }
 
     #[test]
@@ -14872,22 +15053,24 @@ mod economics {
         assert_eq!(quote.payment_asset_symbol, NBLA_SYMBOL);
         assert_eq!(quote.required_fee_nebulai, 100_000);
         assert_eq!(quote.paid_amount_units, 100_000);
+        assert_eq!(quote.buyback_nebulai, 0);
         assert_eq!(quote.reserve_backing_nebulai, 0);
         assert_eq!(quote.validator_reward_nebulai, 100_000);
         assert_eq!(quote.validator_points, 100_000);
     }
 
     #[test]
-    fn nxmr_fee_converts_to_nbla_and_splits_ninety_ten() {
+    fn nxmr_fee_buys_nbla_and_rewards_validators_at_target_rate() {
         let quote = quote_hybrid_fee_at_target_rate(FeeAsset::NXmr, 100, 10_000).unwrap();
 
         assert_eq!(quote.payment_asset_symbol, NXMR_SYMBOL);
         assert_eq!(quote.required_fee_nebulai, 1_000_000);
         assert_eq!(quote.paid_amount_units, 1_000_000);
         assert_eq!(quote.converted_nbla_nebulai, 1_000_000);
-        assert_eq!(quote.reserve_backing_nebulai, 900_000);
-        assert_eq!(quote.validator_reward_nebulai, 100_000);
-        assert_eq!(quote.validator_points, 100_000);
+        assert_eq!(quote.buyback_nebulai, 1_000_000);
+        assert_eq!(quote.reserve_backing_nebulai, 0);
+        assert_eq!(quote.validator_reward_nebulai, 1_000_000);
+        assert_eq!(quote.validator_points, 1_000_000);
     }
 
     #[test]

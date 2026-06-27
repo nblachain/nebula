@@ -95,6 +95,9 @@ fn prove_live_rpc_devnet_json_reports_runtime_rehearsal_contract() {
     assert_eq!(report["withdrawal_request_count"], 1);
     assert_eq!(report["finalized_withdrawal_count"], 1);
     assert_eq!(report["runtime_surface_ready"], true);
+    assert_u64_at_least(&report, "sync_import_count", 1);
+    assert_eq!(report["sync_last_import_height"], report["latest_height"]);
+    assert_eq!(report["sync_quorum_height"], report["latest_height"]);
 
     let block_millis = report["block_millis"]
         .as_u64()
@@ -104,9 +107,9 @@ fn prove_live_rpc_devnet_json_reports_runtime_rehearsal_contract() {
         "block_millis should be sub-second, got {block_millis}"
     );
     assert_u64_at_least(&report, "produced_block_count", 2);
-    assert_eq!(report["total_nxmr_fees_units"], 0);
-    assert_eq!(report["buyback_pool_nebulai"], 0);
-    assert_eq!(report["validator_reward_nebulai"], 0);
+    assert_eq!(report["total_nxmr_fees_units"], 1_000);
+    assert_eq!(report["buyback_pool_nebulai"], 1_000);
+    assert_eq!(report["validator_reward_nebulai"], 1_010);
     assert_eq!(report["bridge_custody_reconciled"], true);
     assert_eq!(report["nxmr_custody_deficit_units"], 0);
     assert_hex64(&report, "runtime_surface_root");

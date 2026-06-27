@@ -21,8 +21,8 @@ another upstream peer.
 
 The economics trial keeps live value disabled while proving the accounting
 model: `NBLA` gas credits validator rewards directly, and `nXMR` gas funds NBLA
-buybacks, NBLA backing, and validator rewards at the target reference price of
-`0.001 XMR` per `NBLA`.
+buybacks at the target reference price of `0.001 XMR` per `NBLA`, with bought
+NBLA credited to validator rewards.
 
 Bridge custody is a public-testnet launch gate, not an honor-system credit
 path. Policy discovery uses `nebula_bridgePolicy`; deposits use
@@ -98,8 +98,8 @@ The public launch sequence for this crate is:
    `/snapshot`, and JSON-RPC `/rpc` views. Each snapshot block must commit to
    the expected sequencer public key and verify its Ed25519 signature before
    accepting the follower. `/health`, `/status`, and `nebula_status` must expose
-   configured sync peers and sync quorum evidence so operators can confirm
-   replica failover coverage.
+   configured sync peers, positive import evidence, and sync quorum evidence so
+   operators can confirm replica failover coverage.
    Public RPC nodes enforce bounded mempool admission, request-size limits, and
    per-client rate limits; tune them with `--max-mempool-transactions`,
    `--max-request-bytes`, and `--max-requests-per-minute`. Admission rejects
@@ -196,8 +196,11 @@ state. `/health`, `/status`, and `nebula_status` expose the configured
 attempt/success/failure/import counts, stale snapshot count, fork rejection
 count, and quorum rejection count. Followers remain launch-blocked with
 `follower-no-successful-sync-peer` until at least one configured peer has
-returned a valid snapshot response and with `follower-sync-quorum-not-met` until
-the configured peer quorum agrees on the same chain-state tip.
+returned a valid snapshot response, `follower-no-imported-sync-snapshot` until a
+newer snapshot has been imported, `follower-import-not-at-served-head` until the
+last imported height matches the served head, `follower-sync-quorum-not-met`
+until the configured peer quorum agrees, and `follower-quorum-tip-mismatch`
+until quorum height/hash/state root match the served chain-state tip.
 
 For a public RPC testnet candidate, start every sequencer and follower with the
 verified launch package artifacts: `--deployment-attestation`, `--public-status`,
@@ -459,12 +462,10 @@ and receipts older than `24` hours are rejected.
 Gas can be paid in native `NBLA` or bridged Monero as `nXMR`. `NBLA` fees go
 directly to the validator reward ledger. The faucet credits only `NBLA` during
 local unbound rehearsals and must be disabled on launch-bound public endpoints;
-`nXMR` must be credited by bridge deposits. `nXMR` fees are converted into NBLA
-accounting value and are the funding source for NBLA buybacks, NBLA backing, and
-validator rewards. Converted `nXMR` value is split with `90%` reserved for NBLA
-buybacks and backing and `10%` credited to validator rewards. Fees and
+`nXMR` must be credited by bridge deposits. `nXMR` fees fund NBLA buybacks at
+the target rate, and the bought NBLA is credited to validator rewards. Fees and
 validator points are denominated in `nebulai`, where
-`1 NBLA = 1,000,000 nebulai` and the target buyback and reserve reference is
+`1 NBLA = 1,000,000 nebulai` and the target buyback reference is
 `1 NBLA = 0.001 XMR`, represented on Nebula as `1 NBLA = 0.001 nXMR`.
 
 The validator-set verifier requires genesis epoch `0`, at least two validators,

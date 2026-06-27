@@ -65,8 +65,8 @@ The target architecture is:
 - `NBLA` as the native gas and validator-accounting token
 - `nXMR` as the bridged Monero gas token used for users who want to pay gas from
   bridged XMR liquidity
-- nXMR-funded NBLA buybacks, NBLA backing, and validator rewards at the target
-  reference price of `0.001 XMR` per `NBLA`
+- nXMR-funded NBLA buybacks at the target reference price of `0.001 XMR` per
+  `NBLA`, with bought NBLA credited to validator rewards
 - explicit Monero bridge custody policy for `nebula_bridgePolicy`,
   `nebula_observeBridgeDeposit`, `nebula_requestWithdrawal`, and
   `nebula_finalizeWithdrawal`: minimum confirmations, operator custody quorum,
@@ -88,8 +88,8 @@ The target architecture is:
 
 Public testnet accounting is intentionally separated from live-value policy.
 Validator rewards are testnet points in `nebulai`, and nXMR-funded NBLA
-buyback and backing entries are launch-policy accounting until a later live-value
-policy is explicitly enabled.
+buyback entries are launch-policy accounting until a later live-value policy is
+explicitly enabled.
 
 ## Public Testnet Launch Plan
 
@@ -162,12 +162,14 @@ evidence is absent or stale.
     Launch-bound public endpoints must set `--disable-nbla-faucet`; otherwise
     ops readiness reports `public-nbla-faucet-enabled`.
     Follower ops readiness must include at least one configured sync peer with a
-    successful valid snapshot response and a configured `--sync-peer-quorum`
-    agreeing on the same height, latest block hash, and state root. Attempts,
-    successes, failures, stale snapshots, fork rejections, quorum rejections,
-    and imports must be visible as telemetry. For a reproducible local proof,
-    `nebula-testnet --prove-live-rpc-devnet --json` must pass before any public
-    endpoint is described as testnet-ready.
+    successful valid snapshot response, a positive `sync_import_count`, and
+    `sync_last_import_height` matching the served `latest_height`. The
+    configured `--sync-peer-quorum` must agree on that same served height, latest
+    block hash, and state root. Attempts, successes, failures, stale snapshots,
+    fork rejections, quorum rejections, and imports must be visible as
+    telemetry. For a reproducible local proof, `nebula-testnet
+    --prove-live-rpc-devnet --json` must pass before any public endpoint is
+    described as testnet-ready.
 12. Confirm the sequencer/follower public-testnet RPC surfaces before launch.
     `/health`, `/status`, `/snapshot`, and JSON-RPC `/rpc` must agree on chain
     head, genesis identity, activation height, fee policy, validator identity,
@@ -274,8 +276,8 @@ evidence is absent or stale.
     verified snapshots, and launch-candidate certificate all bind to the same
     deployment, public-surface, validator, genesis, and fee-policy roots.
 23. Run the economics trial with `NBLA` gas, `nXMR` gas, nXMR-funded NBLA
-    buybacks, NBLA backing, and validator-reward accounting at `0.001 XMR` per
-    `NBLA`, while live-value policy stays disabled.
+    buybacks at `0.001 XMR` per `NBLA`, and validator-reward accounting for the
+    bought NBLA while live-value policy stays disabled.
 24. Publish the remaining blocking evidence list. If any deployment, operator,
     validator, observer, sequencer/follower, snapshot, ops/backup, bridge
     custody, key-rotation/accountability, certificate, or economics evidence is
@@ -290,8 +292,8 @@ deterministic sub-second blocks, while follower nodes persist local state and
 continuously sync signed, verified snapshots from a configured peer set. It
 targets `250 ms` blocks by default, enforces a public-testnet block target below
 one second, exposes health/status JSON and scrapeable metrics, accepts transfer transactions, and
-accounts for `NBLA` gas, `nXMR` gas, nXMR-funded NBLA buybacks/backing, and
-validator rewards. Public RPC nodes enforce stateful signed-spend admission, a
+accounts for `NBLA` gas, `nXMR` gas, nXMR-funded NBLA buybacks, and validator
+rewards. Public RPC nodes enforce stateful signed-spend admission, a
 bounded mempool, maximum request body size, and per-client request rate limit;
 tune rehearsal limits with
 `--max-mempool-transactions`, `--max-request-bytes`, and
@@ -653,14 +655,12 @@ Nebula testnet uses a hybrid fee policy:
   deposits.
 - `nebulai` is the base accounting unit for gas and validator rewards.
 - `1 NBLA = 1,000,000 nebulai`.
-- The target buyback and reserve reference is `1 NBLA = 0.001 XMR`; on Nebula
-  this is represented as `1 NBLA = 0.001 nXMR`.
+- The target buyback reference is `1 NBLA = 0.001 XMR`; on Nebula this is
+  represented as `1 NBLA = 0.001 nXMR`.
 - At that target, one `nXMR` base unit maps to one `nebulai`.
 - `NBLA` gas is credited directly to the validator reward ledger.
-- `nXMR` gas is converted into NBLA accounting value before distribution and is
-  the funding source for NBLA buybacks, NBLA backing, and validator rewards.
-- Converted `nXMR` value is split with `90%` reserved for NBLA buybacks and
-  backing and `10%` credited to the validator reward ledger.
+- `nXMR` gas funds NBLA buybacks at the target rate, and the bought NBLA is
+  credited to the validator reward ledger.
 
 Public testnet rewards are non-transferable validator points. Points mirror the
 validator reward ledger in `nebulai` so validators can prove uptime, attestation
