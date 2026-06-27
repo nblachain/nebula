@@ -1,4 +1,4 @@
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -293,6 +293,7 @@ pub struct DeploymentAttestationReport {
     pub level: &'static str,
     pub evidence_root: String,
     pub witness_evidence_root: String,
+    pub public_surface_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub attestation_expires_at_unix_ms: u128,
@@ -356,6 +357,7 @@ pub struct GenesisManifest {
     pub genesis_time_unix_ms: u128,
     pub activation_height: u64,
     pub deployment_attestation_root: String,
+    pub public_surface_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub validator_set_root: String,
@@ -380,6 +382,7 @@ pub struct GenesisManifestReport {
     pub level: &'static str,
     pub genesis_root: String,
     pub deployment_attestation_root: String,
+    pub public_surface_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub validator_set_root: String,
@@ -402,6 +405,7 @@ pub struct LaunchPackageReport {
     pub level: &'static str,
     pub deployment_attestation_root: String,
     pub witness_evidence_root: String,
+    pub public_surface_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub public_status_manifest_root: String,
@@ -744,6 +748,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "deployment_region_count_reported": true,
                 "public_status_surface_verified": true,
                 "public_probe_surface_verified": true,
+                "public_surface_root_reported": true,
                 "validator_set_verified": true,
                 "genesis_manifest_verified": true,
                 "public_status_binds_deployment_attestation": true,
@@ -755,6 +760,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "all_deployment_operators_admitted": true,
                 "all_bootstrap_nodes_admitted": true,
                 "genesis_binds_deployment_attestation_root": true,
+                "genesis_binds_public_surface_root": true,
                 "genesis_binds_bootstrap_roster_root": true,
                 "genesis_binds_operational_evidence_root": true,
                 "genesis_binds_validator_set_root": true,
@@ -1282,6 +1288,7 @@ pub fn build_genesis_manifest_json_pretty(
         genesis_time_unix_ms: unix_ms(),
         activation_height: PUBLIC_TESTNET_ACTIVATION_HEIGHT,
         deployment_attestation_root: deployment_report.evidence_root,
+        public_surface_root: deployment_report.public_surface_root,
         bootstrap_roster_root: deployment_report.bootstrap_roster_root,
         operational_evidence_root: deployment_report.operational_evidence_root,
         validator_set_root: validator_set_report.validator_set_root,
@@ -1343,6 +1350,11 @@ pub fn verify_genesis_manifest_json(
         &mut errors,
         "deployment_attestation_root",
         &manifest.deployment_attestation_root,
+    );
+    require_hex_root(
+        &mut errors,
+        "public_surface_root",
+        &manifest.public_surface_root,
     );
     require_hex_root(
         &mut errors,
@@ -1439,6 +1451,7 @@ pub fn verify_genesis_manifest_json(
         level: "genesis-manifest-attested",
         genesis_root: manifest.root,
         deployment_attestation_root: manifest.deployment_attestation_root,
+        public_surface_root: manifest.public_surface_root,
         bootstrap_roster_root: manifest.bootstrap_roster_root,
         operational_evidence_root: manifest.operational_evidence_root,
         validator_set_root: manifest.validator_set_root,
@@ -1463,6 +1476,7 @@ fn verify_genesis_root_domains(errors: &mut Vec<String>, manifest: &GenesisManif
             "deployment_attestation_root",
             manifest.deployment_attestation_root.as_str(),
         ),
+        ("public_surface_root", manifest.public_surface_root.as_str()),
         (
             "bootstrap_roster_root",
             manifest.bootstrap_roster_root.as_str(),
@@ -1568,6 +1582,12 @@ pub fn verify_launch_package_jsons(
             deployment_report.evidence_root
         ));
     }
+    if genesis_report.public_surface_root != deployment_report.public_surface_root {
+        errors.push(format!(
+            "genesis public_surface_root does not match deployment public surface root {}",
+            deployment_report.public_surface_root
+        ));
+    }
     if genesis_report.bootstrap_roster_root != deployment_report.bootstrap_roster_root {
         errors.push(format!(
             "genesis bootstrap_roster_root does not match deployment bootstrap roster root {}",
@@ -1650,6 +1670,7 @@ pub fn verify_launch_package_jsons(
         level: "launch-package-attested",
         deployment_attestation_root: deployment_report.evidence_root,
         witness_evidence_root: deployment_report.witness_evidence_root,
+        public_surface_root: deployment_report.public_surface_root,
         bootstrap_roster_root: deployment_report.bootstrap_roster_root,
         operational_evidence_root: deployment_report.operational_evidence_root,
         public_status_manifest_root: public_status_manifest.root,
@@ -1823,6 +1844,7 @@ pub fn verify_deployment_attestation_json(
         level: "public-launch-attested",
         evidence_root: stable_root(&value),
         witness_evidence_root,
+        public_surface_root: deployment_public_surface_root(&attestation),
         bootstrap_roster_root: deployment_bootstrap_roster_root(&attestation),
         operational_evidence_root: deployment_operational_evidence_root(&attestation),
         attestation_expires_at_unix_ms: attestation.expires_at_unix_ms,
@@ -3290,6 +3312,44 @@ fn observer_signature_root(observer: &ObserverAttestation, witness_evidence_root
     }))
 }
 
+fn deployment_public_surface_root(attestation: &DeploymentAttestation) -> String {
+    let mut tls_pins = attestation
+        .public_endpoint
+        .tls_pins
+        .iter()
+        .map(|pin| {
+            (
+                pin.cert_sha256.as_str(),
+                pin.public_key_sha256.as_str(),
+                pin.not_after_unix_ms,
+            )
+        })
+        .collect::<Vec<_>>();
+    tls_pins.sort_unstable();
+    let tls_pins = tls_pins
+        .into_iter()
+        .map(|(cert_sha256, public_key_sha256, not_after_unix_ms)| {
+            json!({
+                "cert_sha256": cert_sha256,
+                "public_key_sha256": public_key_sha256,
+                "not_after_unix_ms": not_after_unix_ms,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    stable_root(&json!({
+        "surface_domain": "nebula-deployment-public-surface-v1",
+        "chain_id": attestation.chain_id,
+        "launch_bundle_root": attestation.launch_bundle.root,
+        "public_status_manifest_root": attestation.public_status_manifest.root,
+        "public_endpoint_url": attestation.public_endpoint.url,
+        "public_endpoint_status_manifest_root": attestation.public_endpoint.public_status_manifest_root,
+        "tls_pins": tls_pins,
+        "policy_claim_root": attestation.policy_claim.root,
+        "public_probe_root": attestation.public_probe.root,
+    }))
+}
+
 fn deployment_bootstrap_roster_root(attestation: &DeploymentAttestation) -> String {
     let mut nodes = attestation
         .bootstrap_nodes
@@ -3471,6 +3531,7 @@ fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
         "genesis_time_unix_ms": manifest.genesis_time_unix_ms,
         "activation_height": manifest.activation_height,
         "deployment_attestation_root": manifest.deployment_attestation_root,
+        "public_surface_root": manifest.public_surface_root,
         "bootstrap_roster_root": manifest.bootstrap_roster_root,
         "operational_evidence_root": manifest.operational_evidence_root,
         "validator_set_root": manifest.validator_set_root,
@@ -3746,6 +3807,7 @@ mod public_launch {
         assert_eq!(report.verified_region_count, 2);
         assert_eq!(report.evidence_root.len(), 64);
         assert_eq!(report.witness_evidence_root.len(), 64);
+        assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
     }
@@ -5426,6 +5488,7 @@ mod public_launch {
         assert_eq!(report.bridged_fee_token, NXMR_SYMBOL);
         assert_eq!(report.genesis_root.len(), 64);
         assert_eq!(report.deployment_attestation_root.len(), 64);
+        assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.validator_set_root.len(), 64);
@@ -5448,6 +5511,7 @@ mod public_launch {
         assert_eq!(report.initial_operator_count, 2);
         assert_eq!(report.initial_region_count, 2);
         assert_eq!(report.validator_set_epoch, PUBLIC_TESTNET_GENESIS_EPOCH);
+        assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.operator_roster_root.len(), 64);
@@ -5617,6 +5681,7 @@ mod public_launch {
         assert_eq!(report.bridged_fee_token, NXMR_SYMBOL);
         assert_eq!(report.deployment_attestation_root.len(), 64);
         assert_eq!(report.witness_evidence_root.len(), 64);
+        assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.public_status_manifest_root.len(), 64);
@@ -5669,6 +5734,40 @@ mod public_launch {
                     .iter()
                     .any(|error| error
                         .starts_with("genesis deployment_attestation_root does not match")));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_rejects_mismatched_genesis_public_surface_root() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let mut genesis = serde_json::from_str::<Value>(
+            &build_genesis_manifest_json_pretty(&deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        genesis["public_surface_root"] = json!(hex_64("different-public-surface-root"));
+        genesis["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(genesis.clone()).unwrap()
+        ));
+
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &genesis.to_string(),
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error.starts_with("genesis public_surface_root does not match")));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }

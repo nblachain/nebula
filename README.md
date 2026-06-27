@@ -101,6 +101,8 @@ The public launch suite covers:
 - distinct rollback plan and recovery-point roots
 - deterministic operational-evidence root for preflight, runbook, and rollback
   evidence
+- deterministic public-surface root for endpoint, TLS pins, policy claim, and
+  public probe evidence
 - policy claim and public probe body exact-shape validation
 - preflight and runbook receipt exact-shape validation
 - bootstrap node/operator and observer attestation exact-shape validation
@@ -234,6 +236,9 @@ compare the exact public bootstrap set before rollout.
 It also reports a deterministic operational-evidence root over the preflight
 receipt, runbook receipt, rollback plan, rollback drill time, and recovery-point
 root.
+The verifier also reports a deterministic public-surface root over the launch
+bundle, public status root, public endpoint URL, TLS pins, policy claim root,
+and public probe root.
 
 Operators can generate and verify the public status/probe surface before filling
 deployment evidence:
@@ -307,11 +312,12 @@ verifiers. The manifest binds the deployment evidence root, validator-set root,
 validator-set epoch `0`, fee-policy root, validator-admission root, initial
 bootstrap-roster root, operator-roster root, reward-ledger root, validator,
 operator, and region counts, total genesis power, fixed activation height `1`,
-operational-evidence root, and fee token identities. The verifier keeps
-deployment, bootstrap-roster, operational-evidence, validator-set,
-operator-roster, reward-ledger, fee-policy, and validator-admission roots in
-separate domains. The final launch-package check requires the genesis timestamp
-to be fresh and to fall inside the deployment attestation validity window.
+public-surface root, operational-evidence root, and fee token identities. The
+verifier keeps deployment, public-surface, bootstrap-roster,
+operational-evidence, validator-set, operator-roster, reward-ledger,
+fee-policy, and validator-admission roots in separate domains. The final
+launch-package check requires the genesis timestamp to be fresh and to fall
+inside the deployment attestation validity window.
 
 Operators can build and verify the launch manifest with:
 
@@ -327,18 +333,20 @@ manifest, public probe, validator-set manifest, and genesis manifest together.
 It rejects a package when the public surface roots do not match the deployment
 attestation, or when the genesis manifest does not bind the exact deployment
 evidence root, validator-set root, validator-set epoch, validator count, total
-operator count, region count, bootstrap-roster root, operator-roster root,
-reward-ledger root, operational-evidence root, genesis power, and deployment
-validity window produced by the other verified files. It also rejects
+operator count, region count, public-surface root, bootstrap-roster root,
+operator-roster root, reward-ledger root, operational-evidence root, genesis
+power, and deployment validity window produced by the other verified files. It
+also rejects
 validator consensus/network keys that reuse deployment witness keys,
 validator-set manifests whose admitted validators do not map to the attested
 deployment operators and bootstrap nodes, validator P2P hosts that do not match
 their attested bootstrap endpoint host, and deployment operators or bootstrap
 nodes that are not represented by an admitted validator. The launch-package
 report also exposes the deployment observer quorum count and deployment region
-count verified from the attestation, the bootstrap-roster root, the
-operational-evidence root, the operator-roster root, the matched reward-account
-count, the reward-ledger root, and the genesis fee token identities.
+count verified from the attestation, the public-surface root, the
+bootstrap-roster root, the operational-evidence root, the operator-roster root,
+the matched reward-account count, the reward-ledger root, and the genesis fee
+token identities.
 
 Operators can verify the full package with:
 

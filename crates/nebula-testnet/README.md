@@ -68,6 +68,9 @@ over the attested bootstrap node IDs, operator IDs, regions, and HTTPS
 endpoints. It also reports a deterministic operational-evidence root over the
 preflight receipt, runbook receipt, rollback plan, rollback drill time, and
 recovery-point root.
+The deployment verifier also reports a deterministic public-surface root over
+the launch bundle, public status root, public endpoint URL, TLS pins, policy
+claim root, and public probe root.
 
 Preflight and runbook receipt verifiers let operators prove launch steps before
 wrapping those receipts in deployment evidence. Receipt phase names must be
@@ -108,9 +111,9 @@ reward-account count derived from the admitted validator reward accounts.
 The genesis manifest builder binds verified deployment evidence and validator
 admission into the root artifact used to start a public testnet at activation
 height `1` with validator-set epoch `0`. Genesis deployment, validator-set,
-bootstrap-roster, operator-roster, reward-ledger, fee-policy, and
-operational-evidence roots must be disjoint from validator-admission roots, and
-initial validator, operator, and region counts must match the verified
+public-surface, bootstrap-roster, operator-roster, reward-ledger, fee-policy,
+and operational-evidence roots must be disjoint from validator-admission roots,
+and initial validator, operator, and region counts must match the verified
 validator set.
 Genesis manifests older than `24` hours are rejected. The final launch-package
 check requires the genesis timestamp to fall inside the deployment attestation
@@ -120,10 +123,11 @@ The launch-package verifier checks that the deployment, public surface,
 validator set, and genesis artifacts all agree before operators advance to a
 live rollout, with deployment attestations expiring within `7` days of
 generation. It reports the verified deployment observer quorum count and
-deployment region count, bootstrap-roster root, operator-roster root, matched
-reward-account count, reward-ledger root, operational-evidence root, and the
-genesis fee token identities. It also rejects validator consensus/network keys
-that reuse deployment witness keys, admitted validators that do not map to
+deployment region count, public-surface root, bootstrap-roster root,
+operator-roster root, matched reward-account count, reward-ledger root,
+operational-evidence root, and the genesis fee token identities. It also
+rejects validator consensus/network keys that reuse deployment witness keys,
+admitted validators that do not map to
 attested deployment operators and bootstrap nodes, validator P2P hosts that do
 not match their attested bootstrap endpoint host, plus deployment operators or
 bootstrap nodes that are not represented by an admitted validator.
