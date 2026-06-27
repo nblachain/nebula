@@ -28,6 +28,8 @@ fn main() {
     let wants_build_launch_package_bundle = args
         .iter()
         .any(|arg| arg == "--build-launch-package-bundle");
+    let wants_build_validator_activation =
+        args.iter().any(|arg| arg == "--build-validator-activation");
     let wants_sample_public_status = args.iter().any(|arg| arg == "--sample-public-status");
     let wants_sample_public_probe = args.iter().any(|arg| arg == "--sample-public-probe");
     let wants_sample_preflight_receipt = args.iter().any(|arg| arg == "--sample-preflight-receipt");
@@ -90,6 +92,10 @@ fn main() {
         build_launch_package_bundle(&args, wants_json);
     } else if let Some(path) = arg_value(&args, "--verify-launch-package-bundle") {
         verify_launch_package_bundle(path, &args, wants_json);
+    } else if wants_build_validator_activation {
+        build_validator_activation(&args, wants_json);
+    } else if let Some(path) = arg_value(&args, "--verify-validator-activation") {
+        verify_validator_activation(path, &args, wants_json);
     } else if wants_json || wants_readiness {
         println!("{}", nebula_testnet::readiness_json_pretty());
     } else {
@@ -177,6 +183,10 @@ fn read_launch_package_inputs(args: &[String], wants_json: bool) -> LaunchPackag
         ),
         genesis_input: read_required_launch_package_input(args, "--genesis-manifest", wants_json),
     }
+}
+
+fn read_launch_package_bundle_input(args: &[String], wants_json: bool) -> String {
+    read_required_launch_package_input(args, "--launch-package-bundle", wants_json)
 }
 
 fn decode_utf16_file(path: &str, bytes: &[u8], endian: Endian) -> Result<String, String> {
@@ -525,6 +535,79 @@ fn verify_launch_package_bundle(path: &str, args: &[String], wants_json: bool) {
         }
         Err(nebula_testnet::AttestationError::Invalid(errors)) => {
             print_launch_package_error(wants_json, &errors);
+            process::exit(1);
+        }
+    }
+}
+
+fn build_validator_activation(args: &[String], wants_json: bool) {
+    let bundle_input = read_launch_package_bundle_input(args, wants_json);
+    let inputs = read_launch_package_inputs(args, wants_json);
+
+    match nebula_testnet::build_validator_activation_json_pretty(
+        &bundle_input,
+        &inputs.deployment_input,
+        &inputs.public_status_input,
+        &inputs.public_probe_input,
+        &inputs.validator_set_input,
+        &inputs.operator_handoff_input,
+        &inputs.operator_acceptance_input,
+        &inputs.genesis_input,
+    ) {
+        Ok(output) => println!("{output}"),
+        Err(nebula_testnet::AttestationError::MalformedJson(error)) => {
+            print_validator_activation_error(wants_json, &[error]);
+            process::exit(1);
+        }
+        Err(nebula_testnet::AttestationError::Invalid(errors)) => {
+            print_validator_activation_error(wants_json, &errors);
+            process::exit(1);
+        }
+    }
+}
+
+fn verify_validator_activation(path: &str, args: &[String], wants_json: bool) {
+    let activation_input = match read_text_file(path) {
+        Ok(input) => input,
+        Err(error) => {
+            print_validator_activation_error(wants_json, &[error]);
+            process::exit(1);
+        }
+    };
+    let bundle_input = read_launch_package_bundle_input(args, wants_json);
+    let inputs = read_launch_package_inputs(args, wants_json);
+
+    match nebula_testnet::verify_validator_activation_jsons(
+        &activation_input,
+        &bundle_input,
+        &inputs.deployment_input,
+        &inputs.public_status_input,
+        &inputs.public_probe_input,
+        &inputs.validator_set_input,
+        &inputs.operator_handoff_input,
+        &inputs.operator_acceptance_input,
+        &inputs.genesis_input,
+    ) {
+        Ok(report) => {
+            if wants_json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report)
+                        .expect("validator activation report serializes")
+                );
+            } else {
+                println!(
+                    "Validator activation verified at {}.",
+                    report.validator_activation_root
+                );
+            }
+        }
+        Err(nebula_testnet::AttestationError::MalformedJson(error)) => {
+            print_validator_activation_error(wants_json, &[error]);
+            process::exit(1);
+        }
+        Err(nebula_testnet::AttestationError::Invalid(errors)) => {
+            print_validator_activation_error(wants_json, &errors);
             process::exit(1);
         }
     }
@@ -1064,8 +1147,26 @@ fn print_launch_package_error(wants_json: bool, errors: &[String]) {
     }
 }
 
+fn print_validator_activation_error(wants_json: bool, errors: &[String]) {
+    if wants_json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "validator_activation_ready": false,
+                "level": "validator-activation-rejected",
+                "errors": errors,
+            })
+        );
+    } else {
+        eprintln!("Validator activation rejected:");
+        for error in errors {
+            eprintln!("- {error}");
+        }
+    }
+}
+
 fn print_help() {
     println!(
-        "nebula-testnet\n\nUSAGE:\n    nebula-testnet [--mainnet-readiness] [--json]\n    nebula-testnet --sample-public-status\n    nebula-testnet --verify-public-status <path> [--json]\n    nebula-testnet --sample-public-probe\n    nebula-testnet --verify-public-probe <path> [--json]\n    nebula-testnet --sample-preflight-receipt\n    nebula-testnet --verify-preflight-receipt <path> [--json]\n    nebula-testnet --sample-runbook-receipt\n    nebula-testnet --verify-runbook-receipt <path> [--json]\n    nebula-testnet --sample-deployment-attestation\n    nebula-testnet --verify-deployment-attestation <path> [--json]\n    nebula-testnet --sample-validator-set\n    nebula-testnet --verify-validator-set <path> [--json]\n    nebula-testnet --sample-operator-handoff\n    nebula-testnet --build-operator-handoff --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-operator-handoff <path> --deployment-attestation <path> --validator-set <path> [--json]\n    nebula-testnet --sample-operator-acceptance\n    nebula-testnet --build-operator-acceptance --operator-handoff <path> --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-operator-acceptance <path> --operator-handoff <path> --deployment-attestation <path> --validator-set <path> [--json]\n    nebula-testnet --sample-genesis-manifest\n    nebula-testnet --build-genesis-manifest --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-genesis-manifest <path> [--json]\n    nebula-testnet --verify-launch-package --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n    nebula-testnet --build-launch-package-bundle --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>\n    nebula-testnet --verify-launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n\nOPTIONS:\n    --mainnet-readiness              Emit the public launch readiness contract\n    --sample-public-status           Emit a public status manifest sample\n    --verify-public-status           Verify a public status manifest file\n    --sample-public-probe            Emit a public probe sample\n    --verify-public-probe            Verify a public probe file\n    --sample-preflight-receipt       Emit a preflight receipt sample\n    --verify-preflight-receipt       Verify a preflight receipt file\n    --sample-runbook-receipt         Emit a runbook receipt sample\n    --verify-runbook-receipt         Verify a runbook receipt file\n    --sample-deployment-attestation  Emit a fillable deployment attestation sample\n    --verify-deployment-attestation  Verify a deployment attestation file\n    --sample-validator-set           Emit a fillable validator-set manifest sample\n    --verify-validator-set           Verify a validator-set manifest file\n    --sample-operator-handoff        Emit a sample operator handoff manifest\n    --build-operator-handoff         Build operator handoff from attestation and validator set\n    --verify-operator-handoff        Verify an operator handoff manifest file\n    --sample-operator-acceptance     Emit a sample operator acceptance manifest\n    --build-operator-acceptance      Build operator acceptance from handoff, attestation, and validator set\n    --verify-operator-acceptance     Verify an operator acceptance manifest file\n    --operator-handoff               Operator handoff input for acceptance/package verification\n    --operator-acceptance            Operator acceptance input for launch package verification\n    --sample-genesis-manifest        Emit a sample genesis manifest built from samples\n    --build-genesis-manifest         Build genesis manifest from attestation and validator set\n    --deployment-attestation         Deployment attestation input for genesis build/package verification\n    --public-status                  Public status manifest input for launch package verification\n    --public-probe                   Public probe input for launch package verification\n    --validator-set                  Validator-set input for genesis build/package verification\n    --genesis-manifest               Genesis manifest input for launch package verification\n    --verify-genesis-manifest        Verify a genesis manifest file\n    --verify-launch-package          Verify deployment, public surface, validator set, genesis, handoff, and acceptance agree\n    --build-launch-package-bundle    Build the external validator launch-package bundle manifest\n    --verify-launch-package-bundle   Verify launch-package bundle hashes and roots against the artifact files\n    --json                           Emit JSON output\n    -h, --help                       Show this help"
+        "nebula-testnet\n\nUSAGE:\n    nebula-testnet [--mainnet-readiness] [--json]\n    nebula-testnet --sample-public-status\n    nebula-testnet --verify-public-status <path> [--json]\n    nebula-testnet --sample-public-probe\n    nebula-testnet --verify-public-probe <path> [--json]\n    nebula-testnet --sample-preflight-receipt\n    nebula-testnet --verify-preflight-receipt <path> [--json]\n    nebula-testnet --sample-runbook-receipt\n    nebula-testnet --verify-runbook-receipt <path> [--json]\n    nebula-testnet --sample-deployment-attestation\n    nebula-testnet --verify-deployment-attestation <path> [--json]\n    nebula-testnet --sample-validator-set\n    nebula-testnet --verify-validator-set <path> [--json]\n    nebula-testnet --sample-operator-handoff\n    nebula-testnet --build-operator-handoff --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-operator-handoff <path> --deployment-attestation <path> --validator-set <path> [--json]\n    nebula-testnet --sample-operator-acceptance\n    nebula-testnet --build-operator-acceptance --operator-handoff <path> --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-operator-acceptance <path> --operator-handoff <path> --deployment-attestation <path> --validator-set <path> [--json]\n    nebula-testnet --sample-genesis-manifest\n    nebula-testnet --build-genesis-manifest --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-genesis-manifest <path> [--json]\n    nebula-testnet --verify-launch-package --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n    nebula-testnet --build-launch-package-bundle --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>\n    nebula-testnet --verify-launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n    nebula-testnet --build-validator-activation --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>\n    nebula-testnet --verify-validator-activation <path> --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n\nOPTIONS:\n    --mainnet-readiness              Emit the public launch readiness contract\n    --sample-public-status           Emit a public status manifest sample\n    --verify-public-status           Verify a public status manifest file\n    --sample-public-probe            Emit a public probe sample\n    --verify-public-probe            Verify a public probe file\n    --sample-preflight-receipt       Emit a preflight receipt sample\n    --verify-preflight-receipt       Verify a preflight receipt file\n    --sample-runbook-receipt         Emit a runbook receipt sample\n    --verify-runbook-receipt         Verify a runbook receipt file\n    --sample-deployment-attestation  Emit a fillable deployment attestation sample\n    --verify-deployment-attestation  Verify a deployment attestation file\n    --sample-validator-set           Emit a fillable validator-set manifest sample\n    --verify-validator-set           Verify a validator-set manifest file\n    --sample-operator-handoff        Emit a sample operator handoff manifest\n    --build-operator-handoff         Build operator handoff from attestation and validator set\n    --verify-operator-handoff        Verify an operator handoff manifest file\n    --sample-operator-acceptance     Emit a sample operator acceptance manifest\n    --build-operator-acceptance      Build operator acceptance from handoff, attestation, and validator set\n    --verify-operator-acceptance     Verify an operator acceptance manifest file\n    --operator-handoff               Operator handoff input for acceptance/package verification\n    --operator-acceptance            Operator acceptance input for launch package verification\n    --sample-genesis-manifest        Emit a sample genesis manifest built from samples\n    --build-genesis-manifest         Build genesis manifest from attestation and validator set\n    --deployment-attestation         Deployment attestation input for genesis build/package verification\n    --public-status                  Public status manifest input for launch package verification\n    --public-probe                   Public probe input for launch package verification\n    --validator-set                  Validator-set input for genesis build/package verification\n    --genesis-manifest               Genesis manifest input for launch package verification\n    --verify-genesis-manifest        Verify a genesis manifest file\n    --verify-launch-package          Verify deployment, public surface, validator set, genesis, handoff, and acceptance agree\n    --build-launch-package-bundle    Build the external validator launch-package bundle manifest\n    --verify-launch-package-bundle   Verify launch-package bundle hashes and roots against the artifact files\n    --launch-package-bundle          Launch-package bundle input for validator activation\n    --build-validator-activation     Build validator activation from a verified launch-package bundle\n    --verify-validator-activation    Verify validators activated against the launch-package bundle\n    --json                           Emit JSON output\n    -h, --help                       Show this help"
     );
 }

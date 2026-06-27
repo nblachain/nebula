@@ -66,6 +66,8 @@ jobs:
           assert roots["validator_admission"]
           assert roots["genesis_manifest"]
           assert roots["launch_package"]
+          assert roots["launch_package_bundle"]
+          assert roots["validator_activation"]
           assert roots["public_status_surface"]
           assert roots["public_probe_surface"]
           assert roots["preflight_receipt"]
@@ -212,6 +214,7 @@ jobs:
           acceptance="$(mktemp)"
           genesis="$(mktemp)"
           bundle="$(mktemp)"
+          activation="$(mktemp)"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > "$attestation"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > "$public_status"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-probe > "$public_probe"
@@ -222,12 +225,15 @@ jobs:
           output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-launch-package-bundle --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" > "$bundle"
           bundle_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
-          NEBULA_LAUNCH_PACKAGE_JSON="$output" NEBULA_LAUNCH_PACKAGE_BUNDLE_JSON="$bundle_output" python3 - <<'PY'
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-validator-activation --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" > "$activation"
+          activation_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
+          NEBULA_LAUNCH_PACKAGE_JSON="$output" NEBULA_LAUNCH_PACKAGE_BUNDLE_JSON="$bundle_output" NEBULA_VALIDATOR_ACTIVATION_JSON="$activation_output" python3 - <<'PY'
           import json
           import os
 
           payload = json.loads(os.environ["NEBULA_LAUNCH_PACKAGE_JSON"])
           bundle = json.loads(os.environ["NEBULA_LAUNCH_PACKAGE_BUNDLE_JSON"])
+          activation = json.loads(os.environ["NEBULA_VALIDATOR_ACTIVATION_JSON"])
           assert payload["launch_package_ready"] is True
           assert payload["level"] == "launch-package-attested"
           assert len(payload["deployment_attestation_root"]) == 64
@@ -253,6 +259,13 @@ jobs:
           assert len(bundle["operator_acceptance_root"]) == 64
           assert bundle["artifact_count"] == 7
           assert bundle["validator_count"] == payload["validator_count"]
+          assert activation["validator_activation_ready"] is True
+          assert activation["level"] == "validator-activation-attested"
+          assert len(activation["validator_activation_root"]) == 64
+          assert activation["launch_package_bundle_root"] == bundle["launch_package_bundle_root"]
+          assert activation["operator_acceptance_root"] == bundle["operator_acceptance_root"]
+          assert activation["activated_validator_count"] == payload["validator_count"]
+          assert activation["activated_operator_count"] == payload["matched_operator_count"]
           PY
 
       - name: Verify Nebula guide mirror

@@ -504,6 +504,51 @@ pub struct LaunchPackageBundleReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct ValidatorActivationManifest {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub launch_package_bundle_root: String,
+    pub launch_package_root: String,
+    pub validator_set_root: String,
+    pub operator_acceptance_root: String,
+    pub activated_at_unix_ms: u128,
+    pub entries: Vec<ValidatorActivationEntry>,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ValidatorActivationEntry {
+    pub validator_id: String,
+    pub operator_id: String,
+    pub node_id: String,
+    pub p2p_endpoint: String,
+    pub consensus_public_key: String,
+    pub network_public_key: String,
+    pub reward_account: String,
+    pub launch_package_bundle_root: String,
+    pub operator_acceptance_root: String,
+    pub activated: bool,
+    pub activation_root: String,
+    pub signature: SignatureVerification,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ValidatorActivationReport {
+    pub validator_activation_ready: bool,
+    pub level: &'static str,
+    pub validator_activation_root: String,
+    pub launch_package_bundle_root: String,
+    pub launch_package_root: String,
+    pub validator_set_root: String,
+    pub operator_acceptance_root: String,
+    pub activated_validator_count: usize,
+    pub activated_operator_count: usize,
+    pub activated_at_unix_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct OperatorHandoffManifest {
     pub chain_id: String,
     pub runtime_version: String,
@@ -962,6 +1007,31 @@ pub fn readiness_report() -> NebulaReadiness {
                 "genesis_binds_total_power": true,
                 "genesis_fee_token_identities_reported": true,
                 "genesis_time_within_deployment_window": true,
+            })),
+            "launch_package_bundle": stable_root(&json!({
+                "launch_package_bundle_root_reported": true,
+                "launch_package_root_reported": true,
+                "deployment_attestation_artifact_hash_required": true,
+                "public_status_artifact_hash_required": true,
+                "public_probe_artifact_hash_required": true,
+                "validator_set_artifact_hash_required": true,
+                "operator_handoff_artifact_hash_required": true,
+                "operator_acceptance_artifact_hash_required": true,
+                "genesis_manifest_artifact_hash_required": true,
+                "operator_acceptance_root_required": true,
+                "artifact_count": 7,
+            })),
+            "validator_activation": stable_root(&json!({
+                "launch_package_bundle_root_required": true,
+                "launch_package_root_required": true,
+                "validator_set_root_required": true,
+                "operator_acceptance_root_required": true,
+                "activated_at_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
+                "one_activation_entry_per_admitted_validator": true,
+                "validator_consensus_key_signs_activation": true,
+                "validator_activation_signature_roots_verified": true,
+                "validator_activation_signatures_verified": true,
+                "all_validators_activated": true,
             })),
             "public_status_surface": stable_root(&json!({
                 "status": "deployment-attested",
@@ -2609,6 +2679,193 @@ pub fn verify_launch_package_bundle_jsons(
         validator_count: launch_report.validator_count,
         matched_operator_count: launch_report.matched_operator_count,
         matched_region_count: launch_report.matched_region_count,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_validator_activation_json_pretty(
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<String, AttestationError> {
+    let bundle_report = verify_launch_package_bundle_jsons(
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let acceptance_report = verify_operator_acceptance_jsons(
+        operator_acceptance_json,
+        operator_handoff_json,
+        deployment_attestation_json,
+        validator_set_json,
+    )?;
+    let validator_set = verified_validator_set_manifest(validator_set_json)?;
+    let mut manifest = validator_activation_manifest(
+        &bundle_report,
+        &acceptance_report,
+        &validator_set,
+        unix_ms(),
+    );
+    manifest.root = validator_activation_manifest_root(&manifest);
+
+    serde_json::to_string_pretty(&manifest)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_validator_activation_jsons(
+    validator_activation_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<ValidatorActivationReport, AttestationError> {
+    let manifest = serde_json::from_str::<ValidatorActivationManifest>(
+        validator_activation_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let bundle_report = verify_launch_package_bundle_jsons(
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let acceptance_report = verify_operator_acceptance_jsons(
+        operator_acceptance_json,
+        operator_handoff_json,
+        deployment_attestation_json,
+        validator_set_json,
+    )?;
+    let validator_set = verified_validator_set_manifest(validator_set_json)?;
+    let expected = validator_activation_manifest(
+        &bundle_report,
+        &acceptance_report,
+        &validator_set,
+        manifest.activated_at_unix_ms,
+    );
+    let now = unix_ms();
+    let mut errors = Vec::new();
+
+    if manifest.activated_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
+        errors.push("activated_at_unix_ms is more than five minutes in the future".to_string());
+    }
+    if manifest.activated_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("activated_at_unix_ms is older than 24 hours".to_string());
+    }
+    require_eq(&mut errors, "chain_id", &manifest.chain_id, CHAIN_ID);
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &manifest.runtime_version,
+        VERSION,
+    );
+    require_root(
+        &mut errors,
+        "launch_package_bundle_root",
+        &manifest.launch_package_bundle_root,
+        &bundle_report.launch_package_bundle_root,
+    );
+    require_root(
+        &mut errors,
+        "launch_package_root",
+        &manifest.launch_package_root,
+        &bundle_report.launch_package_root,
+    );
+    require_root(
+        &mut errors,
+        "validator_set_root",
+        &manifest.validator_set_root,
+        &bundle_report.validator_set_root,
+    );
+    require_root(
+        &mut errors,
+        "operator_acceptance_root",
+        &manifest.operator_acceptance_root,
+        &acceptance_report.operator_acceptance_root,
+    );
+    if manifest.entries != expected.entries {
+        errors.push(
+            "validator activation entries do not match verified bundle and validator set"
+                .to_string(),
+        );
+    }
+    for (index, entry) in manifest.entries.iter().enumerate() {
+        if !entry.activated {
+            errors.push(format!("entries[{index}].activated must be true"));
+        }
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].activation_root"),
+            &entry.activation_root,
+            &validator_activation_entry_root(
+                entry,
+                &manifest.launch_package_bundle_root,
+                &manifest.operator_acceptance_root,
+                manifest.activated_at_unix_ms,
+            ),
+        );
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].signature.signature_sha3_256"),
+            &entry.signature.signature_sha3_256,
+            &validator_activation_signature_root(entry),
+        );
+        if !entry.signature.verified {
+            errors.push(format!("entries[{index}].signature.verified must be true"));
+        }
+    }
+    require_root(
+        &mut errors,
+        "root",
+        &manifest.root,
+        &validator_activation_manifest_root(&manifest),
+    );
+    if manifest.root != validator_activation_manifest_root(&expected) {
+        errors.push(format!(
+            "root does not match expected validator activation root {}",
+            validator_activation_manifest_root(&expected)
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    let activated_operators = manifest
+        .entries
+        .iter()
+        .map(|entry| entry.operator_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    Ok(ValidatorActivationReport {
+        validator_activation_ready: true,
+        level: "validator-activation-attested",
+        validator_activation_root: manifest.root,
+        launch_package_bundle_root: manifest.launch_package_bundle_root,
+        launch_package_root: manifest.launch_package_root,
+        validator_set_root: manifest.validator_set_root,
+        operator_acceptance_root: manifest.operator_acceptance_root,
+        activated_validator_count: manifest.entries.len(),
+        activated_operator_count: activated_operators.len(),
+        activated_at_unix_ms: manifest.activated_at_unix_ms,
     })
 }
 
@@ -5032,6 +5289,120 @@ fn launch_package_bundle_root(manifest: &LaunchPackageBundleManifest) -> String 
     }))
 }
 
+fn validator_activation_manifest(
+    bundle_report: &LaunchPackageBundleReport,
+    acceptance_report: &OperatorAcceptanceReport,
+    validator_set: &ValidatorSetManifest,
+    activated_at_unix_ms: u128,
+) -> ValidatorActivationManifest {
+    let mut entries = validator_set
+        .validators
+        .iter()
+        .map(|validator| {
+            let mut entry = ValidatorActivationEntry {
+                validator_id: validator.validator_id.clone(),
+                operator_id: validator.operator_id.clone(),
+                node_id: validator.node_id.clone(),
+                p2p_endpoint: validator.p2p_endpoint.clone(),
+                consensus_public_key: validator.consensus_public_key.clone(),
+                network_public_key: validator.network_public_key.clone(),
+                reward_account: validator.reward_account.clone(),
+                launch_package_bundle_root: bundle_report.launch_package_bundle_root.clone(),
+                operator_acceptance_root: acceptance_report.operator_acceptance_root.clone(),
+                activated: true,
+                activation_root: String::new(),
+                signature: SignatureVerification {
+                    algorithm: "ed25519-testnet-validator-activation".to_string(),
+                    public_key: validator.consensus_public_key.clone(),
+                    signature_sha3_256: String::new(),
+                    verified: true,
+                },
+            };
+            entry.activation_root = validator_activation_entry_root(
+                &entry,
+                &bundle_report.launch_package_bundle_root,
+                &acceptance_report.operator_acceptance_root,
+                activated_at_unix_ms,
+            );
+            entry.signature.signature_sha3_256 = validator_activation_signature_root(&entry);
+            entry
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        (
+            left.operator_id.as_str(),
+            left.validator_id.as_str(),
+            left.node_id.as_str(),
+        )
+            .cmp(&(
+                right.operator_id.as_str(),
+                right.validator_id.as_str(),
+                right.node_id.as_str(),
+            ))
+    });
+
+    ValidatorActivationManifest {
+        chain_id: CHAIN_ID.to_string(),
+        runtime_version: VERSION.to_string(),
+        launch_package_bundle_root: bundle_report.launch_package_bundle_root.clone(),
+        launch_package_root: bundle_report.launch_package_root.clone(),
+        validator_set_root: bundle_report.validator_set_root.clone(),
+        operator_acceptance_root: acceptance_report.operator_acceptance_root.clone(),
+        activated_at_unix_ms,
+        entries,
+        root: String::new(),
+    }
+}
+
+fn validator_activation_entry_root(
+    entry: &ValidatorActivationEntry,
+    launch_package_bundle_root: &str,
+    operator_acceptance_root: &str,
+    activated_at_unix_ms: u128,
+) -> String {
+    stable_root(&json!({
+        "activation_entry_domain": "nebula-validator-activation-entry-v1",
+        "launch_package_bundle_root": launch_package_bundle_root,
+        "operator_acceptance_root": operator_acceptance_root,
+        "activated_at_unix_ms": activated_at_unix_ms,
+        "validator_id": entry.validator_id,
+        "operator_id": entry.operator_id,
+        "node_id": entry.node_id,
+        "p2p_endpoint": entry.p2p_endpoint,
+        "consensus_public_key": entry.consensus_public_key,
+        "network_public_key": entry.network_public_key,
+        "reward_account": entry.reward_account,
+        "activated": entry.activated,
+    }))
+}
+
+fn validator_activation_signature_root(entry: &ValidatorActivationEntry) -> String {
+    stable_root(&json!({
+        "signature_domain": "nebula-validator-activation-signature-v1",
+        "algorithm": entry.signature.algorithm,
+        "validator_id": entry.validator_id,
+        "operator_id": entry.operator_id,
+        "node_id": entry.node_id,
+        "public_key": entry.signature.public_key,
+        "activation_root": entry.activation_root,
+        "activated": entry.activated,
+    }))
+}
+
+fn validator_activation_manifest_root(manifest: &ValidatorActivationManifest) -> String {
+    stable_root(&json!({
+        "activation_domain": "nebula-validator-activation-v1",
+        "chain_id": manifest.chain_id,
+        "runtime_version": manifest.runtime_version,
+        "launch_package_bundle_root": manifest.launch_package_bundle_root,
+        "launch_package_root": manifest.launch_package_root,
+        "validator_set_root": manifest.validator_set_root,
+        "operator_acceptance_root": manifest.operator_acceptance_root,
+        "activated_at_unix_ms": manifest.activated_at_unix_ms,
+        "entries": manifest.entries,
+    }))
+}
+
 fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
     stable_root(&json!({
         "chain_id": manifest.chain_id,
@@ -5311,6 +5682,17 @@ mod public_launch {
         assert_eq!(report.economics.target_nxmr_per_nbla_denominator, 1_000);
         assert_eq!(report.economics.nxmr_reserve_backing_bps, 9_000);
         assert_eq!(report.economics.nxmr_validator_reward_bps, 1_000);
+    }
+
+    #[test]
+    fn public_launch_readiness_includes_bundle_and_activation_roots() {
+        let report = readiness_report();
+
+        for root_name in ["launch_package_bundle", "validator_activation"] {
+            let root = report.status_roots[root_name].as_str().unwrap();
+            assert_eq!(root.len(), 64);
+            assert!(root.chars().all(|c| c.is_ascii_hexdigit()));
+        }
     }
 
     #[test]
@@ -7488,6 +7870,123 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error.starts_with("public_probe_sha3_256 does not match")));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_activation_verifies_against_launch_package_bundle() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let activation = build_validator_activation_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        let report = verify_validator_activation_jsons(
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        assert!(report.validator_activation_ready);
+        assert_eq!(report.level, "validator-activation-attested");
+        assert_eq!(report.validator_activation_root.len(), 64);
+        assert_eq!(report.launch_package_bundle_root.len(), 64);
+        assert_eq!(report.operator_acceptance_root.len(), 64);
+        assert_eq!(report.activated_validator_count, 2);
+        assert_eq!(report.activated_operator_count, 2);
+    }
+
+    #[test]
+    fn validator_activation_rejects_inactive_entry() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let mut activation = serde_json::from_str::<Value>(
+            &build_validator_activation_json_pretty(
+                &bundle,
+                &deployment,
+                &public_status,
+                &public_probe,
+                &validators,
+                &handoff,
+                &acceptance,
+                &genesis,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        activation["entries"][0]["activated"] = json!(false);
+
+        let error = verify_validator_activation_jsons(
+            &activation.to_string(),
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "entries[0].activated must be true"));
+                assert!(errors.iter().any(|error| {
+                    error
+                    == "validator activation entries do not match verified bundle and validator set"
+                }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
