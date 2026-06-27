@@ -27,6 +27,7 @@ pub const MIN_PUBLIC_TESTNET_OPERATORS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_OBSERVERS: usize = 2;
 pub const MIN_PUBLIC_TESTNET_REGIONS: usize = 2;
 pub const MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS: u128 = 5_000;
+pub const MAX_SINGLE_OPERATOR_GENESIS_POWER_BPS: u128 = 5_000;
 pub const PUBLIC_TESTNET_ACTIVATION_HEIGHT: u64 = 1;
 pub const FUTURE_CLOCK_SKEW_MS: u128 = 300_000;
 pub const PUBLIC_ATTESTATION_MAX_AGE_MS: u128 = 86_400_000;
@@ -617,6 +618,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "operator_contact_address_required": true,
                 "operator_contact_single_mailto_required": true,
                 "operator_contact_query_fragment_forbidden": true,
+                "unique_operator_ids_required": true,
                 "hex_consensus_key_required": true,
                 "hex_network_key_required": true,
                 "consensus_network_key_domains_disjoint": true,
@@ -629,6 +631,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "p2p_endpoint_userinfo_forbidden": true,
                 "p2p_endpoint_query_fragment_forbidden": true,
                 "max_single_validator_genesis_power_bps": MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS,
+                "max_single_operator_genesis_power_bps": MAX_SINGLE_OPERATOR_GENESIS_POWER_BPS,
             })),
             "genesis_manifest": stable_root(&json!({
                 "deployment_attestation_root_required": true,
@@ -2849,7 +2852,12 @@ fn verify_validator_admission(
         &validator.p2p_endpoint,
     );
 
-    operator_ids.insert(validator.operator_id.clone());
+    insert_unique(
+        errors,
+        operator_ids,
+        &format!("validators[{index}].operator_id"),
+        &validator.operator_id,
+    );
     regions.insert(validator.region.clone());
 }
 
@@ -2862,12 +2870,25 @@ fn verify_validator_power_concentration(
         return;
     }
     let total = u128::from(total_genesis_power);
+    let mut operator_power_by_id = BTreeMap::new();
     for (index, validator) in validators.iter().enumerate() {
         let validator_power_bps =
             u128::from(validator.genesis_power).saturating_mul(FEE_BASIS_POINTS) / total;
         if validator_power_bps > MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS {
             errors.push(format!(
                 "validators[{index}].genesis_power must not exceed {MAX_SINGLE_VALIDATOR_GENESIS_POWER_BPS} bps of total genesis power"
+            ));
+        }
+        let operator_power = operator_power_by_id
+            .entry(validator.operator_id.as_str())
+            .or_insert(0_u128);
+        *operator_power = operator_power.saturating_add(u128::from(validator.genesis_power));
+    }
+    for (operator_id, operator_power) in operator_power_by_id {
+        let operator_power_bps = operator_power.saturating_mul(FEE_BASIS_POINTS) / total;
+        if operator_power_bps > MAX_SINGLE_OPERATOR_GENESIS_POWER_BPS {
+            errors.push(format!(
+                "operator_id {operator_id} aggregate genesis_power must not exceed {MAX_SINGLE_OPERATOR_GENESIS_POWER_BPS} bps of total genesis power"
             ));
         }
     }
@@ -4523,6 +4544,25 @@ mod public_launch {
     }
 
     #[test]
+    fn validator_set_rejects_duplicate_operator_id() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][1]["operator_id"] = value["validators"][0]["operator_id"].clone();
+        value["validators"][1]["reward_account"] = value["validators"][0]["reward_account"].clone();
+        refresh_validator_manifest_root(&mut value, 1);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "validators[1].operator_id must be unique"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
     fn validator_set_rejects_region_with_whitespace() {
         let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
         value["validators"][0]["region"] = json!("us east");
@@ -4646,6 +4686,31 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error
                         == "validators[0].genesis_power must not exceed 5000 bps of total genesis power"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_set_rejects_concentrated_operator_genesis_power() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        let mut validator = value["validators"][0].clone();
+        validator["validator_id"] = json!("validator-c");
+        validator["node_id"] = json!("bootstrap-us-east-2");
+        validator["consensus_public_key"] = json!(hex_64("consensus-key-c"));
+        validator["network_public_key"] = json!(hex_64("network-key-c"));
+        validator["p2p_endpoint"] = json!("tcp://bootstrap-a2.testnet.nebula.example:26656");
+        value["validators"].as_array_mut().unwrap().push(validator);
+        refresh_validator_manifest_root(&mut value, 2);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "operator_id operator-a aggregate genesis_power must not exceed 5000 bps of total genesis power"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

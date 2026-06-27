@@ -78,10 +78,11 @@ Fees and validator points are denominated in `nebulai`, where
 
 The validator-set verifier requires at least two validators, two operators, and
 two regions. Validator IDs, operator IDs, and node IDs must not contain
-whitespace or reuse each other. Validator region labels must not contain
-whitespace. Validator IDs, node IDs, keys, reward accounts, and P2P endpoints
-must be unique. No single validator may hold more than `5000` basis points of
-total genesis power. Operator contacts must use `mailto:` or `https://`.
+whitespace or reuse each other. Operator IDs must be unique across admitted
+validators. Validator region labels must not contain whitespace. Validator IDs,
+node IDs, keys, reward accounts, and P2P endpoints must be unique. No single
+validator or operator may hold more than `5000` basis points of total genesis
+power. Operator contacts must use `mailto:` or `https://`.
 `mailto:` contacts must include exactly one email address with no
 query/fragment components, `https://` contacts must include a host and no
 userinfo/query/fragment components, and P2P endpoints must use

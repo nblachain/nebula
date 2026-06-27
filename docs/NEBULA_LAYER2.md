@@ -100,8 +100,8 @@ The public launch suite covers:
 - preflight and runbook receipt exact-shape validation
 - bootstrap node/operator and observer attestation exact-shape validation
 - validator-set admission, whitespace-free and role-separated identity,
-  whitespace-free region, contact, reward-unit, uniqueness, and region-spread
-  validation
+  whitespace-free region, contact, reward-unit, uniqueness, operator power
+  concentration, and region-spread validation
 - genesis manifest root binding across deployment evidence, validator set, and
   fee policy
 - genesis timestamp binding to the deployment attestation validity window
@@ -243,11 +243,12 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 Public testnet admission also requires a validator-set manifest. The verifier
 requires at least two validators, two operators, and two regions. Validator IDs,
 operator IDs, and node IDs must not contain whitespace or reuse each other.
-Validator region labels must not contain whitespace. Validator IDs, node IDs,
-consensus keys, network keys, reward accounts, and P2P endpoints must be unique.
-Genesis power must be positive, no single validator may hold more than `5000`
-basis points of total genesis power, commission must be at or below `10000`
-basis points, operator contacts must use `mailto:` or `https://`, `mailto:`
+Operator IDs must be unique across admitted validators. Validator region labels
+must not contain whitespace. Validator IDs, node IDs, consensus keys, network
+keys, reward accounts, and P2P endpoints must be unique. Genesis power must be
+positive, no single validator or operator may hold more than `5000` basis points
+of total genesis power, commission must be at or below `10000` basis points,
+operator contacts must use `mailto:` or `https://`, `mailto:`
 contacts must include exactly one email address with no query/fragment
 components, `https://` contacts must include a host and no
 userinfo/query/fragment components, P2P endpoints must use `tcp://host:port`
