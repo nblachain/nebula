@@ -30,6 +30,90 @@ jobs:
       - name: Build Nebula testnet binary
         run: cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
 
+      - name: Smoke test sub-second RPC node
+        shell: bash
+        run: |
+          set -euo pipefail
+          data_a="$(mktemp -d)"
+          data_b="$(mktemp -d)"
+          node_b_pid=""
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --rpc-bind 127.0.0.1:9955 --block-ms 250 --validator-id ci-validator --data-dir "$data_a" &
+          node_pid="$!"
+          trap 'kill "$node_pid" "$node_b_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..40}; do
+            if curl -fsS http://127.0.0.1:9955/status > /tmp/nebula-runtime-status.json; then
+              break
+            fi
+            sleep 0.25
+          done
+          test -s /tmp/nebula-runtime-status.json
+          curl -fsS -X POST http://127.0.0.1:9955/rpc \
+            -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"nebula_observeBridgeDeposit","params":{"deposit":{"monero_tx_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","account":"alice","amount_nxmr_units":5000,"confirmations":10,"observer_id":"observer-a","proof_root":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","observed_at_unix_ms":1}}}' \
+            > /tmp/nebula-runtime-deposit.json
+          curl -fsS -X POST http://127.0.0.1:9955/rpc \
+            -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":2,"method":"nebula_requestWithdrawal","params":{"account":"alice","monero_address":"9xTestnetMoneroAddressForNebulaWithdrawals","amount_nxmr_units":2000}}' \
+            > /tmp/nebula-runtime-withdrawal.json
+          test -s "$data_a/nebula-runtime-snapshot.json"
+          curl -fsS http://127.0.0.1:9955/snapshot > /tmp/nebula-runtime-snapshot.json
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9956 --block-ms 250 --validator-id ci-validator-b --data-dir "$data_b" --bootstrap-rpc http://127.0.0.1:9955/snapshot --sync-rpc http://127.0.0.1:9955/snapshot &
+          node_b_pid="$!"
+          for attempt in {1..40}; do
+            if curl -fsS http://127.0.0.1:9956/status > /tmp/nebula-runtime-status-b.json; then
+              break
+            fi
+            sleep 0.25
+          done
+          test -s "$data_b/nebula-runtime-snapshot.json"
+          sleep 1
+          curl -fsS http://127.0.0.1:9955/status > /tmp/nebula-runtime-status-after-sync.json
+          curl -fsS http://127.0.0.1:9956/status > /tmp/nebula-runtime-status-b-after-sync.json
+          python3 - <<'PY'
+          import json
+
+          with open("/tmp/nebula-runtime-status.json", "r", encoding="utf-8") as handle:
+              status = json.load(handle)
+          with open("/tmp/nebula-runtime-status-b.json", "r", encoding="utf-8") as handle:
+              status_b = json.load(handle)
+          with open("/tmp/nebula-runtime-status-after-sync.json", "r", encoding="utf-8") as handle:
+              status_after = json.load(handle)
+          with open("/tmp/nebula-runtime-status-b-after-sync.json", "r", encoding="utf-8") as handle:
+              status_b_after = json.load(handle)
+          with open("/tmp/nebula-runtime-snapshot.json", "r", encoding="utf-8") as handle:
+              snapshot = json.load(handle)
+          with open("/tmp/nebula-runtime-deposit.json", "r", encoding="utf-8") as handle:
+              deposit = json.load(handle)["result"]
+          with open("/tmp/nebula-runtime-withdrawal.json", "r", encoding="utf-8") as handle:
+              withdrawal = json.load(handle)["result"]
+          assert status["block_target_ms"] == 250
+          assert status["sub_second_blocks"] is True
+          assert status["latest_height"] >= 0
+          assert status["validator_reward_account"] == "validator:ci-validator"
+          assert len(status["sequencer_public_key_hex"]) == 64
+          assert len(status["current_state_root"]) == 64
+          assert snapshot["snapshot_version"] == 2
+          assert len(snapshot["root"]) == 64
+          assert snapshot["config"]["sequencer_public_key_hex"] == status["sequencer_public_key_hex"]
+          assert "sequencer_secret_key_hex" not in json.dumps(snapshot)
+          for block in snapshot["blocks"]:
+              assert block["producer_public_key"] == status["sequencer_public_key_hex"]
+              assert len(block["signature"]) == 128
+              assert len(block["block_hash"]) == 64
+          assert deposit["credited"] is True
+          assert deposit["account_state"]["nxmr_units"] == 5000
+          assert withdrawal["accepted"] is True
+          assert withdrawal["account_state"]["nxmr_units"] == 3000
+          assert status_b["block_target_ms"] == 250
+          assert status_b["sub_second_blocks"] is True
+          assert status_b["validator_reward_account"] == "validator:ci-validator-b"
+          assert status_b["node_role"] == "follower"
+          assert status_b["block_production_enabled"] is False
+          assert status_b["sequencer_public_key_hex"] == status["sequencer_public_key_hex"]
+          assert status_b["latest_height"] >= snapshot["blocks"][-1]["height"]
+          assert status_b_after["latest_height"] >= status_after["latest_height"] - 2
+          PY
+
       - name: Run Nebula test suite
         run: cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
 
@@ -71,6 +155,7 @@ jobs:
           assert roots["validator_join"]
           assert roots["operator_join_confirmation"]
           assert roots["public_observer_confirmation"]
+          assert roots["public_testnet_launch_certificate"]
           assert roots["public_status_surface"]
           assert roots["public_probe_surface"]
           assert roots["preflight_receipt"]
@@ -221,6 +306,7 @@ jobs:
           join_receipt="$(mktemp)"
           join_confirmation="$(mktemp)"
           observer_confirmation="$(mktemp)"
+          launch_certificate="$(mktemp)"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-deployment-attestation > "$attestation"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > "$public_status"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-probe > "$public_probe"
@@ -239,7 +325,9 @@ jobs:
           confirmation_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-operator-join-confirmation "$join_confirmation" --validator-join "$join_receipt" --validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
           cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-public-observer-confirmation --operator-join-confirmation "$join_confirmation" --validator-join "$join_receipt" --validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" > "$observer_confirmation"
           observer_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-observer-confirmation "$observer_confirmation" --operator-join-confirmation "$join_confirmation" --validator-join "$join_receipt" --validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
-          NEBULA_LAUNCH_PACKAGE_JSON="$output" NEBULA_LAUNCH_PACKAGE_BUNDLE_JSON="$bundle_output" NEBULA_VALIDATOR_ACTIVATION_JSON="$activation_output" NEBULA_VALIDATOR_JOIN_JSON="$join_output" NEBULA_OPERATOR_JOIN_CONFIRMATION_JSON="$confirmation_output" NEBULA_PUBLIC_OBSERVER_CONFIRMATION_JSON="$observer_output" python3 - <<'PY'
+          cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-public-testnet-launch-certificate --public-observer-confirmation "$observer_confirmation" --operator-join-confirmation "$join_confirmation" --validator-join "$join_receipt" --validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" > "$launch_certificate"
+          certificate_output="$(cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-testnet-launch-certificate "$launch_certificate" --public-observer-confirmation "$observer_confirmation" --operator-join-confirmation "$join_confirmation" --validator-join "$join_receipt" --validator-activation "$activation" --launch-package-bundle "$bundle" --deployment-attestation "$attestation" --public-status "$public_status" --public-probe "$public_probe" --validator-set "$validators" --operator-handoff "$handoff" --operator-acceptance "$acceptance" --genesis-manifest "$genesis" --json)"
+          NEBULA_LAUNCH_PACKAGE_JSON="$output" NEBULA_LAUNCH_PACKAGE_BUNDLE_JSON="$bundle_output" NEBULA_VALIDATOR_ACTIVATION_JSON="$activation_output" NEBULA_VALIDATOR_JOIN_JSON="$join_output" NEBULA_OPERATOR_JOIN_CONFIRMATION_JSON="$confirmation_output" NEBULA_PUBLIC_OBSERVER_CONFIRMATION_JSON="$observer_output" NEBULA_PUBLIC_TESTNET_LAUNCH_CERTIFICATE_JSON="$certificate_output" python3 - <<'PY'
           import json
           import os
 
@@ -249,6 +337,7 @@ jobs:
           join = json.loads(os.environ["NEBULA_VALIDATOR_JOIN_JSON"])
           confirmation = json.loads(os.environ["NEBULA_OPERATOR_JOIN_CONFIRMATION_JSON"])
           observer = json.loads(os.environ["NEBULA_PUBLIC_OBSERVER_CONFIRMATION_JSON"])
+          certificate = json.loads(os.environ["NEBULA_PUBLIC_TESTNET_LAUNCH_CERTIFICATE_JSON"])
           assert payload["launch_package_ready"] is True
           assert payload["level"] == "launch-package-attested"
           assert len(payload["deployment_attestation_root"]) == 64
@@ -308,6 +397,21 @@ jobs:
           assert observer["endpoint_url"] == payload["endpoint_url"]
           assert observer["confirmed_observer_count"] >= 2
           assert observer["confirmed_region_count"] >= 2
+          assert certificate["public_testnet_launch_certificate_ready"] is True
+          assert certificate["level"] == "public-testnet-launch-candidate-certified"
+          assert len(certificate["public_testnet_launch_certificate_root"]) == 64
+          assert certificate["launch_package_bundle_root"] == bundle["launch_package_bundle_root"]
+          assert certificate["validator_activation_root"] == activation["validator_activation_root"]
+          assert certificate["validator_join_root"] == join["validator_join_root"]
+          assert certificate["operator_join_confirmation_root"] == confirmation["operator_join_confirmation_root"]
+          assert certificate["public_observer_confirmation_root"] == observer["public_observer_confirmation_root"]
+          assert certificate["public_status_manifest_root"] == payload["public_status_manifest_root"]
+          assert certificate["public_probe_root"] == payload["public_probe_root"]
+          assert certificate["endpoint_url"] == payload["endpoint_url"]
+          assert certificate["validator_count"] == payload["validator_count"]
+          assert certificate["operator_count"] == payload["matched_operator_count"]
+          assert certificate["observer_count"] >= 2
+          assert certificate["region_count"] >= 2
           PY
 
       - name: Verify Nebula guide mirror

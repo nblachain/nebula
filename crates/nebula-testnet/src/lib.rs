@@ -6,6 +6,8 @@ use sha3::{Digest, Sha3_256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod runtime;
+
 pub const VERSION: &str = "nebula-testnet-runner/0.2.0";
 pub const CHAIN_ID: &str = "nebula-private-l2-testnet";
 pub const PUBLIC_LAUNCH_BLOCKER: &str = "public-launch-deployment-attestation";
@@ -683,6 +685,50 @@ pub struct PublicObserverConfirmationReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct PublicTestnetLaunchCertificate {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub launch_package_bundle_root: String,
+    pub launch_package_root: String,
+    pub validator_activation_root: String,
+    pub validator_join_root: String,
+    pub operator_join_confirmation_root: String,
+    pub public_observer_confirmation_root: String,
+    pub public_status_manifest_root: String,
+    pub public_probe_root: String,
+    pub validator_set_root: String,
+    pub genesis_root: String,
+    pub endpoint_url: String,
+    pub certified_at_unix_ms: u128,
+    pub validator_count: usize,
+    pub operator_count: usize,
+    pub observer_count: usize,
+    pub region_count: usize,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PublicTestnetLaunchCertificateReport {
+    pub public_testnet_launch_certificate_ready: bool,
+    pub level: &'static str,
+    pub public_testnet_launch_certificate_root: String,
+    pub launch_package_bundle_root: String,
+    pub validator_activation_root: String,
+    pub validator_join_root: String,
+    pub operator_join_confirmation_root: String,
+    pub public_observer_confirmation_root: String,
+    pub public_status_manifest_root: String,
+    pub public_probe_root: String,
+    pub endpoint_url: String,
+    pub validator_count: usize,
+    pub operator_count: usize,
+    pub observer_count: usize,
+    pub region_count: usize,
+    pub certified_at_unix_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct OperatorHandoffManifest {
     pub chain_id: String,
     pub runtime_version: String,
@@ -797,6 +843,16 @@ struct PublicSurfaceSample {
     economics_root: String,
     public_status_manifest: PublicStatusManifest,
     public_probe: PublicProbe,
+}
+
+struct LaunchCertificateReports {
+    launch_package_bundle: LaunchPackageBundleReport,
+    validator_activation: ValidatorActivationReport,
+    validator_join: ValidatorJoinReport,
+    operator_join_confirmation: OperatorJoinConfirmationReport,
+    public_observer_confirmation: PublicObserverConfirmationReport,
+    genesis: GenesisManifestReport,
+    deployment: DeploymentAttestationReport,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1203,6 +1259,20 @@ pub fn readiness_report() -> NebulaReadiness {
                 "minimum_observer_region_count_required": MIN_PUBLIC_TESTNET_REGIONS,
                 "observer_confirmation_signature_roots_verified": true,
                 "observer_confirmation_signatures_verified": true,
+            })),
+            "public_testnet_launch_certificate": stable_root(&json!({
+                "launch_package_bundle_root_required": true,
+                "validator_activation_root_required": true,
+                "validator_join_root_required": true,
+                "operator_join_confirmation_root_required": true,
+                "public_observer_confirmation_root_required": true,
+                "public_status_manifest_root_required": true,
+                "public_probe_root_required": true,
+                "genesis_root_required": true,
+                "validator_set_root_required": true,
+                "certified_at_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
+                "operator_validator_observer_region_counts_bound": true,
+                "single_launch_candidate_root_reported": true,
             })),
             "public_status_surface": stable_root(&json!({
                 "status": "deployment-attested",
@@ -2669,6 +2739,7 @@ pub fn build_launch_package_bundle_json_pretty(
         .map_err(|error| AttestationError::MalformedJson(error.to_string()))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn verify_launch_package_bundle_jsons(
     launch_package_bundle_json: &str,
     deployment_attestation_json: &str,
@@ -3664,6 +3735,224 @@ pub fn verify_public_observer_confirmation_jsons(
         confirmed_observer_count: confirmed_observers.len(),
         confirmed_region_count: confirmed_regions.len(),
         observed_at_unix_ms: manifest.observed_at_unix_ms,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_public_testnet_launch_certificate_json_pretty(
+    public_observer_confirmation_json: &str,
+    operator_join_confirmation_json: &str,
+    validator_join_receipt_json: &str,
+    validator_activation_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<String, AttestationError> {
+    let reports = verified_launch_certificate_reports(
+        public_observer_confirmation_json,
+        operator_join_confirmation_json,
+        validator_join_receipt_json,
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let certificate = public_testnet_launch_certificate(&reports, unix_ms());
+
+    serde_json::to_string_pretty(&certificate)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_public_testnet_launch_certificate_jsons(
+    public_testnet_launch_certificate_json: &str,
+    public_observer_confirmation_json: &str,
+    operator_join_confirmation_json: &str,
+    validator_join_receipt_json: &str,
+    validator_activation_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<PublicTestnetLaunchCertificateReport, AttestationError> {
+    let certificate = serde_json::from_str::<PublicTestnetLaunchCertificate>(
+        public_testnet_launch_certificate_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let reports = verified_launch_certificate_reports(
+        public_observer_confirmation_json,
+        operator_join_confirmation_json,
+        validator_join_receipt_json,
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let expected = public_testnet_launch_certificate(&reports, certificate.certified_at_unix_ms);
+    let now = unix_ms();
+    let mut errors = Vec::new();
+
+    if certificate.certified_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
+        errors.push("certified_at_unix_ms is more than five minutes in the future".to_string());
+    }
+    if certificate.certified_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("certified_at_unix_ms is older than 24 hours".to_string());
+    }
+    require_eq(
+        &mut errors,
+        "chain_id",
+        &certificate.chain_id,
+        &expected.chain_id,
+    );
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &certificate.runtime_version,
+        &expected.runtime_version,
+    );
+    require_root(
+        &mut errors,
+        "launch_package_bundle_root",
+        &certificate.launch_package_bundle_root,
+        &expected.launch_package_bundle_root,
+    );
+    require_root(
+        &mut errors,
+        "launch_package_root",
+        &certificate.launch_package_root,
+        &expected.launch_package_root,
+    );
+    require_root(
+        &mut errors,
+        "validator_activation_root",
+        &certificate.validator_activation_root,
+        &expected.validator_activation_root,
+    );
+    require_root(
+        &mut errors,
+        "validator_join_root",
+        &certificate.validator_join_root,
+        &expected.validator_join_root,
+    );
+    require_root(
+        &mut errors,
+        "operator_join_confirmation_root",
+        &certificate.operator_join_confirmation_root,
+        &expected.operator_join_confirmation_root,
+    );
+    require_root(
+        &mut errors,
+        "public_observer_confirmation_root",
+        &certificate.public_observer_confirmation_root,
+        &expected.public_observer_confirmation_root,
+    );
+    require_root(
+        &mut errors,
+        "public_status_manifest_root",
+        &certificate.public_status_manifest_root,
+        &expected.public_status_manifest_root,
+    );
+    require_root(
+        &mut errors,
+        "public_probe_root",
+        &certificate.public_probe_root,
+        &expected.public_probe_root,
+    );
+    require_root(
+        &mut errors,
+        "validator_set_root",
+        &certificate.validator_set_root,
+        &expected.validator_set_root,
+    );
+    require_root(
+        &mut errors,
+        "genesis_root",
+        &certificate.genesis_root,
+        &expected.genesis_root,
+    );
+    require_eq(
+        &mut errors,
+        "endpoint_url",
+        &certificate.endpoint_url,
+        &expected.endpoint_url,
+    );
+    if certificate.validator_count != expected.validator_count {
+        errors.push(format!(
+            "validator_count expected {} but got {}",
+            expected.validator_count, certificate.validator_count
+        ));
+    }
+    if certificate.operator_count != expected.operator_count {
+        errors.push(format!(
+            "operator_count expected {} but got {}",
+            expected.operator_count, certificate.operator_count
+        ));
+    }
+    if certificate.observer_count != expected.observer_count {
+        errors.push(format!(
+            "observer_count expected {} but got {}",
+            expected.observer_count, certificate.observer_count
+        ));
+    }
+    if certificate.region_count != expected.region_count {
+        errors.push(format!(
+            "region_count expected {} but got {}",
+            expected.region_count, certificate.region_count
+        ));
+    }
+    require_root(
+        &mut errors,
+        "root",
+        &certificate.root,
+        &public_testnet_launch_certificate_root(&certificate),
+    );
+    if certificate.root != expected.root {
+        errors.push(format!(
+            "public testnet launch certificate root does not match expected root {}",
+            expected.root
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    Ok(PublicTestnetLaunchCertificateReport {
+        public_testnet_launch_certificate_ready: true,
+        level: "public-testnet-launch-candidate-certified",
+        public_testnet_launch_certificate_root: certificate.root,
+        launch_package_bundle_root: certificate.launch_package_bundle_root,
+        validator_activation_root: certificate.validator_activation_root,
+        validator_join_root: certificate.validator_join_root,
+        operator_join_confirmation_root: certificate.operator_join_confirmation_root,
+        public_observer_confirmation_root: certificate.public_observer_confirmation_root,
+        public_status_manifest_root: certificate.public_status_manifest_root,
+        public_probe_root: certificate.public_probe_root,
+        endpoint_url: certificate.endpoint_url,
+        validator_count: certificate.validator_count,
+        operator_count: certificate.operator_count,
+        observer_count: certificate.observer_count,
+        region_count: certificate.region_count,
+        certified_at_unix_ms: certificate.certified_at_unix_ms,
     })
 }
 
@@ -4900,6 +5189,7 @@ fn verify_validator_deployment_binding(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn verify_validator_admission(
     errors: &mut Vec<String>,
     index: usize,
@@ -5754,7 +6044,7 @@ fn validator_deployment_binding_root(
             })
         })
         .collect::<Vec<_>>();
-    bindings.sort_by(|left, right| left.to_string().cmp(&right.to_string()));
+    bindings.sort_by_key(|left| left.to_string());
 
     stable_root(&json!({
         "binding_domain": "nebula-validator-deployment-binding-v1",
@@ -6669,6 +6959,168 @@ fn public_observer_confirmation_manifest_root(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn verified_launch_certificate_reports(
+    public_observer_confirmation_json: &str,
+    operator_join_confirmation_json: &str,
+    validator_join_receipt_json: &str,
+    validator_activation_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<LaunchCertificateReports, AttestationError> {
+    let launch_package_bundle = verify_launch_package_bundle_jsons(
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let validator_activation = verify_validator_activation_jsons(
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let validator_join = verify_validator_join_receipt_jsons(
+        validator_join_receipt_json,
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let operator_join_confirmation = verify_operator_join_confirmation_jsons(
+        operator_join_confirmation_json,
+        validator_join_receipt_json,
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let public_observer_confirmation = verify_public_observer_confirmation_jsons(
+        public_observer_confirmation_json,
+        operator_join_confirmation_json,
+        validator_join_receipt_json,
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let genesis = verify_genesis_manifest_json(genesis_manifest_json)?;
+    let deployment = verify_deployment_attestation_json(deployment_attestation_json)?;
+
+    Ok(LaunchCertificateReports {
+        launch_package_bundle,
+        validator_activation,
+        validator_join,
+        operator_join_confirmation,
+        public_observer_confirmation,
+        genesis,
+        deployment,
+    })
+}
+
+fn public_testnet_launch_certificate(
+    reports: &LaunchCertificateReports,
+    certified_at_unix_ms: u128,
+) -> PublicTestnetLaunchCertificate {
+    let mut certificate = PublicTestnetLaunchCertificate {
+        chain_id: CHAIN_ID.to_string(),
+        runtime_version: VERSION.to_string(),
+        launch_package_bundle_root: reports
+            .launch_package_bundle
+            .launch_package_bundle_root
+            .clone(),
+        launch_package_root: reports.launch_package_bundle.launch_package_root.clone(),
+        validator_activation_root: reports
+            .validator_activation
+            .validator_activation_root
+            .clone(),
+        validator_join_root: reports.validator_join.validator_join_root.clone(),
+        operator_join_confirmation_root: reports
+            .operator_join_confirmation
+            .operator_join_confirmation_root
+            .clone(),
+        public_observer_confirmation_root: reports
+            .public_observer_confirmation
+            .public_observer_confirmation_root
+            .clone(),
+        public_status_manifest_root: reports
+            .public_observer_confirmation
+            .public_status_manifest_root
+            .clone(),
+        public_probe_root: reports
+            .public_observer_confirmation
+            .public_probe_root
+            .clone(),
+        validator_set_root: reports.launch_package_bundle.validator_set_root.clone(),
+        genesis_root: reports.genesis.genesis_root.clone(),
+        endpoint_url: reports.public_observer_confirmation.endpoint_url.clone(),
+        certified_at_unix_ms,
+        validator_count: reports.validator_join.joined_validator_count,
+        operator_count: reports.operator_join_confirmation.confirmed_operator_count,
+        observer_count: reports
+            .public_observer_confirmation
+            .confirmed_observer_count,
+        region_count: reports.deployment.verified_region_count,
+        root: String::new(),
+    };
+    certificate.root = public_testnet_launch_certificate_root(&certificate);
+    certificate
+}
+
+fn public_testnet_launch_certificate_root(certificate: &PublicTestnetLaunchCertificate) -> String {
+    stable_root(&json!({
+        "launch_certificate_domain": "nebula-public-testnet-launch-certificate-v1",
+        "chain_id": certificate.chain_id,
+        "runtime_version": certificate.runtime_version,
+        "launch_package_bundle_root": certificate.launch_package_bundle_root,
+        "launch_package_root": certificate.launch_package_root,
+        "validator_activation_root": certificate.validator_activation_root,
+        "validator_join_root": certificate.validator_join_root,
+        "operator_join_confirmation_root": certificate.operator_join_confirmation_root,
+        "public_observer_confirmation_root": certificate.public_observer_confirmation_root,
+        "public_status_manifest_root": certificate.public_status_manifest_root,
+        "public_probe_root": certificate.public_probe_root,
+        "validator_set_root": certificate.validator_set_root,
+        "genesis_root": certificate.genesis_root,
+        "endpoint_url": certificate.endpoint_url,
+        "certified_at_unix_ms": certificate.certified_at_unix_ms,
+        "validator_count": certificate.validator_count,
+        "operator_count": certificate.operator_count,
+        "observer_count": certificate.observer_count,
+        "region_count": certificate.region_count,
+    }))
+}
+
 fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
     stable_root(&json!({
         "chain_id": manifest.chain_id,
@@ -6894,7 +7346,7 @@ fn split_basis_points(amount: u128, bps: u128) -> Result<u128, FeeError> {
 }
 
 fn ceil_div(numerator: u128, denominator: u128) -> u128 {
-    numerator / denominator + u128::from(numerator % denominator != 0)
+    numerator / denominator + u128::from(!numerator.is_multiple_of(denominator))
 }
 
 fn unix_ms() -> u128 {
@@ -6960,6 +7412,7 @@ mod public_launch {
             "validator_join",
             "operator_join_confirmation",
             "public_observer_confirmation",
+            "public_testnet_launch_certificate",
         ] {
             let root = report.status_roots[root_name].as_str().unwrap();
             assert_eq!(root.len(), 64);
@@ -9773,6 +10226,242 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error
                         == "public observer confirmation entries do not match verified deployment observers and public surface"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn public_testnet_launch_certificate_verifies_full_candidate_chain() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let activation = build_validator_activation_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join = build_validator_join_receipt_json_pretty(
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join_confirmation = build_operator_join_confirmation_json_pretty(
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let observer_confirmation = build_public_observer_confirmation_json_pretty(
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let certificate = build_public_testnet_launch_certificate_json_pretty(
+            &observer_confirmation,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        let report = verify_public_testnet_launch_certificate_jsons(
+            &certificate,
+            &observer_confirmation,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        assert!(report.public_testnet_launch_certificate_ready);
+        assert_eq!(report.level, "public-testnet-launch-candidate-certified");
+        assert_eq!(report.public_testnet_launch_certificate_root.len(), 64);
+        assert_eq!(report.validator_count, 2);
+        assert_eq!(report.operator_count, 2);
+        assert_eq!(report.observer_count, 2);
+        assert_eq!(report.region_count, 2);
+        assert_eq!(report.endpoint_url, "https://testnet.nebula.example/status");
+    }
+
+    #[test]
+    fn public_testnet_launch_certificate_rejects_wrong_validator_count() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let activation = build_validator_activation_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join = build_validator_join_receipt_json_pretty(
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join_confirmation = build_operator_join_confirmation_json_pretty(
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let observer_confirmation = build_public_observer_confirmation_json_pretty(
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let mut certificate = serde_json::from_str::<Value>(
+            &build_public_testnet_launch_certificate_json_pretty(
+                &observer_confirmation,
+                &join_confirmation,
+                &join,
+                &activation,
+                &bundle,
+                &deployment,
+                &public_status,
+                &public_probe,
+                &validators,
+                &handoff,
+                &acceptance,
+                &genesis,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        certificate["validator_count"] = json!(1);
+        certificate["root"] = json!(public_testnet_launch_certificate_root(
+            &serde_json::from_value::<PublicTestnetLaunchCertificate>(certificate.clone()).unwrap()
+        ));
+
+        let error = verify_public_testnet_launch_certificate_jsons(
+            &certificate.to_string(),
+            &observer_confirmation,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "validator_count expected 2 but got 1"));
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("public testnet launch certificate root does not match")
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

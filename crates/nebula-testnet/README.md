@@ -4,12 +4,109 @@ This crate contains Nebula's local testnet readiness contract and command-line
 runner. It is intentionally self-contained and does not depend on inherited
 node, wallet, mining, reproducible-build, or daemon surfaces.
 
+## Target Architecture And Launch Plan
+
+The public testnet target is a Monero Layer 2 with deterministic sub-second
+block slots, native `NBLA` gas, bridged Monero gas as `nXMR`, and public launch
+artifacts that bind deployment evidence before the network is treated as
+public. The runtime starts from validator-set epoch `0` and activation height
+`1`, then admits only validators whose deployment, operator handoff, operator
+acceptance, genesis, launch-package bundle, activation, join, observer, and
+launch-certificate artifacts all verify against the same roots.
+
+In the Base-style public testnet phase, a sequencer produces deterministic
+sub-second blocks, while followers persist their own local state and
+continuously sync Ed25519-signed, verified snapshots from the sequencer or
+another upstream peer.
+
+The economics trial keeps live value disabled while proving the accounting
+model: `NBLA` gas credits validator rewards directly, and `nXMR` gas funds NBLA
+buybacks, NBLA backing, and validator rewards at the target reference price of
+`0.001 XMR` per `NBLA`.
+
+The public launch sequence for this crate is:
+
+1. Prove local readiness with formatting, build, tests, the readiness contract,
+   and generated sample artifacts for public status, public probe, preflight,
+   runbook, deployment, validator-set, operator handoff, operator acceptance,
+   genesis, launch package, launch-package bundle, activation, join, observer,
+   and launch-certificate gates.
+2. Publish and verify the public status and public probe surfaces over HTTPS,
+   including the exact endpoint URL, probe body, endpoint policy, TLS
+   certificate pin, TLS public-key pin, and launch-bundle identity.
+3. Complete preflight and runbook receipts before deployment evidence, keep
+   their evidence roots separated, and record fresh rollback drill and
+   recovery-point evidence.
+4. Fill and verify deployment attestation evidence for bootstrap nodes,
+   operators, observers, public endpoint policy, probe, TLS pins, rollback,
+   preflight, and runbook material. The deployment root plus bootstrap-roster,
+   public-surface, operator-approval, observer-confirmation,
+   rollback-readiness, deployment-validity, deployment-quorum, and
+   operational-evidence roots must all verify.
+5. Admit the validator set at genesis epoch `0`, with unique validator,
+   operator, node, reward-account, consensus-key, network-key, region, contact,
+   and P2P endpoint material, then verify the operator-roster and reward-ledger
+   roots.
+6. Build and verify operator handoff, operator acceptance, and the genesis
+   manifest for activation height `1`.
+7. Verify the strict launch package, then build and verify the launch-package
+   bundle that external validators compare before joining.
+8. Rehearse the Base-style RPC devnet with one persistent sequencer and
+   persisted followers. Followers must import a verified startup snapshot with
+   `--bootstrap-rpc`, continuously sync newer verified snapshots with
+   `--sync-rpc`, and expose matching `/health`, `/status`, `/snapshot`, and
+   JSON-RPC `/rpc` views. Each snapshot block must commit to the expected
+   sequencer public key and verify its Ed25519 signature before accepting the
+   follower.
+9. Build and verify validator activation receipts, validator join receipts,
+   operator join confirmations, public observer confirmations, and the public
+   testnet launch-candidate certificate against the same deployment,
+   public-surface, validator, genesis, fee-policy, and bundle roots.
+10. Open the public launch gate only after the signed launch package, verified
+    bundle, sequencer/follower rehearsal evidence, verified snapshots, and
+    launch certificate all agree. Run the `NBLA`/`nXMR` economics trial with
+    live value disabled, and keep reporting any remaining blocking evidence
+    until every deployment, operator, validator, observer, RPC, snapshot,
+    certificate, and economics gap is closed.
+
+## Local RPC Devnet
+
+Run a local Base-style public-testnet rehearsal with one sequencer and
+persisted followers:
+
+```bash
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --sync-rpc http://127.0.0.1:9944/snapshot
+```
+
+The sequencer produces sub-second blocks. Followers do not produce blocks; they
+persist `nebula-runtime-snapshot.json` under `--data-dir`. `--bootstrap-rpc`
+imports one verified snapshot at startup. `--sync-rpc <http://peer/snapshot>`
+keeps fetching, verifying, importing, and persisting newer snapshots from the
+peer.
+
+The default dev sequencer key is only for throwaway local rehearsals. Public
+rehearsals should pass `--sequencer-public-key <hex>` to all nodes and pass the
+matching `--sequencer-secret-key <hex>` only to the sequencer. Snapshots export
+the public sequencer key and block signatures, never the secret key.
+
+Each node exposes `/health`, `/status`, `/snapshot`, and JSON-RPC 2.0 on `/rpc`
+for
+`nebula_status`, `nebula_chainHead`, `nebula_getBlockByHeight`,
+`nebula_getAccount`, `nebula_getReceipt`, `nebula_exportSnapshot`,
+`nebula_importSnapshot`, `nebula_feeQuote`, `nebula_faucet`,
+`nebula_sendTransaction`, `nebula_observeBridgeDeposit`,
+`nebula_requestWithdrawal`, and `nebula_produceBlock`.
+
 ## Commands
 
 ```bash
 cargo fmt --manifest-path crates/nebula-testnet/Cargo.toml -- --check
 cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
 cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --sync-rpc http://127.0.0.1:9944/snapshot
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > /tmp/nebula-public-status.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-status /tmp/nebula-public-status.json --json
@@ -40,6 +137,8 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-operator-join-confirmation /tmp/nebula-operator-join-confirmation.json --validator-join /tmp/nebula-validator-join.json --validator-activation /tmp/nebula-validator-activation.json --launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-public-observer-confirmation --operator-join-confirmation /tmp/nebula-operator-join-confirmation.json --validator-join /tmp/nebula-validator-join.json --validator-activation /tmp/nebula-validator-activation.json --launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json > /tmp/nebula-public-observer-confirmation.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-observer-confirmation /tmp/nebula-public-observer-confirmation.json --operator-join-confirmation /tmp/nebula-operator-join-confirmation.json --validator-join /tmp/nebula-validator-join.json --validator-activation /tmp/nebula-validator-activation.json --launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-public-testnet-launch-certificate --public-observer-confirmation /tmp/nebula-public-observer-confirmation.json --operator-join-confirmation /tmp/nebula-operator-join-confirmation.json --validator-join /tmp/nebula-validator-join.json --validator-activation /tmp/nebula-validator-activation.json --launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json > /tmp/nebula-public-testnet-launch-certificate.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-public-testnet-launch-certificate /tmp/nebula-public-testnet-launch-certificate.json --public-observer-confirmation /tmp/nebula-public-observer-confirmation.json --operator-join-confirmation /tmp/nebula-operator-join-confirmation.json --validator-join /tmp/nebula-validator-join.json --validator-activation /tmp/nebula-validator-activation.json --launch-package-bundle /tmp/nebula-launch-package-bundle.json --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json --json
 ```
 
 The readiness report keeps local testnet acceptance separate from public launch
@@ -106,12 +205,14 @@ must be unique across the receipt. Runbook receipts must not reuse preflight
 evidence roots. Receipts must complete before deployment evidence is generated,
 and receipts older than `24` hours are rejected.
 
-Gas can be paid in `NBLA` or `nXMR`. `NBLA` fees go directly to the validator
-reward ledger. `nXMR` fees are converted into NBLA accounting value and split
-with `90%` reserved for NBLA backing and `10%` credited to validator rewards.
-Fees and validator points are denominated in `nebulai`, where
-`1 NBLA = 1,000,000 nebulai` and the target reserve reference is
-`1 NBLA = 0.001 nXMR`.
+Gas can be paid in native `NBLA` or bridged Monero as `nXMR`. `NBLA` fees go
+directly to the validator reward ledger. `nXMR` fees are converted into NBLA
+accounting value and are the funding source for NBLA buybacks, NBLA backing, and
+validator rewards. Converted `nXMR` value is split with `90%` reserved for NBLA
+buybacks and backing and `10%` credited to validator rewards. Fees and
+validator points are denominated in `nebulai`, where
+`1 NBLA = 1,000,000 nebulai` and the target buyback and reserve reference is
+`1 NBLA = 0.001 XMR`, represented on Nebula as `1 NBLA = 0.001 nXMR`.
 
 The validator-set verifier requires genesis epoch `0`, at least two validators,
 two operators, and two regions. Validator IDs, operator IDs, and node IDs must
@@ -205,3 +306,7 @@ The public observer confirmation builder records one confirmation entry per
 deployment observer after operator-confirmed validator join. Each entry binds the
 public endpoint, public status root, public probe root, operator join
 confirmation root, observer region, and observer signature root.
+
+The public testnet launch certificate builder binds every verified launch
+artifact root and the validator, operator, observer, and region counts into one
+candidate certificate root for final operator comparison.
