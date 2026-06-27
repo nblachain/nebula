@@ -100,9 +100,10 @@ The public launch sequence for this crate is:
    accepting the follower. `/health`, `/status`, and `nebula_status` must expose
    configured sync peers, positive import evidence, and sync quorum evidence so
    operators can confirm replica failover coverage.
-   Public RPC nodes enforce bounded mempool admission, request-size limits, and
-   per-client rate limits; tune them with `--max-mempool-transactions`,
-   `--max-request-bytes`, and `--max-requests-per-minute`. Admission rejects
+   Public RPC nodes enforce bounded mempool admission, request-size limits,
+   per-client rate limits, and active connection caps; tune them with
+   `--max-mempool-transactions`, `--max-request-bytes`,
+   `--max-requests-per-minute`, and `--max-active-connections`. Admission rejects
    missing senders, duplicate pending account nonces, nonce mismatches, and
    insufficient `NBLA`/`nXMR` balances before consuming bounded capacity.
    Launch-bound public endpoints must set `--disable-nbla-faucet`; otherwise

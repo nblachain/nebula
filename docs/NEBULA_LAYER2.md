@@ -57,7 +57,8 @@ The target architecture is:
   sub-second blocks after launch package verification, while followers persist
   local state and continuously sync Ed25519-signed, verified snapshots from a
   sequencer/replica peer set with failover, with public RPC nodes enforcing
-  bounded mempool admission, request-size limits, and per-client rate limits
+  bounded mempool admission, request-size limits, per-client rate limits, and
+  active connection caps
 - public status and public probe surfaces that are bound into deployment
   evidence before operators can label the testnet public
 - bootstrap nodes, operators, and observers tied to one deployment witness root
@@ -155,8 +156,8 @@ evidence is absent or stale.
     persist `nebula-runtime-snapshot.json`, import a verified startup snapshot
     with `--bootstrap-rpc`, and continuously sync newer verified snapshots from
     a repeatable `--sync-rpc` peer set. Configure public RPC abuse-resistance with
-    `--max-mempool-transactions`, `--max-request-bytes`, and
-    `--max-requests-per-minute`. Mempool admission is stateful: public nodes
+    `--max-mempool-transactions`, `--max-request-bytes`,
+    `--max-requests-per-minute`, and `--max-active-connections`. Mempool admission is stateful: public nodes
     reject missing senders, duplicate pending account nonces, nonce mismatches,
     and insufficient `NBLA`/`nXMR` balances before consuming bounded capacity.
     Launch-bound public endpoints must set `--disable-nbla-faucet`; otherwise
@@ -294,10 +295,11 @@ targets `250 ms` blocks by default, enforces a public-testnet block target below
 one second, exposes health/status JSON and scrapeable metrics, accepts transfer transactions, and
 accounts for `NBLA` gas, `nXMR` gas, nXMR-funded NBLA buybacks, and validator
 rewards. Public RPC nodes enforce stateful signed-spend admission, a
-bounded mempool, maximum request body size, and per-client request rate limit;
+bounded mempool, maximum request body size, per-client request rate limit, and
+active connection cap;
 tune rehearsal limits with
-`--max-mempool-transactions`, `--max-request-bytes`, and
-`--max-requests-per-minute`. Admission rejects missing senders, duplicate
+`--max-mempool-transactions`, `--max-request-bytes`,
+`--max-requests-per-minute`, and `--max-active-connections`. Admission rejects missing senders, duplicate
 pending account nonces, nonce mismatches, and insufficient `NBLA`/`nXMR`
 balances before consuming local mempool capacity.
 

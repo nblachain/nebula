@@ -133,6 +133,48 @@ fn public_rpc_methods_remain_callable_without_admin_token() {
 }
 
 #[test]
+fn public_rpc_rejects_connections_above_active_connection_cap_before_request() {
+    let mut config = RuntimeConfig::public_testnet_default();
+    config.block_target_ms = 999;
+    let rpc_addr = start_rpc_server_with_config(
+        config,
+        RuntimeNodeOptions {
+            max_active_connections: 1,
+            max_requests_per_minute: 10_000,
+            ..RuntimeNodeOptions::default()
+        },
+    );
+
+    let held = TcpStream::connect(&rpc_addr).expect("held connection opens");
+    held.set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("set held read timeout");
+    thread::sleep(Duration::from_millis(100));
+
+    let mut rejected = TcpStream::connect(&rpc_addr).expect("second connection opens");
+    rejected
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("set rejected read timeout");
+    let mut response = String::new();
+    rejected
+        .read_to_string(&mut response)
+        .expect("read rejection response");
+
+    assert!(
+        response.starts_with("HTTP/1.1 503"),
+        "expected 503 active connection rejection, got {response:?}"
+    );
+    assert!(response.contains("active connection limit exceeded"));
+    let (_, body) = response
+        .split_once("\r\n\r\n")
+        .expect("rejection response has body");
+    let body = serde_json::from_str::<Value>(body.trim()).expect("rejection body is JSON");
+    assert_eq!(body["max_active_connections"], 1);
+
+    drop(held);
+    wait_for_rpc(&rpc_addr);
+}
+
+#[test]
 fn metrics_endpoint_exposes_public_rpc_operational_gauges() {
     let (rpc_addr, _admin_addr) = start_rpc_server_with_admin(Some(ADMIN_TOKEN));
 

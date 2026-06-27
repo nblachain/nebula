@@ -6750,6 +6750,7 @@ const RUNTIME_STATUS_DURABLE_FIELDS: &[&str] = &[
     "sync_failed_peer_count",
     "rpc_max_request_bytes",
     "rpc_max_requests_per_minute",
+    "rpc_max_active_connections",
     "admin_rpc_enabled",
     "admin_rpc_private_listener",
     "public_rpc_admin_methods_enabled",
@@ -6828,6 +6829,7 @@ const RUNTIME_OPS_DURABLE_FIELDS: &[&str] = &[
     "sync_failed_peer_count",
     "rpc_max_request_bytes",
     "rpc_max_requests_per_minute",
+    "rpc_max_active_connections",
     "admin_rpc_enabled",
     "admin_rpc_private_listener",
     "public_rpc_admin_methods_enabled",
@@ -6909,6 +6911,7 @@ const RUNTIME_BACKUP_DURABLE_FIELDS: &[&str] = &[
     "sync_failed_peer_count",
     "rpc_max_request_bytes",
     "rpc_max_requests_per_minute",
+    "rpc_max_active_connections",
     "admin_rpc_enabled",
     "admin_rpc_private_listener",
     "public_rpc_admin_methods_enabled",
@@ -7251,6 +7254,7 @@ fn require_ops_backup_snapshot_agreement(
         "sync_successful_peer_count",
         "rpc_max_request_bytes",
         "rpc_max_requests_per_minute",
+        "rpc_max_active_connections",
         "admin_rpc_enabled",
         "admin_rpc_private_listener",
         "public_rpc_admin_methods_enabled",
@@ -7406,6 +7410,13 @@ fn require_metrics_agreement(
         "nebula_rpc_max_request_bytes",
         status,
         "rpc_max_request_bytes",
+    );
+    require_metric_from_json(
+        errors,
+        metrics_text,
+        "nebula_rpc_max_active_connections",
+        status,
+        "rpc_max_active_connections",
     );
     require_metric_value(
         errors,

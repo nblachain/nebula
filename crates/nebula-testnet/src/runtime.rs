@@ -11,7 +11,10 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -34,6 +37,7 @@ pub const DEFAULT_PEER_SYNC_MS: u64 = 100;
 pub const DEFAULT_SYNC_PEER_QUORUM: usize = 1;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
 pub const DEFAULT_MAX_REQUESTS_PER_MINUTE: u32 = 600;
+pub const DEFAULT_MAX_ACTIVE_CONNECTIONS: usize = 512;
 const RPC_RATE_LIMIT_WINDOW_MS: u128 = 60_000;
 pub const DEFAULT_DEV_SEQUENCER_SECRET_KEY_HEX: &str =
     "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -51,6 +55,7 @@ pub struct RuntimeNodeOptions {
     pub admin_token: Option<String>,
     pub max_request_bytes: usize,
     pub max_requests_per_minute: u32,
+    pub max_active_connections: usize,
 }
 
 impl Default for RuntimeNodeOptions {
@@ -67,6 +72,7 @@ impl Default for RuntimeNodeOptions {
             admin_token: None,
             max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
             max_requests_per_minute: DEFAULT_MAX_REQUESTS_PER_MINUTE,
+            max_active_connections: DEFAULT_MAX_ACTIVE_CONNECTIONS,
         }
     }
 }
@@ -639,6 +645,7 @@ pub struct RuntimeOpsStatus {
     pub sync_peer_telemetry: Vec<RuntimeSyncPeerTelemetry>,
     pub rpc_max_request_bytes: usize,
     pub rpc_max_requests_per_minute: u32,
+    pub rpc_max_active_connections: usize,
     pub admin_rpc_enabled: bool,
     pub admin_rpc_private_listener: bool,
     pub public_rpc_admin_methods_enabled: bool,
@@ -733,6 +740,7 @@ pub struct RuntimeBackupManifest {
     pub sync_peer_telemetry: Vec<RuntimeSyncPeerTelemetry>,
     pub rpc_max_request_bytes: usize,
     pub rpc_max_requests_per_minute: u32,
+    pub rpc_max_active_connections: usize,
     pub admin_rpc_enabled: bool,
     pub admin_rpc_private_listener: bool,
     pub public_rpc_admin_methods_enabled: bool,
@@ -837,6 +845,7 @@ struct RuntimeRpcState {
     runtime: Arc<Mutex<NebulaRuntime>>,
     storage: Option<RuntimeStorage>,
     rpc_limits: RuntimeRpcLimits,
+    active_connections: Arc<AtomicUsize>,
     sync_peers: RuntimeSyncPeerSet,
     sync_telemetry: Arc<Mutex<BTreeMap<String, RuntimeSyncPeerTelemetry>>>,
     admin_token: Option<String>,
@@ -860,6 +869,17 @@ impl RuntimeRpcAccess {
 struct RuntimeRpcLimits {
     max_request_bytes: usize,
     max_requests_per_minute: u32,
+    max_active_connections: usize,
+}
+
+struct RuntimeConnectionGuard {
+    active_connections: Arc<AtomicUsize>,
+}
+
+impl Drop for RuntimeConnectionGuard {
+    fn drop(&mut self) {
+        self.active_connections.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1077,6 +1097,34 @@ impl RuntimeRpcState {
             .checked_add(1)
             .ok_or_else(|| "rate limit counter overflowed".to_string())?;
         Ok(())
+    }
+
+    fn try_acquire_connection(&self) -> Result<RuntimeConnectionGuard, String> {
+        let max = self.rpc_limits.max_active_connections;
+        if max == 0 {
+            return Err("max_active_connections must be greater than zero".to_string());
+        }
+        let mut current = self.active_connections.load(Ordering::Acquire);
+        loop {
+            if current >= max {
+                return Err(format!(
+                    "active connection limit exceeded: max {max} concurrent RPC connections"
+                ));
+            }
+            match self.active_connections.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Ok(RuntimeConnectionGuard {
+                        active_connections: self.active_connections.clone(),
+                    });
+                }
+                Err(observed) => current = observed,
+            }
+        }
     }
 
     fn sync_telemetry_summary(&self) -> Result<RuntimeSyncTelemetrySummary, String> {
@@ -1310,6 +1358,10 @@ impl RuntimeRpcState {
         fields.insert(
             "rpc_max_requests_per_minute".to_string(),
             json!(self.rpc_limits.max_requests_per_minute),
+        );
+        fields.insert(
+            "rpc_max_active_connections".to_string(),
+            json!(self.rpc_limits.max_active_connections),
         );
         fields.insert(
             "bootstrap_peer_urls".to_string(),
@@ -1604,6 +1656,7 @@ impl RuntimeRpcState {
             sync_peer_telemetry: sync_telemetry.peer_telemetry,
             rpc_max_request_bytes: self.rpc_limits.max_request_bytes,
             rpc_max_requests_per_minute: self.rpc_limits.max_requests_per_minute,
+            rpc_max_active_connections: self.rpc_limits.max_active_connections,
             admin_rpc_enabled: self.admin_rpc_enabled(),
             admin_rpc_private_listener: self.admin_rpc_private_listener,
             public_rpc_admin_methods_enabled: self.public_rpc_admin_methods_enabled(),
@@ -1704,6 +1757,7 @@ impl RuntimeRpcState {
             sync_peer_telemetry: ops_status.sync_peer_telemetry,
             rpc_max_request_bytes: ops_status.rpc_max_request_bytes,
             rpc_max_requests_per_minute: ops_status.rpc_max_requests_per_minute,
+            rpc_max_active_connections: ops_status.rpc_max_active_connections,
             admin_rpc_enabled: ops_status.admin_rpc_enabled,
             admin_rpc_private_listener: ops_status.admin_rpc_private_listener,
             public_rpc_admin_methods_enabled: ops_status.public_rpc_admin_methods_enabled,
@@ -1777,6 +1831,7 @@ impl RuntimeRpcState {
             "rpc_limits": self.rpc_limits,
             "rpc_max_request_bytes": status["rpc_max_request_bytes"],
             "rpc_max_requests_per_minute": status["rpc_max_requests_per_minute"],
+            "rpc_max_active_connections": status["rpc_max_active_connections"],
             "admin_rpc_enabled": self.admin_rpc_enabled(),
             "admin_rpc_private_listener": self.admin_rpc_private_listener,
             "public_rpc_admin_methods_enabled": self.public_rpc_admin_methods_enabled(),
@@ -1937,6 +1992,12 @@ impl RuntimeRpcState {
             "nebula_rpc_max_requests_per_minute",
             "Per-client RPC request budget per minute.",
             self.rpc_limits.max_requests_per_minute,
+        );
+        push_metric(
+            &mut output,
+            "nebula_rpc_max_active_connections",
+            "Maximum active RPC connections admitted before listener rejection.",
+            self.rpc_limits.max_active_connections,
         );
         push_metric(
             &mut output,
@@ -2172,9 +2233,13 @@ impl RuntimeRpcLimits {
         if options.max_requests_per_minute == 0 {
             return Err("max_requests_per_minute must be greater than zero".to_string());
         }
+        if options.max_active_connections == 0 {
+            return Err("max_active_connections must be greater than zero".to_string());
+        }
         Ok(Self {
             max_request_bytes: options.max_request_bytes,
             max_requests_per_minute: options.max_requests_per_minute,
+            max_active_connections: options.max_active_connections,
         })
     }
 }
@@ -3294,6 +3359,7 @@ pub fn serve_runtime_rpc_with_options(
         runtime: Arc::new(Mutex::new(runtime)),
         storage,
         rpc_limits,
+        active_connections: Arc::new(AtomicUsize::new(0)),
         sync_peers,
         sync_telemetry: Arc::new(Mutex::new(BTreeMap::new())),
         admin_token,
@@ -3346,9 +3412,24 @@ fn serve_runtime_rpc_listener(
 ) -> std::io::Result<()> {
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
+            Ok(mut stream) => {
+                let connection_guard = match state.try_acquire_connection() {
+                    Ok(connection_guard) => connection_guard,
+                    Err(error) => {
+                        let _ = write_json_response(
+                            &mut stream,
+                            503,
+                            &json!({
+                                "error": error,
+                                "max_active_connections": state.rpc_limits.max_active_connections,
+                            }),
+                        );
+                        continue;
+                    }
+                };
                 let state = state.clone();
                 thread::spawn(move || {
+                    let _connection_guard = connection_guard;
                     let _ = handle_http_connection(stream, state, access);
                 });
             }
@@ -5660,6 +5741,7 @@ fn ops_status_root(report: &RuntimeOpsStatus) -> String {
         "sync_peer_telemetry": report.sync_peer_telemetry,
         "rpc_max_request_bytes": report.rpc_max_request_bytes,
         "rpc_max_requests_per_minute": report.rpc_max_requests_per_minute,
+        "rpc_max_active_connections": report.rpc_max_active_connections,
         "admin_rpc_enabled": report.admin_rpc_enabled,
         "admin_rpc_private_listener": report.admin_rpc_private_listener,
         "public_rpc_admin_methods_enabled": report.public_rpc_admin_methods_enabled,
@@ -5755,6 +5837,7 @@ fn backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
         "sync_peer_telemetry": manifest.sync_peer_telemetry,
         "rpc_max_request_bytes": manifest.rpc_max_request_bytes,
         "rpc_max_requests_per_minute": manifest.rpc_max_requests_per_minute,
+        "rpc_max_active_connections": manifest.rpc_max_active_connections,
         "admin_rpc_enabled": manifest.admin_rpc_enabled,
         "admin_rpc_private_listener": manifest.admin_rpc_private_listener,
         "public_rpc_admin_methods_enabled": manifest.public_rpc_admin_methods_enabled,
@@ -6041,7 +6124,9 @@ mod tests {
             rpc_limits: RuntimeRpcLimits {
                 max_request_bytes,
                 max_requests_per_minute,
+                max_active_connections: DEFAULT_MAX_ACTIVE_CONNECTIONS,
             },
+            active_connections: Arc::new(AtomicUsize::new(0)),
             sync_peers: RuntimeSyncPeerSet::default(),
             sync_telemetry: Arc::new(Mutex::new(BTreeMap::new())),
             admin_token: None,
@@ -6457,6 +6542,10 @@ mod tests {
             limits.max_requests_per_minute,
             DEFAULT_MAX_REQUESTS_PER_MINUTE
         );
+        assert_eq!(
+            limits.max_active_connections,
+            DEFAULT_MAX_ACTIVE_CONNECTIONS
+        );
 
         let options = RuntimeNodeOptions {
             max_request_bytes: 0,
@@ -6473,6 +6562,14 @@ mod tests {
         assert!(RuntimeRpcLimits::from_options(&options)
             .unwrap_err()
             .contains("max_requests_per_minute"));
+
+        let options = RuntimeNodeOptions {
+            max_active_connections: 0,
+            ..RuntimeNodeOptions::default()
+        };
+        assert!(RuntimeRpcLimits::from_options(&options)
+            .unwrap_err()
+            .contains("max_active_connections"));
 
         assert!(normalize_admin_token(Some(String::new()))
             .unwrap_err()
@@ -6548,6 +6645,10 @@ mod tests {
 
         assert_eq!(status["rpc_max_request_bytes"], 2048);
         assert_eq!(status["rpc_max_requests_per_minute"], 7);
+        assert_eq!(
+            status["rpc_max_active_connections"],
+            DEFAULT_MAX_ACTIVE_CONNECTIONS
+        );
         assert_eq!(status["admin_rpc_enabled"], false);
         assert_eq!(
             status["max_mempool_transactions"],
@@ -6602,6 +6703,11 @@ mod tests {
             dispatch_json_rpc_method(&state, "nebula_status", json!({})).unwrap()
                 ["rpc_max_requests_per_minute"],
             7
+        );
+        assert_eq!(
+            dispatch_json_rpc_method(&state, "nebula_status", json!({})).unwrap()
+                ["rpc_max_active_connections"],
+            DEFAULT_MAX_ACTIVE_CONNECTIONS
         );
         assert_eq!(
             dispatch_json_rpc_method(&state, "nebula_status", json!({})).unwrap()
@@ -6889,6 +6995,10 @@ mod tests {
             ops.rpc_max_requests_per_minute,
             DEFAULT_MAX_REQUESTS_PER_MINUTE
         );
+        assert_eq!(
+            ops.rpc_max_active_connections,
+            DEFAULT_MAX_ACTIVE_CONNECTIONS
+        );
         assert!(ops.admin_rpc_enabled);
         assert!(ops.admin_rpc_private_listener);
         assert!(!ops.public_rpc_admin_methods_enabled);
@@ -6918,6 +7028,10 @@ mod tests {
         assert_eq!(manifest.snapshot_root.len(), 64);
         assert!(manifest.snapshot_persisted);
         assert!(manifest.storage_snapshot_matches_runtime);
+        assert_eq!(
+            manifest.rpc_max_active_connections,
+            DEFAULT_MAX_ACTIVE_CONNECTIONS
+        );
         assert!(manifest.admin_rpc_enabled);
         assert!(manifest.admin_rpc_private_listener);
         assert!(!manifest.public_rpc_admin_methods_enabled);
@@ -6946,6 +7060,10 @@ mod tests {
         assert_eq!(rpc_ops["bridge_custody_reconciled"], true);
         assert_eq!(rpc_ops["nxmr_custody_deficit_units"], 0);
         assert_eq!(rpc_ops["storage_snapshot_matches_runtime"], true);
+        assert_eq!(
+            rpc_ops["rpc_max_active_connections"],
+            DEFAULT_MAX_ACTIVE_CONNECTIONS
+        );
         let rpc_backup =
             dispatch_json_rpc_method(&state, "nebula_backupManifest", json!({})).unwrap();
         assert_eq!(rpc_backup["backup_root"].as_str().unwrap().len(), 64);
@@ -6957,6 +7075,10 @@ mod tests {
         assert_eq!(rpc_backup["bridge_custody_reconciled"], true);
         assert_eq!(rpc_backup["nxmr_custody_deficit_units"], 0);
         assert_eq!(rpc_backup["storage_snapshot_matches_runtime"], true);
+        assert_eq!(
+            rpc_backup["rpc_max_active_connections"],
+            DEFAULT_MAX_ACTIVE_CONNECTIONS
+        );
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -7010,6 +7132,10 @@ mod tests {
         assert_eq!(health["admin_rpc_private_listener"], true);
         assert_eq!(health["public_rpc_admin_methods_enabled"], false);
         assert_eq!(health["default_dev_sequencer_key"], false);
+        assert_eq!(
+            health["rpc_max_active_connections"],
+            DEFAULT_MAX_ACTIVE_CONNECTIONS
+        );
         assert_eq!(health["snapshot_persisted"], true);
         assert_eq!(health["storage_snapshot_matches_runtime"], true);
         assert_eq!(health["sync_peer_count"], status["sync_peer_count"]);
@@ -7244,6 +7370,9 @@ mod tests {
         assert!(metrics.contains("nebula_sub_second_blocks 1"));
         assert!(metrics.contains("nebula_rpc_max_request_bytes 2048"));
         assert!(metrics.contains("nebula_rpc_max_requests_per_minute 7"));
+        assert!(metrics.contains(&format!(
+            "nebula_rpc_max_active_connections {DEFAULT_MAX_ACTIVE_CONNECTIONS}"
+        )));
         assert!(metrics.contains("nebula_sync_peer_count 0"));
         assert!(metrics.contains("nebula_sync_peer_quorum 1"));
         assert!(metrics.contains("nebula_sync_quorum_met 0"));
