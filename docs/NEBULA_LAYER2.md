@@ -79,6 +79,7 @@ The public launch suite covers:
   validation
 - unique bootstrap node, operator, observer, endpoint, and witness-key
   validation
+- unique TLS certificate and public-key pin validation
 - deployment freshness windows for generated attestations, expiry, TLS pins,
   and rollback drills
 - standalone preflight/runbook receipt exact-shape validation
@@ -152,6 +153,7 @@ Public launch requires a filled deployment attestation. The verifier rejects:
   the signed payload
 - duplicate bootstrap node IDs, bootstrap endpoints, operator IDs, operator
   keys, observer IDs, and observer keys
+- duplicate TLS certificate and public-key pins
 - deployment attestations older than `24` hours, expiry windows longer than
   `7` days, TLS pins with less than `7` days remaining, and rollback drills
   older than `7` days

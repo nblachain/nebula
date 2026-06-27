@@ -628,6 +628,8 @@ pub fn readiness_report() -> NebulaReadiness {
                 "minimum_tls_pin_validity_ms": MIN_TLS_PIN_VALIDITY_MS,
                 "rollback_drill_max_age_ms": ROLLBACK_DRILL_MAX_AGE_MS,
                 "deployment_witness_root_verified": true,
+                "unique_tls_cert_pins_required": true,
+                "unique_tls_public_key_pins_required": true,
                 "unique_bootstrap_node_ids_required": true,
                 "unique_bootstrap_endpoints_required": true,
                 "unique_operator_ids_required": true,
@@ -1751,6 +1753,8 @@ fn verify_public_endpoint(
     if public_endpoint.tls_pins.is_empty() {
         errors.push("public_endpoint.tls_pins must not be empty".to_string());
     }
+    let mut cert_pins = BTreeSet::new();
+    let mut public_key_pins = BTreeSet::new();
     for (index, pin) in public_endpoint.tls_pins.iter().enumerate() {
         require_hex_root(
             errors,
@@ -1759,6 +1763,18 @@ fn verify_public_endpoint(
         );
         require_hex_root(
             errors,
+            &format!("public_endpoint.tls_pins[{index}].public_key_sha256"),
+            &pin.public_key_sha256,
+        );
+        insert_unique(
+            errors,
+            &mut cert_pins,
+            &format!("public_endpoint.tls_pins[{index}].cert_sha256"),
+            &pin.cert_sha256,
+        );
+        insert_unique(
+            errors,
+            &mut public_key_pins,
             &format!("public_endpoint.tls_pins[{index}].public_key_sha256"),
             &pin.public_key_sha256,
         );
@@ -2880,6 +2896,44 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error
                         == "public_endpoint.tls_pins[0].not_after_unix_ms expires in less than seven days"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_duplicate_tls_cert_pin() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["public_endpoint"]["tls_pins"][1]["cert_sha256"] =
+            value["public_endpoint"]["tls_pins"][0]["cert_sha256"].clone();
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "public_endpoint.tls_pins[1].cert_sha256 must be unique"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_duplicate_tls_public_key_pin() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["public_endpoint"]["tls_pins"][1]["public_key_sha256"] =
+            value["public_endpoint"]["tls_pins"][0]["public_key_sha256"].clone();
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "public_endpoint.tls_pins[1].public_key_sha256 must be unique"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
