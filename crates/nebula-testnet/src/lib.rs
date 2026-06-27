@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const VERSION: &str = "nebula-testnet-runner/0.2.0";
 pub const CHAIN_ID: &str = "nebula-private-l2-testnet";
 pub const PUBLIC_LAUNCH_BLOCKER: &str = "public-launch-deployment-attestation";
+pub const PUBLIC_TESTNET_BUNDLE_ID: &str = "nebula-public-testnet-bundle-1";
 pub const NBLA_SYMBOL: &str = "NBLA";
 pub const NXMR_SYMBOL: &str = "nXMR";
 pub const NEBULAI_UNIT: &str = "nebulai";
@@ -650,6 +651,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "deployment_attestation_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
                 "deployment_attestation_max_ttl_ms": PUBLIC_ATTESTATION_MAX_TTL_MS,
                 "deployment_attestation_expires_after_generated": true,
+                "launch_bundle_id": PUBLIC_TESTNET_BUNDLE_ID,
                 "minimum_tls_pin_validity_ms": MIN_TLS_PIN_VALIDITY_MS,
                 "rollback_drill_max_age_ms": ROLLBACK_DRILL_MAX_AGE_MS,
                 "preflight_runbook_evidence_domains_disjoint": true,
@@ -1651,7 +1653,7 @@ fn sample_launch_bundle(
     economics_root: &str,
 ) -> LaunchBundle {
     let mut launch_bundle = LaunchBundle {
-        bundle_id: "nebula-public-testnet-bundle-1".to_string(),
+        bundle_id: PUBLIC_TESTNET_BUNDLE_ID.to_string(),
         chain_id: CHAIN_ID.to_string(),
         package_root: package_root.to_string(),
         runtime_root: runtime_root.to_string(),
@@ -1804,6 +1806,12 @@ fn verify_launch_bundle(
     runtime_root: &str,
     economics_root: &str,
 ) {
+    require_eq(
+        errors,
+        "launch_bundle.bundle_id",
+        &launch_bundle.bundle_id,
+        PUBLIC_TESTNET_BUNDLE_ID,
+    );
     require_eq(
         errors,
         "launch_bundle.chain_id",
@@ -3746,6 +3754,28 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "expires_at_unix_ms must be after generated_at_unix_ms"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_wrong_launch_bundle_id() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["launch_bundle"]["bundle_id"] = json!("nebula-wrong-testnet-bundle");
+        value["launch_bundle"]["root"] = json!(launch_bundle_root(
+            &serde_json::from_value::<LaunchBundle>(value["launch_bundle"].clone()).unwrap()
+        ));
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "launch_bundle.bundle_id expected nebula-public-testnet-bundle-1 but got nebula-wrong-testnet-bundle"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
