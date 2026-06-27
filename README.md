@@ -171,8 +171,10 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - duplicated preflight/runbook receipt phase names, step names, and step
   evidence roots
 - public status/probe endpoints that do not use `https://`
-- public status/probe and bootstrap endpoints that do not include a host,
-  include userinfo, or include query/fragment components
+- public status/probe endpoints that do not include a host, include userinfo,
+  or include query/fragment components
+- bootstrap endpoints that include a path, omit a host, include userinfo, or
+  include query/fragment components
 - operator and observer witness roots that do not match the deployment surface
 - operator and observer public keys that are not 64-character hex values
 - observer public keys that reuse an operator public key

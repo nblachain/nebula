@@ -662,6 +662,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "unique_bootstrap_endpoints_required": true,
                 "unique_bootstrap_endpoint_hosts_required": true,
                 "bootstrap_endpoint_authority_required": true,
+                "bootstrap_endpoint_path_forbidden": true,
                 "bootstrap_region_spread_required": true,
                 "bootstrap_operator_region_binding_required": true,
                 "deployment_region_whitespace_free": true,
@@ -2325,7 +2326,7 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("bootstrap_nodes[{index}].endpoint"),
             &node.endpoint,
         );
-        require_https_endpoint(
+        require_https_endpoint_without_path(
             errors,
             &format!("bootstrap_nodes[{index}].endpoint"),
             &node.endpoint,
@@ -3076,6 +3077,21 @@ fn require_https_endpoint(errors: &mut Vec<String>, label: &str, endpoint: &str)
     require_endpoint_authority(errors, label, endpoint, scheme);
 }
 
+fn require_https_endpoint_without_path(errors: &mut Vec<String>, label: &str, endpoint: &str) {
+    let scheme = "https://";
+    if !endpoint.starts_with(scheme) {
+        errors.push(format!("{label} must use an https:// endpoint"));
+        return;
+    }
+    let Some(_authority) = require_endpoint_authority(errors, label, endpoint, scheme) else {
+        return;
+    };
+    let remainder = endpoint.strip_prefix(scheme).unwrap_or_default();
+    if remainder.contains('/') {
+        errors.push(format!("{label} must not include a path"));
+    }
+}
+
 fn require_tcp_endpoint_with_port(errors: &mut Vec<String>, label: &str, endpoint: &str) {
     let scheme = "tcp://";
     if !endpoint.starts_with(scheme) {
@@ -3763,6 +3779,26 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error == "bootstrap_nodes[0].endpoint must include a host after https://"
                 }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_bootstrap_endpoint_with_path() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["bootstrap_nodes"][0]["endpoint"] =
+            json!("https://bootstrap-a.testnet.nebula.example/rpc");
+        refresh_bootstrap_node_root(&mut value, 0);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "bootstrap_nodes[0].endpoint must not include a path"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
