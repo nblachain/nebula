@@ -46,9 +46,11 @@ other. Observer IDs must not reuse bootstrap node IDs or operator IDs. Operator
 and observer public keys must be 64-character hex values, and observer keys
 must not reuse operator keys.
 Public status and probe HTTPS endpoints must include a host and no
-userinfo/query/fragment components. Bootstrap HTTPS endpoints must include a
-host and no path/userinfo/query/fragment components. Bootstrap nodes must match
-their attested operator region. Bootstrap
+userinfo/query/fragment components; any explicit HTTPS port must be numeric and
+nonzero. Bootstrap HTTPS endpoints must include a host and no
+path/userinfo/query/fragment components; any explicit bootstrap port must be
+numeric and nonzero. Bootstrap nodes must match their attested operator region.
+Bootstrap
 nodes, operator quorums, and observer quorums must each cover at least two
 regions. Bootstrap, operator, observer, and deployment-region labels must not
 contain whitespace. Observer IDs must not reuse operator IDs. Deployment

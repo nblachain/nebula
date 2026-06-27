@@ -652,6 +652,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "deployment_witness_root_verified": true,
                 "public_https_endpoint_required": true,
                 "public_endpoint_authority_required": true,
+                "https_endpoint_port_numeric_when_present": true,
                 "endpoint_userinfo_forbidden": true,
                 "endpoint_query_fragment_forbidden": true,
                 "unique_tls_cert_pins_required": true,
@@ -3160,6 +3161,17 @@ fn require_endpoint_authority<'a>(
         errors.push(format!("{label} must not include userinfo"));
         return None;
     }
+    if let Some((_host, port)) = authority.rsplit_once(':') {
+        if port.trim().is_empty()
+            || !port.chars().all(|character| character.is_ascii_digit())
+            || port.parse::<u16>().ok().filter(|port| *port > 0).is_none()
+        {
+            errors.push(format!(
+                "{label} must include a numeric port when a port is present"
+            ));
+            return None;
+        }
+    }
     if remainder.contains('?') || remainder.contains('#') {
         errors.push(format!("{label} must not include query or fragment"));
         return None;
@@ -3405,6 +3417,28 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "public_status_manifest.endpoint_url must not include query or fragment"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn public_status_rejects_endpoint_with_nonnumeric_port() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_public_status_manifest_json_pretty()).unwrap();
+        value["endpoint_url"] = json!("https://testnet.nebula.example:status/status");
+        value["root"] = json!(public_status_manifest_root(
+            &serde_json::from_value::<PublicStatusManifest>(value.clone()).unwrap()
+        ));
+
+        let error = verify_public_status_manifest_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "public_status_manifest.endpoint_url must include a numeric port when a port is present"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
@@ -3799,6 +3833,27 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error == "bootstrap_nodes[0].endpoint must not include a path"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_bootstrap_endpoint_with_zero_port() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["bootstrap_nodes"][0]["endpoint"] =
+            json!("https://bootstrap-a.testnet.nebula.example:0");
+        refresh_bootstrap_node_root(&mut value, 0);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "bootstrap_nodes[0].endpoint must include a numeric port when a port is present"
+                }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }

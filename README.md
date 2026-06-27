@@ -172,9 +172,9 @@ Public launch requires a filled deployment attestation. The verifier rejects:
   evidence roots
 - public status/probe endpoints that do not use `https://`
 - public status/probe endpoints that do not include a host, include userinfo,
-  or include query/fragment components
+  include query/fragment components, or include a nonnumeric/zero port
 - bootstrap endpoints that include a path, omit a host, include userinfo, or
-  include query/fragment components
+  include query/fragment components or a nonnumeric/zero port
 - operator and observer witness roots that do not match the deployment surface
 - operator and observer public keys that are not 64-character hex values
 - observer public keys that reuse an operator public key
