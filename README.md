@@ -137,7 +137,9 @@ evidence is absent or stale.
     with `--bootstrap-rpc`, and continuously sync newer verified snapshots from
     a repeatable `--sync-rpc` peer set. Configure public RPC abuse-resistance with
     `--max-mempool-transactions`, `--max-request-bytes`, and
-    `--max-requests-per-minute`.
+    `--max-requests-per-minute`. Mempool admission is stateful: public nodes
+    reject missing senders, duplicate pending account nonces, nonce mismatches,
+    and insufficient `NBLA`/`nXMR` balances before consuming bounded capacity.
 12. Confirm the sequencer/follower public-testnet RPC surfaces before launch.
     `/health`, `/status`, `/snapshot`, and JSON-RPC `/rpc` must agree on chain
     head, genesis identity, activation height, fee policy, validator identity,
@@ -145,9 +147,10 @@ evidence is absent or stale.
     peers. Every snapshot block must commit to the producer public key and verify
     its Ed25519 signature before a follower treats the peer as ready; exported
     snapshots must never include the sequencer secret key. Public RPC nodes must
-    reject transactions beyond the configured mempool cap, reject oversized
-    requests, and throttle per-client request bursts before launch observers
-    treat the endpoint as ready.
+    reject invalid signed spend attempts before mempool admission, reject
+    transactions beyond the configured mempool cap, reject oversized requests,
+    and throttle per-client request bursts before launch observers treat the
+    endpoint as ready.
 13. Gate bridge custody before treating `nXMR` as public-testnet gas. The
     `nebula_bridgePolicy` method must expose the policy root and testnet
     custody constants. Deposits submitted through `nebula_observeBridgeDeposit`
@@ -169,13 +172,15 @@ evidence is absent or stale.
     `nebula_backupManifest` must agree with `/health`, `/status`, and
     `nebula_status` on block freshness,
     latest height/hash, state root, snapshot root, persisted snapshot path and
-    presence, sync peer count, mempool cap/remaining capacity/rejection count,
-    RPC request-size and rate-limit policy, admin RPC state, bridge policy root,
-    backup manifest root, and public ops readiness gauges. Operators must treat
+    presence, sync peer count, mempool cap/remaining capacity/full and
+    admission rejection counts, RPC request-size and rate-limit policy, admin
+    RPC state, bridge policy root, backup manifest root, and public ops
+    readiness gauges. Operators must treat
     stale blocks, missing
     persisted snapshots, mismatched backup roots, missing bridge policy roots,
-    full mempools, disabled or unexpected admin RPC state, or unexpected
-    sync/RPC-limit values as public-launch blockers.
+    full mempools, unexpected admission-rejection spikes, disabled or
+    unexpected admin RPC state, or unexpected sync/RPC-limit values as
+    public-launch blockers.
 15. Gate sequencer key rotation and operator accountability before public
     endpoint exposure. `/health`, `/status`, and `nebula_status` must expose
     the current sequencer public key, sequencer key-rotation history/root,
@@ -231,10 +236,13 @@ continuously sync signed, verified snapshots from a configured peer set. It
 targets `250 ms` blocks by default, enforces a public-testnet block target below
 one second, exposes health/status JSON and scrapeable metrics, accepts transfer transactions, and
 accounts for `NBLA` gas, `nXMR` gas, nXMR-funded NBLA buybacks/backing, and
-validator rewards. Public RPC nodes enforce a bounded mempool, maximum request
-body size, and per-client request rate limit; tune rehearsal limits with
+validator rewards. Public RPC nodes enforce stateful signed-spend admission, a
+bounded mempool, maximum request body size, and per-client request rate limit;
+tune rehearsal limits with
 `--max-mempool-transactions`, `--max-request-bytes`, and
-`--max-requests-per-minute`.
+`--max-requests-per-minute`. Admission rejects missing senders, duplicate
+pending account nonces, nonce mismatches, and insufficient `NBLA`/`nXMR`
+balances before consuming local mempool capacity.
 
 Operator-only JSON-RPC methods require a node started with
 `--admin-token <operator-token>` and request params containing
@@ -301,13 +309,14 @@ operators need during launch rehearsals: `GET /ops`, `GET /backup`,
 public testnet endpoint, operators must compare those reports with `/health`,
 `/status`, `/snapshot`, and `nebula_status` and verify block freshness, latest
 height/hash, state root, snapshot root, persisted snapshot path and presence,
-configured sync peer count, mempool cap/remaining capacity/rejection count, RPC
-max-request/rate-limit policy, admin RPC state, bridge policy root, and backup
-manifest root. The `/metrics` scrape must expose the same block freshness,
-mempool pressure, RPC limit, peer count, bridge counter, storage snapshot, and
-accountability gauges. A valid backup manifest must bind the node role, validator ID,
-latest chain head, state/snapshot roots, persisted snapshot location, sync peer
-coverage, mempool capacity policy, RPC limit policy, admin RPC state, and
+configured sync peer count, mempool cap/remaining capacity/full and admission
+rejection counts, RPC max-request/rate-limit policy, admin RPC state, bridge
+policy root, and backup manifest root. The `/metrics` scrape must expose the
+same block freshness, mempool pressure, RPC limit, peer count, bridge counter, storage snapshot,
+accountability, and public ops readiness gauges. A valid backup manifest must
+bind the node role, validator ID, latest chain head, state/snapshot roots,
+persisted snapshot location, sync peer coverage, mempool capacity policy,
+full/admission rejection counters, RPC limit policy, admin RPC state, and
 bridge policy root without exporting any sequencer secret key material.
 
 A follower can import once from an ahead peer before it starts serving RPC:

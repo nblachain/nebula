@@ -92,7 +92,9 @@ The public launch sequence for this crate is:
    configured sync peers so operators can confirm replica failover coverage.
    Public RPC nodes enforce bounded mempool admission, request-size limits, and
    per-client rate limits; tune them with `--max-mempool-transactions`,
-   `--max-request-bytes`, and `--max-requests-per-minute`.
+   `--max-request-bytes`, and `--max-requests-per-minute`. Admission rejects
+   missing senders, duplicate pending account nonces, nonce mismatches, and
+   insufficient `NBLA`/`nXMR` balances before consuming bounded capacity.
 9. Exercise the bridge custody policy. `nebula_bridgePolicy` must expose the
    active bridge policy root and quorum constants. Deposits must prove the
    current `monero_tx_id`, `account`, `amount_nxmr_units`, `confirmations`,
@@ -112,11 +114,11 @@ The public launch sequence for this crate is:
    agree with `/health`, `/status`, `/snapshot`, and `nebula_status` on block
    freshness, latest height/hash, state root, snapshot root, persisted snapshot
    path and presence, sync peer count, mempool cap/remaining capacity/full
-   rejection count, RPC request-size and rate-limit policy, bridge policy root,
-   backup manifest root, and public ops readiness gauges. Stale blocks, missing
-   persisted snapshots, mismatched backup roots, missing bridge policy roots,
-   full mempools, or unexpected sync/RPC limit values keep the public endpoint
-   launch-blocked.
+   and admission rejection counts, RPC request-size and rate-limit policy,
+   bridge policy root, backup manifest root, and public ops readiness gauges.
+   Stale blocks, missing persisted snapshots, mismatched backup roots, missing
+   bridge policy roots, full mempools, unexpected admission-rejection spikes, or
+   unexpected sync/RPC limit values keep the public endpoint launch-blocked.
 11. Exercise sequencer key rotation and operator accountability. `/health`,
    `/status`, and `nebula_status` must expose the current sequencer public key,
    key-rotation history/root, accountability evidence root, equivocation
@@ -162,7 +164,10 @@ per-client request rate limit before dispatching JSON-RPC work. Use
 `--max-mempool-transactions <count>`, `--max-request-bytes <bytes>`, and
 `--max-requests-per-minute <count>` to tune rehearsals or public endpoint
 hardening. `/health`, `/status`, `/ops`, `/backup`, and `nebula_status` expose
-the mempool cap, remaining capacity, full-rejection count, and admin RPC state.
+the mempool cap, remaining capacity, full/admission rejection counts, and admin
+RPC state. Signed spend admission rejects missing senders, duplicate pending
+account nonces, nonce mismatches, and insufficient `NBLA`/`nXMR` balances before
+consuming local mempool capacity.
 
 Operator-only JSON-RPC methods require a node started with
 `--admin-token <operator-token>` and request params containing
@@ -195,14 +200,14 @@ compare those reports with `/health`, `/status`, `/snapshot`, and
 `nebula_status` and verify block
 freshness, latest height/hash, state root, snapshot root, persisted snapshot
 path and presence, configured sync peer count, mempool cap/remaining capacity,
-full-rejection count, RPC max-request/rate-limit policy, admin RPC state, bridge
-policy root, and backup manifest root. The metrics scrape must expose matching
-block freshness, mempool pressure, RPC limit, peer count, bridge counter,
-storage snapshot, accountability, and public ops readiness gauges. Backup
-manifests must bind the node role, validator ID, latest chain head,
+full/admission rejection counts, RPC max-request/rate-limit policy, admin RPC
+state, bridge policy root, and backup manifest root. The metrics scrape must
+expose matching block freshness, mempool pressure, RPC limit, peer count, bridge
+counter, storage snapshot, accountability, and public ops readiness gauges.
+Backup manifests must bind the node role, validator ID, latest chain head,
 state/snapshot roots, persisted snapshot location, sync peer coverage, mempool
-capacity policy, RPC limit policy, admin RPC state, and bridge policy root
-without exporting sequencer secret key material.
+capacity policy, full/admission rejection counters, RPC limit policy, admin RPC
+state, and bridge policy root without exporting sequencer secret key material.
 
 The default dev sequencer key is only for throwaway local rehearsals. Public
 rehearsals should pass `--sequencer-public-key <hex>` to all nodes and pass the

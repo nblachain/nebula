@@ -30,7 +30,7 @@ pub const MIN_WITHDRAWAL_OPERATOR_QUORUM: usize = 2;
 pub const BRIDGE_CUSTODY_POLICY_ID: &str = "nebula-monero-bridge-custody-testnet-v1";
 pub const VALIDATOR_REWARD_ACCOUNT_PREFIX: &str = "validator:";
 pub const RUNTIME_SNAPSHOT_FILE: &str = "nebula-runtime-snapshot.json";
-pub const RUNTIME_SNAPSHOT_VERSION: u32 = 6;
+pub const RUNTIME_SNAPSHOT_VERSION: u32 = 7;
 pub const DEFAULT_PEER_SYNC_MS: u64 = 100;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
 pub const DEFAULT_MAX_REQUESTS_PER_MINUTE: u32 = 600;
@@ -311,6 +311,7 @@ pub struct RuntimeSnapshot {
     pub buyback_pool_nebulai: u128,
     pub validator_reward_nebulai: u128,
     pub mempool_full_rejection_count: u64,
+    pub mempool_admission_rejection_count: u64,
     pub sequencer_key_rotations: Vec<RuntimeSequencerKeyRotation>,
     pub accountability_reports: Vec<RuntimeAccountabilityReport>,
     pub root: String,
@@ -369,6 +370,7 @@ pub struct RuntimeStatus {
     pub max_mempool_transactions: usize,
     pub mempool_capacity_remaining: usize,
     pub mempool_full_rejection_count: u64,
+    pub mempool_admission_rejection_count: u64,
     pub account_count: usize,
     pub bridge_deposit_count: usize,
     pub withdrawal_request_count: usize,
@@ -426,6 +428,7 @@ pub struct RuntimeOpsStatus {
     pub mempool_size: usize,
     pub mempool_capacity_remaining: usize,
     pub mempool_full_rejection_count: u64,
+    pub mempool_admission_rejection_count: u64,
     pub sequencer_public_key_hex: String,
     pub sequencer_key_rotation_count: usize,
     pub sequencer_latest_rotation_activation_height: Option<u64>,
@@ -472,6 +475,7 @@ pub struct RuntimeBackupManifest {
     pub mempool_size: usize,
     pub mempool_capacity_remaining: usize,
     pub mempool_full_rejection_count: u64,
+    pub mempool_admission_rejection_count: u64,
     pub backup_root: String,
 }
 
@@ -541,6 +545,7 @@ pub struct NebulaRuntime {
     buyback_pool_nebulai: u128,
     validator_reward_nebulai: u128,
     mempool_full_rejection_count: u64,
+    mempool_admission_rejection_count: u64,
     sequencer_key_rotations: Vec<RuntimeSequencerKeyRotation>,
     accountability_reports: Vec<RuntimeAccountabilityReport>,
 }
@@ -576,6 +581,13 @@ struct RuntimeSyncPeerSet {
 struct RuntimeRateLimitBucket {
     window_start_unix_ms: u128,
     request_count: u32,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeTransactionExecutionPlan {
+    asset: FeeAsset,
+    quote: HybridFeeQuote,
+    next_sender: RuntimeAccount,
 }
 
 impl RuntimeRpcState {
@@ -771,6 +783,7 @@ impl RuntimeRpcState {
             mempool_size: status.mempool_size,
             mempool_capacity_remaining: status.mempool_capacity_remaining,
             mempool_full_rejection_count: status.mempool_full_rejection_count,
+            mempool_admission_rejection_count: status.mempool_admission_rejection_count,
             sequencer_public_key_hex: status.sequencer_public_key_hex,
             sequencer_key_rotation_count: status.sequencer_key_rotation_count,
             sequencer_latest_rotation_activation_height: status
@@ -823,6 +836,7 @@ impl RuntimeRpcState {
             mempool_size: ops_status.mempool_size,
             mempool_capacity_remaining: ops_status.mempool_capacity_remaining,
             mempool_full_rejection_count: ops_status.mempool_full_rejection_count,
+            mempool_admission_rejection_count: ops_status.mempool_admission_rejection_count,
             backup_root: String::new(),
         };
         manifest.backup_root = backup_manifest_root(&manifest);
@@ -886,6 +900,12 @@ impl RuntimeRpcState {
             "nebula_mempool_full_rejection_count",
             "Transactions rejected because the mempool was full.",
             status.mempool_full_rejection_count,
+        );
+        push_metric(
+            &mut output,
+            "nebula_mempool_admission_rejection_count",
+            "Transactions rejected by stateful mempool admission checks.",
+            status.mempool_admission_rejection_count,
         );
         push_metric(
             &mut output,
@@ -1121,6 +1141,7 @@ impl NebulaRuntime {
             buyback_pool_nebulai: 0,
             validator_reward_nebulai: 0,
             mempool_full_rejection_count: 0,
+            mempool_admission_rejection_count: 0,
             sequencer_key_rotations: Vec::new(),
             accountability_reports: Vec::new(),
         };
@@ -1195,6 +1216,7 @@ impl NebulaRuntime {
             buyback_pool_nebulai: snapshot.buyback_pool_nebulai,
             validator_reward_nebulai: snapshot.validator_reward_nebulai,
             mempool_full_rejection_count: snapshot.mempool_full_rejection_count,
+            mempool_admission_rejection_count: snapshot.mempool_admission_rejection_count,
             sequencer_key_rotations: snapshot.sequencer_key_rotations,
             accountability_reports: snapshot.accountability_reports,
         };
@@ -1225,6 +1247,7 @@ impl NebulaRuntime {
             buyback_pool_nebulai: self.buyback_pool_nebulai,
             validator_reward_nebulai: self.validator_reward_nebulai,
             mempool_full_rejection_count: self.mempool_full_rejection_count,
+            mempool_admission_rejection_count: self.mempool_admission_rejection_count,
             sequencer_key_rotations: self.sequencer_key_rotations.clone(),
             accountability_reports: self.accountability_reports.clone(),
             root: String::new(),
@@ -1286,6 +1309,7 @@ impl NebulaRuntime {
                 .max_mempool_transactions
                 .saturating_sub(self.mempool.len()),
             mempool_full_rejection_count: self.mempool_full_rejection_count,
+            mempool_admission_rejection_count: self.mempool_admission_rejection_count,
             account_count: self.accounts.len(),
             bridge_deposit_count: self.bridge_deposits.len(),
             withdrawal_request_count: self.withdrawals.len(),
@@ -1335,12 +1359,31 @@ impl NebulaRuntime {
         tx: RuntimeTransaction,
     ) -> Result<SubmitTransactionReport, String> {
         self.ensure_accountability_clean()?;
-        validate_transaction_shape(&tx)?;
+        if let Err(error) = validate_transaction_shape(&tx) {
+            self.record_mempool_admission_rejection()?;
+            return Err(error);
+        }
         let tx_id = tx.id();
         if self.receipts.contains_key(&tx_id)
             || self.mempool.iter().any(|pending| pending.id() == tx_id)
         {
+            self.record_mempool_admission_rejection()?;
             return Err(format!("transaction {tx_id} already exists"));
+        }
+        if self
+            .mempool
+            .iter()
+            .any(|pending| pending.from == tx.from && pending.nonce == tx.nonce)
+        {
+            self.record_mempool_admission_rejection()?;
+            return Err(format!(
+                "mempool already contains a pending transaction for account {} nonce {}",
+                tx.from, tx.nonce
+            ));
+        }
+        if let Err(error) = self.transaction_execution_plan(&tx) {
+            self.record_mempool_admission_rejection()?;
+            return Err(error);
         }
         if self.mempool.len() >= self.config.max_mempool_transactions {
             self.mempool_full_rejection_count = self
@@ -1378,6 +1421,14 @@ impl NebulaRuntime {
                 .max_mempool_transactions
                 .saturating_sub(self.mempool.len()),
         })
+    }
+
+    fn record_mempool_admission_rejection(&mut self) -> Result<(), String> {
+        self.mempool_admission_rejection_count = self
+            .mempool_admission_rejection_count
+            .checked_add(1)
+            .ok_or_else(|| "mempool admission rejection counter overflowed".to_string())?;
+        Ok(())
     }
 
     pub fn receipt(&self, tx_id: &str) -> Option<RuntimeReceipt> {
@@ -1819,6 +1870,63 @@ impl NebulaRuntime {
         tx: &RuntimeTransaction,
         block_height: u64,
     ) -> Result<RuntimeReceipt, String> {
+        let plan = self.transaction_execution_plan(tx)?;
+        self.accounts.insert(tx.from.clone(), plan.next_sender);
+
+        if matches!(plan.asset, FeeAsset::NXmr) {
+            self.total_nxmr_fees_units = self
+                .total_nxmr_fees_units
+                .checked_add(plan.quote.paid_amount_units)
+                .ok_or_else(|| "nXMR fee accounting overflowed".to_string())?;
+            self.buyback_pool_nebulai = self
+                .buyback_pool_nebulai
+                .checked_add(plan.quote.reserve_backing_nebulai)
+                .ok_or_else(|| "NBLA buyback accounting overflowed".to_string())?;
+        }
+
+        let recipient = self
+            .accounts
+            .entry(tx.to.clone())
+            .or_insert_with(RuntimeAccount::empty);
+        recipient.nbla_nebulai = recipient
+            .nbla_nebulai
+            .checked_add(tx.amount_nebulai)
+            .ok_or_else(|| "recipient NBLA credit overflowed".to_string())?;
+
+        let reward_account_id = self.config.validator_reward_account();
+        let reward_account = self
+            .accounts
+            .entry(reward_account_id)
+            .or_insert_with(RuntimeAccount::empty);
+        reward_account.nbla_nebulai = reward_account
+            .nbla_nebulai
+            .checked_add(plan.quote.validator_reward_nebulai)
+            .ok_or_else(|| "validator reward credit overflowed".to_string())?;
+        reward_account.validator_points = reward_account
+            .validator_points
+            .checked_add(plan.quote.validator_points)
+            .ok_or_else(|| "validator points overflowed".to_string())?;
+        self.validator_reward_nebulai = self
+            .validator_reward_nebulai
+            .checked_add(plan.quote.validator_reward_nebulai)
+            .ok_or_else(|| "validator reward accounting overflowed".to_string())?;
+
+        Ok(RuntimeReceipt {
+            tx_id: tx.id(),
+            status: TransactionStatus::Included,
+            block_height: Some(block_height),
+            fee_asset: tx.fee_asset.clone(),
+            paid_amount_units: plan.quote.paid_amount_units,
+            validator_reward_nebulai: plan.quote.validator_reward_nebulai,
+            buyback_nebulai: plan.quote.reserve_backing_nebulai,
+            error: None,
+        })
+    }
+
+    fn transaction_execution_plan(
+        &self,
+        tx: &RuntimeTransaction,
+    ) -> Result<RuntimeTransactionExecutionPlan, String> {
         validate_transaction_shape(tx)?;
         let asset = tx.fee_asset_kind()?;
         let quote = quote_hybrid_fee(
@@ -1870,58 +1978,17 @@ impl NebulaRuntime {
                 }
                 next_sender.nbla_nebulai -= tx.amount_nebulai;
                 next_sender.nxmr_units -= quote.paid_amount_units;
-                self.total_nxmr_fees_units = self
-                    .total_nxmr_fees_units
-                    .checked_add(quote.paid_amount_units)
-                    .ok_or_else(|| "nXMR fee accounting overflowed".to_string())?;
-                self.buyback_pool_nebulai = self
-                    .buyback_pool_nebulai
-                    .checked_add(quote.reserve_backing_nebulai)
-                    .ok_or_else(|| "NBLA buyback accounting overflowed".to_string())?;
             }
         }
         next_sender.nonce = next_sender
             .nonce
             .checked_add(1)
             .ok_or_else(|| "sender nonce overflowed".to_string())?;
-        self.accounts.insert(tx.from.clone(), next_sender);
 
-        let recipient = self
-            .accounts
-            .entry(tx.to.clone())
-            .or_insert_with(RuntimeAccount::empty);
-        recipient.nbla_nebulai = recipient
-            .nbla_nebulai
-            .checked_add(tx.amount_nebulai)
-            .ok_or_else(|| "recipient NBLA credit overflowed".to_string())?;
-
-        let reward_account_id = self.config.validator_reward_account();
-        let reward_account = self
-            .accounts
-            .entry(reward_account_id)
-            .or_insert_with(RuntimeAccount::empty);
-        reward_account.nbla_nebulai = reward_account
-            .nbla_nebulai
-            .checked_add(quote.validator_reward_nebulai)
-            .ok_or_else(|| "validator reward credit overflowed".to_string())?;
-        reward_account.validator_points = reward_account
-            .validator_points
-            .checked_add(quote.validator_points)
-            .ok_or_else(|| "validator points overflowed".to_string())?;
-        self.validator_reward_nebulai = self
-            .validator_reward_nebulai
-            .checked_add(quote.validator_reward_nebulai)
-            .ok_or_else(|| "validator reward accounting overflowed".to_string())?;
-
-        Ok(RuntimeReceipt {
-            tx_id: tx.id(),
-            status: TransactionStatus::Included,
-            block_height: Some(block_height),
-            fee_asset: tx.fee_asset.clone(),
-            paid_amount_units: quote.paid_amount_units,
-            validator_reward_nebulai: quote.validator_reward_nebulai,
-            buyback_nebulai: quote.reserve_backing_nebulai,
-            error: None,
+        Ok(RuntimeTransactionExecutionPlan {
+            asset,
+            quote,
+            next_sender,
         })
     }
 
@@ -2371,6 +2438,7 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
                     "mempool_size": status["mempool_size"],
                     "mempool_capacity_remaining": status["mempool_capacity_remaining"],
                     "mempool_full_rejection_count": status["mempool_full_rejection_count"],
+                    "mempool_admission_rejection_count": status["mempool_admission_rejection_count"],
                     "sequencer_public_key_hex": status["sequencer_public_key_hex"],
                     "sequencer_key_rotation_count": status["sequencer_key_rotation_count"],
                     "sequencer_latest_rotation_activation_height": status["sequencer_latest_rotation_activation_height"],
@@ -3574,6 +3642,7 @@ fn ops_status_root(report: &RuntimeOpsStatus) -> String {
         "mempool_size": report.mempool_size,
         "mempool_capacity_remaining": report.mempool_capacity_remaining,
         "mempool_full_rejection_count": report.mempool_full_rejection_count,
+        "mempool_admission_rejection_count": report.mempool_admission_rejection_count,
         "sequencer_public_key_hex": report.sequencer_public_key_hex,
         "sequencer_key_rotation_count": report.sequencer_key_rotation_count,
         "sequencer_latest_rotation_activation_height": report.sequencer_latest_rotation_activation_height,
@@ -3621,6 +3690,7 @@ fn backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
         "mempool_size": manifest.mempool_size,
         "mempool_capacity_remaining": manifest.mempool_capacity_remaining,
         "mempool_full_rejection_count": manifest.mempool_full_rejection_count,
+        "mempool_admission_rejection_count": manifest.mempool_admission_rejection_count,
     }))
 }
 
@@ -3758,6 +3828,7 @@ fn snapshot_root(snapshot: &RuntimeSnapshot) -> String {
         "buyback_pool_nebulai": snapshot.buyback_pool_nebulai,
         "validator_reward_nebulai": snapshot.validator_reward_nebulai,
         "mempool_full_rejection_count": snapshot.mempool_full_rejection_count,
+        "mempool_admission_rejection_count": snapshot.mempool_admission_rejection_count,
         "sequencer_key_rotations": snapshot.sequencer_key_rotations,
         "accountability_reports": snapshot.accountability_reports,
     }))
@@ -3972,6 +4043,7 @@ mod tests {
             DEFAULT_MAX_MEMPOOL_TRANSACTIONS
         );
         assert_eq!(status["mempool_full_rejection_count"], 0);
+        assert_eq!(status["mempool_admission_rejection_count"], 0);
         assert_eq!(status["sync_peer_count"], 2);
         assert_eq!(
             status["sync_peer_urls"],
@@ -4047,6 +4119,7 @@ mod tests {
             ops.mempool_capacity_remaining,
             DEFAULT_MAX_MEMPOOL_TRANSACTIONS
         );
+        assert_eq!(ops.mempool_admission_rejection_count, 0);
         assert_eq!(ops.ops_root.len(), 64);
 
         let manifest = state.backup_manifest().unwrap();
@@ -4058,15 +4131,18 @@ mod tests {
             manifest.max_mempool_transactions,
             DEFAULT_MAX_MEMPOOL_TRANSACTIONS
         );
+        assert_eq!(manifest.mempool_admission_rejection_count, 0);
         assert_eq!(manifest.backup_root.len(), 64);
         let rpc_ops = dispatch_json_rpc_method(&state, "nebula_opsStatus", json!({})).unwrap();
         assert_eq!(rpc_ops["ops_root"].as_str().unwrap().len(), 64);
         assert_eq!(rpc_ops["public_ops_ready"], true);
+        assert_eq!(rpc_ops["mempool_admission_rejection_count"], 0);
         assert_eq!(rpc_ops["storage_snapshot_matches_runtime"], true);
         let rpc_backup =
             dispatch_json_rpc_method(&state, "nebula_backupManifest", json!({})).unwrap();
         assert_eq!(rpc_backup["backup_root"].as_str().unwrap().len(), 64);
         assert_eq!(rpc_backup["snapshot_persisted"], true);
+        assert_eq!(rpc_backup["mempool_admission_rejection_count"], 0);
         assert_eq!(rpc_backup["storage_snapshot_matches_runtime"], true);
 
         let _ = fs::remove_dir_all(dir);
@@ -4077,6 +4153,7 @@ mod tests {
         let mut config = RuntimeConfig::public_testnet_default();
         config.max_mempool_transactions = 1;
         let mut runtime = NebulaRuntime::new(config).unwrap();
+        runtime.faucet(&test_account_id()).unwrap();
         runtime
             .submit_transaction(test_nbla_transaction(0, "bob"))
             .unwrap();
@@ -4091,6 +4168,7 @@ mod tests {
         assert_eq!(ops.max_mempool_transactions, 1);
         assert_eq!(ops.mempool_size, 1);
         assert_eq!(ops.mempool_capacity_remaining, 0);
+        assert_eq!(ops.mempool_admission_rejection_count, 0);
         assert!(ops
             .blocking_gaps
             .contains(&"mempool-at-capacity".to_string()));
@@ -4109,6 +4187,7 @@ mod tests {
         assert!(metrics.contains("nebula_rpc_max_requests_per_minute 7"));
         assert!(metrics.contains("nebula_sync_peer_count 0"));
         assert!(metrics.contains("nebula_admin_rpc_enabled 0"));
+        assert!(metrics.contains("nebula_mempool_admission_rejection_count 0"));
         assert!(metrics.contains("nebula_bridge_deposit_count 0"));
         assert!(metrics.contains("nebula_withdrawal_request_count 0"));
         assert!(metrics.contains("nebula_sequencer_accountability_clean 1"));

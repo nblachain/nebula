@@ -2042,9 +2042,10 @@ RPC OPERATOR OPS, BACKUP, AND METRICS:
     uses /backup and nebula_backupManifest. Scrapeable monitoring uses
     /metrics. Public operators must verify block freshness, latest height/hash,
     state and snapshot roots, persisted snapshot path and presence, sync peer
-    count, mempool capacity, RPC request-size/rate-limit policy, admin RPC
-    state, bridge policy root, backup manifest root, and public ops readiness
-    gauges before opening a public testnet endpoint.
+    count, mempool capacity and full/admission rejection counts, RPC
+    request-size/rate-limit policy, admin RPC state, bridge policy root, backup
+    manifest root, and public ops readiness gauges before opening a public
+    testnet endpoint.
 
 RPC ADMIN BOUNDARY:
     Public RPC methods remain callable without an admin token. Operator-only
