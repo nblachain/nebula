@@ -71,6 +71,7 @@ The public launch suite covers:
 - deployment evidence root binding
 - public status manifest redaction
 - public endpoint and TLS pin evidence
+- HTTPS-only public status/probe endpoints
 - standalone public status/probe surface exact-shape validation
 - final package binding for the public status/probe surface
 - shared deployment witness root binding for bootstrap nodes, operators, and
@@ -147,6 +148,7 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - unexpected observer and signature verification fields
 - stale or mismatched roots, package identities, launch bundle identities, and
   public status manifest identities
+- public status/probe endpoints that do not use `https://`
 - operator and observer witness roots that do not match the deployment surface
 - bootstrap node attestation roots that do not bind the deployment witness root
 - operator, observer, and validator admission signature roots that do not bind

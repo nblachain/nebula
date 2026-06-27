@@ -36,9 +36,9 @@ Public status and probe verifiers let operators prove the exact public surface
 before wrapping it in deployment evidence.
 
 Deployment evidence binds bootstrap nodes, operators, and observers to one
-shared witness root for the launch bundle, public status, endpoint/TLS pins,
-policy claim, and public probe. Operator and observer signature roots must bind
-their signer identity and that witness root. Bootstrap node IDs/endpoints,
+shared witness root for the launch bundle, public status, HTTPS endpoint/TLS
+pins, policy claim, and public probe. Operator and observer signature roots must
+bind their signer identity and that witness root. Bootstrap node IDs/endpoints,
 operator IDs/keys, observer IDs/keys, and TLS certificate/public-key pins must
 be unique. Deployment evidence must be generated within `24` hours, expire
 within `7` days, carry TLS pins with at least `7` days remaining, and include a

@@ -628,6 +628,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "minimum_tls_pin_validity_ms": MIN_TLS_PIN_VALIDITY_MS,
                 "rollback_drill_max_age_ms": ROLLBACK_DRILL_MAX_AGE_MS,
                 "deployment_witness_root_verified": true,
+                "public_https_endpoint_required": true,
                 "unique_tls_cert_pins_required": true,
                 "unique_tls_public_key_pins_required": true,
                 "unique_bootstrap_node_ids_required": true,
@@ -1724,6 +1725,11 @@ fn verify_public_status_manifest(
         &public_status_manifest.launch_bundle_root,
         launch_bundle_root,
     );
+    require_https_endpoint(
+        errors,
+        "public_status_manifest.endpoint_url",
+        &public_status_manifest.endpoint_url,
+    );
     require_root(
         errors,
         "public_status_manifest.root",
@@ -1744,6 +1750,7 @@ fn verify_public_endpoint(
         &public_endpoint.url,
         &public_status_manifest.endpoint_url,
     );
+    require_https_endpoint(errors, "public_endpoint.url", &public_endpoint.url);
     require_eq(
         errors,
         "public_endpoint.public_status_manifest_root",
@@ -1842,6 +1849,7 @@ fn verify_public_probe(
     economics_root: &str,
 ) {
     require_eq(errors, "public_probe.url", &public_probe.url, endpoint_url);
+    require_https_endpoint(errors, "public_probe.url", &public_probe.url);
     if public_probe.status_code != 200 {
         errors.push(format!(
             "public_probe.status_code expected 200 but got {}",
@@ -2617,6 +2625,12 @@ fn require_hex_root(errors: &mut Vec<String>, label: &str, value: &str) {
     }
 }
 
+fn require_https_endpoint(errors: &mut Vec<String>, label: &str, endpoint: &str) {
+    if !endpoint.starts_with("https://") {
+        errors.push(format!("{label} must use an https:// endpoint"));
+    }
+}
+
 fn require_non_empty(errors: &mut Vec<String>, label: &str, value: &str) {
     if value.trim().is_empty() {
         errors.push(format!("{label} must not be empty"));
@@ -2755,6 +2769,27 @@ mod public_launch {
     }
 
     #[test]
+    fn public_status_rejects_non_https_endpoint() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_public_status_manifest_json_pretty()).unwrap();
+        value["endpoint_url"] = json!("http://testnet.nebula.example/status");
+        value["root"] = json!(public_status_manifest_root(
+            &serde_json::from_value::<PublicStatusManifest>(value.clone()).unwrap()
+        ));
+
+        let error = verify_public_status_manifest_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "public_status_manifest.endpoint_url must use an https:// endpoint"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
     fn public_probe_rejects_unexpected_body_fields() {
         let mut value = serde_json::from_str::<Value>(&sample_public_probe_json_pretty()).unwrap();
         value["body"]["unexpected_field"] = json!(true);
@@ -2762,6 +2797,26 @@ mod public_launch {
         let error = verify_public_probe_json(&value.to_string()).unwrap_err();
 
         assert!(matches!(error, AttestationError::MalformedJson(_)));
+    }
+
+    #[test]
+    fn public_probe_rejects_non_https_endpoint() {
+        let mut value = serde_json::from_str::<Value>(&sample_public_probe_json_pretty()).unwrap();
+        value["url"] = json!("http://testnet.nebula.example/status");
+        value["root"] = json!(public_probe_root(
+            &serde_json::from_value::<PublicProbe>(value.clone()).unwrap()
+        ));
+
+        let error = verify_public_probe_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "public_probe.url must use an https:// endpoint"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
     }
 
     #[test]
@@ -2897,6 +2952,24 @@ mod public_launch {
                     error
                         == "public_endpoint.tls_pins[0].not_after_unix_ms expires in less than seven days"
                 }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_non_https_public_endpoint() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["public_endpoint"]["url"] = json!("http://testnet.nebula.example/status");
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "public_endpoint.url must use an https:// endpoint"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
