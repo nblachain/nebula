@@ -353,6 +353,7 @@ fn prove_live_rpc_devnet_with_launch_artifacts_binds_rehearsal_to_bundle() {
         &bundle,
     );
 
+    let runtime_surface = dir.join("live-rpc-devnet-runtime-surface.json");
     let stdout = run_nebula_strings(&[
         "--prove-live-rpc-devnet".to_string(),
         "--launch-package-bundle".to_string(),
@@ -371,9 +372,14 @@ fn prove_live_rpc_devnet_with_launch_artifacts_binds_rehearsal_to_bundle() {
         path_arg(&acceptance),
         "--genesis-manifest".to_string(),
         path_arg(&genesis),
+        "--live-rpc-devnet-runtime-surface-out".to_string(),
+        path_arg(&runtime_surface),
         "--json".to_string(),
     ]);
     let report: Value = serde_json::from_str(&stdout).expect("live rpc devnet report json");
+    let runtime_surface_evidence: Value =
+        serde_json::from_str(&fs::read_to_string(&runtime_surface).expect("read runtime surface"))
+            .expect("runtime surface evidence json");
     let bundle_manifest: Value =
         serde_json::from_str(&fs::read_to_string(&bundle).expect("read bundle manifest"))
             .expect("bundle manifest json");
@@ -387,7 +393,17 @@ fn prove_live_rpc_devnet_with_launch_artifacts_binds_rehearsal_to_bundle() {
         report["launch_package_bundle_root"],
         bundle_manifest["root"]
     );
+    assert_eq!(runtime_surface_evidence["capture_mode"], "loopback-devnet");
+    assert_eq!(
+        runtime_surface_evidence["root"],
+        report["runtime_surface_root"]
+    );
+    assert_eq!(
+        runtime_surface_evidence["status"]["launch_package_bundle_root"],
+        bundle_manifest["root"]
+    );
     assert_hex64(&report, "launch_package_bundle_root");
+    assert_hex64(&report, "runtime_surface_root");
     assert_hex64(&report, "rehearsal_root");
 
     fs::remove_dir_all(&dir).expect("remove temp rehearsal dir");

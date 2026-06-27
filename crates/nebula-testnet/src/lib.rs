@@ -827,6 +827,7 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub runtime_surface_root: String,
     pub runtime_surface_capture_mode: String,
     pub live_rpc_devnet_rehearsal_root: String,
+    pub live_rpc_devnet_runtime_surface_root: String,
     pub validator_set_root: String,
     pub genesis_root: String,
     pub endpoint_url: String,
@@ -835,6 +836,17 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub observer_count: usize,
     pub region_count: usize,
     pub certified_at_unix_ms: u128,
+    pub generated_at_unix_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PublicTestnetLaunchReadinessRejectionReport {
+    pub public_launch_ready: bool,
+    pub level: &'static str,
+    pub blocking_gaps: Vec<String>,
+    pub errors: Vec<String>,
+    pub required_attestation: &'static str,
+    pub public_launch_readiness_rejection_root: String,
     pub generated_at_unix_ms: u128,
 }
 
@@ -2120,10 +2132,14 @@ pub fn prove_live_rpc_devnet_rehearsal_json_pretty() -> Result<String, Attestati
 }
 
 pub fn prove_live_rpc_devnet_rehearsal() -> Result<LiveRpcDevnetRehearsalReport, AttestationError> {
-    let (sequencer_binding, follower_binding) = live_runtime_launch_bindings()?;
-    let (report, _evidence) =
-        prove_live_rpc_devnet_rehearsal_with_bindings(sequencer_binding, follower_binding)?;
+    let (report, _evidence) = prove_live_rpc_devnet_rehearsal_with_evidence()?;
     Ok(report)
+}
+
+pub fn prove_live_rpc_devnet_rehearsal_with_evidence(
+) -> Result<(LiveRpcDevnetRehearsalReport, Value), AttestationError> {
+    let (sequencer_binding, follower_binding) = live_runtime_launch_bindings()?;
+    prove_live_rpc_devnet_rehearsal_with_bindings(sequencer_binding, follower_binding)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2137,6 +2153,30 @@ pub fn prove_live_rpc_devnet_rehearsal_with_jsons(
     operator_acceptance_json: &str,
     genesis_manifest_json: &str,
 ) -> Result<LiveRpcDevnetRehearsalReport, AttestationError> {
+    let (report, _evidence) = prove_live_rpc_devnet_rehearsal_with_jsons_and_evidence(
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    Ok(report)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn prove_live_rpc_devnet_rehearsal_with_jsons_and_evidence(
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<(LiveRpcDevnetRehearsalReport, Value), AttestationError> {
     let sequencer_binding = build_runtime_launch_binding_from_jsons(
         deployment_attestation_json,
         public_status_json,
@@ -2159,9 +2199,7 @@ pub fn prove_live_rpc_devnet_rehearsal_with_jsons(
         launch_package_bundle_json,
         "validator-b",
     )?;
-    let (report, _evidence) =
-        prove_live_rpc_devnet_rehearsal_with_bindings(sequencer_binding, follower_binding)?;
-    Ok(report)
+    prove_live_rpc_devnet_rehearsal_with_bindings(sequencer_binding, follower_binding)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6330,6 +6368,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
     public_observer_confirmation_json: &str,
     runtime_surface_evidence_json: &str,
     live_rpc_devnet_rehearsal_json: &str,
+    live_rpc_devnet_runtime_surface_evidence_json: &str,
     operator_join_confirmation_json: &str,
     validator_join_receipt_json: &str,
     validator_activation_json: &str,
@@ -6360,6 +6399,8 @@ pub fn verify_public_testnet_launch_readiness_jsons(
     )?;
     let runtime_surface = verify_runtime_surface_evidence_json(runtime_surface_evidence_json)?;
     let live_rehearsal = verify_live_rpc_devnet_rehearsal_json(live_rpc_devnet_rehearsal_json)?;
+    let live_runtime_surface =
+        verify_runtime_surface_evidence_json(live_rpc_devnet_runtime_surface_evidence_json)?;
     let runtime_surface_evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(
         runtime_surface_evidence_json.trim_start_matches('\u{feff}'),
     )
@@ -6395,6 +6436,78 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         &live_rehearsal.launch_package_bundle_root,
         &certificate.launch_package_bundle_root,
     );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_runtime_surface.capture_mode",
+        &live_runtime_surface.capture_mode,
+        RUNTIME_SURFACE_CAPTURE_MODE_LOOPBACK_DEVNET,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_runtime_surface.runtime_surface_root",
+        &live_runtime_surface.runtime_surface_root,
+        &live_rehearsal.runtime_surface_root,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_runtime_surface.endpoint_url",
+        &live_runtime_surface.endpoint_url,
+        &certificate.endpoint_url,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_runtime_surface.launch_package_bundle_root",
+        &live_runtime_surface.launch_package_bundle_root,
+        &certificate.launch_package_bundle_root,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_runtime_surface.launch_package_root",
+        &live_runtime_surface.launch_package_root,
+        &certificate.launch_package_root,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_runtime_surface.fee_policy_root",
+        &live_runtime_surface.fee_policy_root,
+        &certificate.fee_policy_root,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_runtime_surface.validator_set_root",
+        &live_runtime_surface.validator_set_root,
+        &certificate.validator_set_root,
+    );
+    require_eq(
+        &mut errors,
+        "live_rpc_devnet_runtime_surface.genesis_root",
+        &live_runtime_surface.genesis_root,
+        &certificate.genesis_root,
+    );
+    if live_runtime_surface.latest_height != live_rehearsal.latest_height {
+        errors.push(format!(
+            "live_rpc_devnet_runtime_surface.latest_height expected {} but got {}",
+            live_rehearsal.latest_height, live_runtime_surface.latest_height
+        ));
+    }
+    if live_runtime_surface.total_nxmr_fees_units != live_rehearsal.total_nxmr_fees_units {
+        errors.push(format!(
+            "live_rpc_devnet_runtime_surface.total_nxmr_fees_units expected {} but got {}",
+            live_rehearsal.total_nxmr_fees_units, live_runtime_surface.total_nxmr_fees_units
+        ));
+    }
+    if live_runtime_surface.buyback_pool_nebulai != live_rehearsal.buyback_pool_nebulai {
+        errors.push(format!(
+            "live_rpc_devnet_runtime_surface.buyback_pool_nebulai expected {} but got {}",
+            live_rehearsal.buyback_pool_nebulai, live_runtime_surface.buyback_pool_nebulai
+        ));
+    }
+    if live_runtime_surface.validator_reward_nebulai != live_rehearsal.validator_reward_nebulai {
+        errors.push(format!(
+            "live_rpc_devnet_runtime_surface.validator_reward_nebulai expected {} but got {}",
+            live_rehearsal.validator_reward_nebulai, live_runtime_surface.validator_reward_nebulai
+        ));
+    }
     require_eq(
         &mut errors,
         "runtime_surface.capture_mode",
@@ -6468,6 +6581,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         runtime_surface_root: certificate.runtime_surface_root,
         runtime_surface_capture_mode: runtime_surface.capture_mode,
         live_rpc_devnet_rehearsal_root: live_rehearsal.rehearsal_root,
+        live_rpc_devnet_runtime_surface_root: live_runtime_surface.runtime_surface_root,
         validator_set_root: certificate.validator_set_root,
         genesis_root: certificate.genesis_root,
         endpoint_url: certificate.endpoint_url,
@@ -6481,6 +6595,29 @@ pub fn verify_public_testnet_launch_readiness_jsons(
     report.public_launch_readiness_root = public_testnet_launch_readiness_root(&report);
 
     Ok(report)
+}
+
+pub fn public_testnet_launch_readiness_rejection_report(
+    errors: &[String],
+) -> PublicTestnetLaunchReadinessRejectionReport {
+    let blocking_gaps = if errors.is_empty() {
+        vec!["public-testnet-launch-readiness-unknown-blocker".to_string()]
+    } else {
+        errors.to_vec()
+    };
+    let mut report = PublicTestnetLaunchReadinessRejectionReport {
+        public_launch_ready: false,
+        level: "public-testnet-launch-readiness-rejected",
+        blocking_gaps,
+        errors: errors.to_vec(),
+        required_attestation:
+            "operator-signed public endpoint, runtime surface, observer, rollback, and launch certificate evidence",
+        public_launch_readiness_rejection_root: String::new(),
+        generated_at_unix_ms: unix_ms(),
+    };
+    report.public_launch_readiness_rejection_root =
+        public_testnet_launch_readiness_rejection_root(&report);
+    report
 }
 
 pub fn verify_live_rpc_devnet_rehearsal_json(
@@ -11788,6 +11925,7 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "runtime_surface_root": report.runtime_surface_root,
         "runtime_surface_capture_mode": report.runtime_surface_capture_mode,
         "live_rpc_devnet_rehearsal_root": report.live_rpc_devnet_rehearsal_root,
+        "live_rpc_devnet_runtime_surface_root": report.live_rpc_devnet_runtime_surface_root,
         "validator_set_root": report.validator_set_root,
         "genesis_root": report.genesis_root,
         "endpoint_url": report.endpoint_url,
@@ -11796,6 +11934,20 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "observer_count": report.observer_count,
         "region_count": report.region_count,
         "certified_at_unix_ms": report.certified_at_unix_ms,
+        "generated_at_unix_ms": report.generated_at_unix_ms,
+    }))
+}
+
+fn public_testnet_launch_readiness_rejection_root(
+    report: &PublicTestnetLaunchReadinessRejectionReport,
+) -> String {
+    stable_root(&json!({
+        "launch_readiness_rejection_domain": "nebula-public-testnet-launch-readiness-rejection-v1",
+        "level": report.level,
+        "public_launch_ready": report.public_launch_ready,
+        "blocking_gaps": report.blocking_gaps,
+        "errors": report.errors,
+        "required_attestation": report.required_attestation,
         "generated_at_unix_ms": report.generated_at_unix_ms,
     }))
 }
@@ -15981,17 +16133,20 @@ mod public_launch {
             &genesis,
         )
         .unwrap();
-        let runtime_surface = build_live_rpc_devnet_runtime_surface_evidence_json_pretty(
-            &bundle,
-            &deployment,
-            &public_status,
-            &public_probe,
-            &validators,
-            &handoff,
-            &acceptance,
-            &genesis,
-        )
-        .unwrap();
+        let (live_rehearsal_report, runtime_surface_evidence) =
+            prove_live_rpc_devnet_rehearsal_with_jsons_and_evidence(
+                &bundle,
+                &deployment,
+                &public_status,
+                &public_probe,
+                &validators,
+                &handoff,
+                &acceptance,
+                &genesis,
+            )
+            .unwrap();
+        let runtime_surface = serde_json::to_string_pretty(&runtime_surface_evidence).unwrap();
+        let live_rehearsal = serde_json::to_string_pretty(&live_rehearsal_report).unwrap();
         let certificate = build_public_testnet_launch_certificate_json_pretty(
             &observer_confirmation,
             &runtime_surface,
@@ -16037,26 +16192,12 @@ mod public_launch {
         assert_eq!(report.region_count, 2);
         assert_eq!(report.endpoint_url, "https://testnet.nebula.example/status");
 
-        let live_rehearsal = serde_json::to_string_pretty(
-            &prove_live_rpc_devnet_rehearsal_with_jsons(
-                &bundle,
-                &deployment,
-                &public_status,
-                &public_probe,
-                &validators,
-                &handoff,
-                &acceptance,
-                &genesis,
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
         let loopback_ready_error = verify_public_testnet_launch_readiness_jsons(
             &certificate,
             &observer_confirmation,
             &runtime_surface,
             &live_rehearsal,
+            &runtime_surface,
             &join_confirmation,
             &join,
             &activation,
@@ -16115,6 +16256,7 @@ mod public_launch {
             &observer_confirmation,
             &external_runtime_surface,
             &live_rehearsal,
+            &runtime_surface,
             &join_confirmation,
             &join,
             &activation,
@@ -16164,6 +16306,46 @@ mod public_launch {
                 .unwrap()
                 .rehearsal_root
         );
+        assert_eq!(
+            readiness.live_rpc_devnet_runtime_surface_root,
+            verify_runtime_surface_evidence_json(&runtime_surface)
+                .unwrap()
+                .runtime_surface_root
+        );
+
+        let mut forged_rehearsal_surface_root =
+            serde_json::from_str::<LiveRpcDevnetRehearsalReport>(&live_rehearsal).unwrap();
+        forged_rehearsal_surface_root.runtime_surface_root =
+            hex_64("forged-live-rpc-devnet-runtime-surface-root");
+        forged_rehearsal_surface_root.rehearsal_root =
+            live_rpc_devnet_rehearsal_root(&forged_rehearsal_surface_root);
+        let forged_rehearsal_surface_root =
+            serde_json::to_string_pretty(&forged_rehearsal_surface_root).unwrap();
+        let forged_surface_ready_error = verify_public_testnet_launch_readiness_jsons(
+            &external_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &forged_rehearsal_surface_root,
+            &runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match forged_surface_ready_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error.starts_with("live_rpc_devnet_runtime_surface.runtime_surface_root expected ")
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
 
         let mut wrong_rehearsal =
             serde_json::from_str::<LiveRpcDevnetRehearsalReport>(&live_rehearsal).unwrap();
@@ -16176,6 +16358,7 @@ mod public_launch {
             &observer_confirmation,
             &external_runtime_surface,
             &wrong_rehearsal,
+            &runtime_surface,
             &join_confirmation,
             &join,
             &activation,
@@ -16238,6 +16421,7 @@ mod public_launch {
             &observer_confirmation,
             &wrong_endpoint_runtime_surface,
             &live_rehearsal,
+            &runtime_surface,
             &join_confirmation,
             &join,
             &activation,
@@ -16290,6 +16474,7 @@ mod public_launch {
             &observer_confirmation,
             &mismatched_runtime_surface,
             &live_rehearsal,
+            &runtime_surface,
             &join_confirmation,
             &join,
             &activation,
