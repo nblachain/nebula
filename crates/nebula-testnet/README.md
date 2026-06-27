@@ -29,7 +29,7 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-operator-acceptance /tmp/nebula-operator-acceptance.json --operator-handoff /tmp/nebula-operator-handoff.json --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-genesis-manifest --deployment-attestation /tmp/nebula-attestation.json --validator-set /tmp/nebula-validator-set.json > /tmp/nebula-genesis.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-genesis-manifest /tmp/nebula-genesis.json --json
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --genesis-manifest /tmp/nebula-genesis.json --json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-launch-package --deployment-attestation /tmp/nebula-attestation.json --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --validator-set /tmp/nebula-validator-set.json --operator-handoff /tmp/nebula-operator-handoff.json --operator-acceptance /tmp/nebula-operator-acceptance.json --genesis-manifest /tmp/nebula-genesis.json --json
 ```
 
 The readiness report keeps local testnet acceptance separate from public launch
@@ -154,9 +154,10 @@ check requires the genesis timestamp to fall inside the deployment attestation
 validity window.
 
 The launch-package verifier checks that the deployment, public surface,
-validator set, and genesis artifacts all agree before operators advance to a
-live rollout, with deployment attestations expiring within `7` days of
-generation. It reports the verified deployment observer quorum count and
+validator set, operator handoff, operator acceptance, and genesis artifacts all
+agree before operators advance to a live rollout, with deployment attestations
+expiring within `7` days of generation. It reports the verified deployment
+observer quorum count and
 deployment region count, public-surface root, operator-approval root,
 observer-confirmation root, bootstrap-roster root, operator-roster root,
 matched reward-account count, reward-ledger root, rollback-readiness root,
@@ -167,4 +168,6 @@ validator consensus/network keys that reuse deployment witness keys, admitted
 validators that do not map to
 attested deployment operators and bootstrap nodes, validator P2P hosts that do
 not match their attested bootstrap endpoint host, plus deployment operators or
-bootstrap nodes that are not represented by an admitted validator.
+bootstrap nodes that are not represented by an admitted validator. The strict
+package gate also verifies that operator acceptance entries bind the same
+handoff root and accepted operator/validator counts.

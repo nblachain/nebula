@@ -886,6 +886,9 @@ pub fn readiness_report() -> NebulaReadiness {
                 "genesis_manifest_verified": true,
                 "validator_deployment_binding_root_reported": true,
                 "operator_handoff_root_reported": true,
+                "operator_handoff_verified": true,
+                "operator_acceptance_verified": true,
+                "operator_acceptance_counts_bind_launch_package": true,
                 "public_status_binds_deployment_attestation": true,
                 "public_probe_binds_deployment_attestation": true,
                 "validator_set_binds_deployment_operators": true,
@@ -2276,6 +2279,67 @@ pub fn verify_launch_package_jsons(
         native_base_unit: genesis_report.native_base_unit,
         bridged_fee_token: genesis_report.bridged_fee_token,
     })
+}
+
+pub fn verify_launch_package_with_operator_acceptance_jsons(
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<LaunchPackageReport, AttestationError> {
+    let handoff_report = verify_operator_handoff_jsons(
+        operator_handoff_json,
+        deployment_attestation_json,
+        validator_set_json,
+    )?;
+    let acceptance_report = verify_operator_acceptance_jsons(
+        operator_acceptance_json,
+        operator_handoff_json,
+        deployment_attestation_json,
+        validator_set_json,
+    )?;
+    let launch_report = verify_launch_package_jsons(
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        genesis_manifest_json,
+    )?;
+    let mut errors = Vec::new();
+
+    if launch_report.operator_handoff_root != handoff_report.operator_handoff_root {
+        errors.push(format!(
+            "launch package operator_handoff_root does not match operator handoff root {}",
+            handoff_report.operator_handoff_root
+        ));
+    }
+    if acceptance_report.operator_handoff_root != handoff_report.operator_handoff_root {
+        errors.push(format!(
+            "operator acceptance operator_handoff_root does not match operator handoff root {}",
+            handoff_report.operator_handoff_root
+        ));
+    }
+    if acceptance_report.accepted_operator_count != launch_report.matched_operator_count {
+        errors.push(format!(
+            "operator acceptance accepted_operator_count expected {} but got {}",
+            launch_report.matched_operator_count, acceptance_report.accepted_operator_count
+        ));
+    }
+    if acceptance_report.accepted_validator_count != launch_report.matched_validator_count {
+        errors.push(format!(
+            "operator acceptance accepted_validator_count expected {} but got {}",
+            launch_report.matched_validator_count, acceptance_report.accepted_validator_count
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    Ok(launch_report)
 }
 
 pub fn verify_deployment_attestation_json(
@@ -6908,6 +6972,69 @@ mod public_launch {
         assert_eq!(report.deployment_observer_count, 2);
         assert_eq!(report.deployment_region_count, 2);
         assert_eq!(report.bootstrap_node_count, 2);
+    }
+
+    #[test]
+    fn launch_package_with_operator_acceptance_verifies_consistent_artifacts() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+
+        let report = verify_launch_package_with_operator_acceptance_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        assert!(report.launch_package_ready);
+        assert_eq!(report.operator_handoff_root.len(), 64);
+        assert_eq!(report.matched_operator_count, 2);
+        assert_eq!(report.matched_validator_count, 2);
+    }
+
+    #[test]
+    fn launch_package_with_operator_acceptance_rejects_unaccepted_entry() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let mut acceptance = serde_json::from_str::<Value>(
+            &build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        acceptance["entries"][0]["accepted"] = json!(false);
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+
+        let error = verify_launch_package_with_operator_acceptance_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance.to_string(),
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "entries[0].accepted must be true"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
     }
 
     #[test]
