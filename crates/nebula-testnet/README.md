@@ -126,9 +126,10 @@ admission into the root artifact used to start a public testnet at activation
 height `1` with validator-set epoch `0`. Genesis deployment, validator-set,
 public-surface, operator-approval, observer-confirmation, bootstrap-roster,
 rollback-readiness, deployment-validity, operator-roster, reward-ledger,
-deployment-quorum, fee-policy, and operational-evidence roots must be disjoint from
-validator-admission roots, and initial validator, operator, and region counts
-must match the verified validator set.
+deployment-quorum, validator-deployment-binding, fee-policy, and
+operational-evidence roots must be disjoint from validator-admission roots, and
+initial validator, operator, and region counts must match the verified
+validator set.
 Genesis manifests older than `24` hours are rejected. The final launch-package
 check requires the genesis timestamp to fall inside the deployment attestation
 validity window.
@@ -141,9 +142,9 @@ deployment region count, public-surface root, operator-approval root,
 observer-confirmation root, bootstrap-roster root, operator-roster root,
 matched reward-account count, reward-ledger root, rollback-readiness root,
 deployment-validity root, operational-evidence root, and the genesis fee token
-identities. It also reports the deployment-quorum root and rejects validator
-consensus/network keys that reuse deployment witness keys, admitted validators
-that do not map to
+identities. It also reports the deployment-quorum root and
+validator-deployment-binding root and rejects validator consensus/network keys
+that reuse deployment witness keys, admitted validators that do not map to
 attested deployment operators and bootstrap nodes, validator P2P hosts that do
 not match their attested bootstrap endpoint host, plus deployment operators or
 bootstrap nodes that are not represented by an admitted validator.

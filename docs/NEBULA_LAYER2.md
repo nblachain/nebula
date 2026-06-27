@@ -336,14 +336,15 @@ bootstrap-roster root, operator-roster root, reward-ledger root, validator,
 operator, and region counts, total genesis power, fixed activation height `1`,
 public-surface root, operator-approval root, observer-confirmation root,
 rollback-readiness root, deployment-validity root, operational-evidence root,
-deployment-quorum root, and fee token identities. The verifier keeps
+deployment-quorum root, validator-deployment-binding root, and fee token
+identities. The verifier keeps
 deployment, public-surface, operator-approval, observer-confirmation,
 rollback-readiness, deployment-validity, deployment-quorum,
 bootstrap-roster,
 operational-evidence, validator-set, operator-roster, reward-ledger,
-fee-policy, and validator-admission roots in separate domains. The final
-launch-package check requires the genesis timestamp to be fresh and to fall
-inside the deployment attestation validity window.
+validator-deployment-binding, fee-policy, and validator-admission roots in
+separate domains. The final launch-package check requires the genesis timestamp
+to be fresh and to fall inside the deployment attestation validity window.
 
 Operators can build and verify the launch manifest with:
 
@@ -362,20 +363,21 @@ evidence root, validator-set root, validator-set epoch, validator count, total
 operator count, region count, public-surface root, bootstrap-roster root,
 operator-approval root, observer-confirmation root, rollback-readiness root,
 deployment-validity root, operator-roster root, reward-ledger root,
-deployment-quorum root, operational-evidence root, genesis power, and
-deployment validity window produced by the other verified files. It also rejects
-validator consensus/network keys that reuse deployment witness keys,
-validator-set manifests whose admitted validators do not map to the attested
-deployment operators and bootstrap nodes, validator P2P hosts that do not match
-their attested bootstrap endpoint host, and deployment operators or bootstrap
-nodes that are not represented by an admitted validator. The launch-package
-report also exposes the deployment observer quorum count and deployment region
-count verified from the attestation, the public-surface root, the
-operator-approval root, the observer-confirmation root, the bootstrap-roster
-root, the rollback-readiness root, the operational-evidence root, the
-deployment-validity root, the deployment-quorum root, the operator-roster root,
-the matched reward-account count, the reward-ledger root, and the genesis fee
-token identities.
+deployment-quorum root, validator-deployment-binding root,
+operational-evidence root, genesis power, and deployment validity window
+produced by the other verified files. It also rejects validator
+consensus/network keys that reuse deployment witness keys, validator-set
+manifests whose admitted validators do not map to the attested deployment
+operators and bootstrap nodes, validator P2P hosts that do not match their
+attested bootstrap endpoint host, and deployment operators or bootstrap nodes
+that are not represented by an admitted validator. The launch-package report
+also exposes the deployment observer quorum count and deployment region count
+verified from the attestation, the public-surface root, the operator-approval
+root, the observer-confirmation root, the bootstrap-roster root, the
+rollback-readiness root, the operational-evidence root, the deployment-validity
+root, the deployment-quorum root, the validator-deployment-binding root, the
+operator-roster root, the matched reward-account count, the reward-ledger root,
+and the genesis fee token identities.
 
 Operators can verify the full package with:
 

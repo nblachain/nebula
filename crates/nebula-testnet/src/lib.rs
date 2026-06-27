@@ -376,6 +376,7 @@ pub struct GenesisManifest {
     pub validator_admission_root: String,
     pub operator_roster_root: String,
     pub reward_ledger_root: String,
+    pub validator_deployment_binding_root: String,
     pub initial_validator_count: usize,
     pub initial_operator_count: usize,
     pub initial_region_count: usize,
@@ -404,6 +405,7 @@ pub struct GenesisManifestReport {
     pub validator_set_epoch: u64,
     pub operator_roster_root: String,
     pub reward_ledger_root: String,
+    pub validator_deployment_binding_root: String,
     pub initial_validator_count: usize,
     pub initial_operator_count: usize,
     pub initial_region_count: usize,
@@ -437,6 +439,7 @@ pub struct LaunchPackageReport {
     pub validator_set_epoch: u64,
     pub operator_roster_root: String,
     pub reward_ledger_root: String,
+    pub validator_deployment_binding_root: String,
     pub genesis_root: String,
     pub matched_validator_count: usize,
     pub matched_reward_account_count: usize,
@@ -705,6 +708,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "validator_admission_root_required": true,
                 "operator_roster_root_required": true,
                 "reward_ledger_root_required": true,
+                "validator_deployment_binding_root_required": true,
                 "artifact_root_domains_disjoint": true,
                 "initial_operator_count_required": true,
                 "initial_region_count_required": true,
@@ -776,6 +780,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "public_surface_root_reported": true,
                 "validator_set_verified": true,
                 "genesis_manifest_verified": true,
+                "validator_deployment_binding_root_reported": true,
                 "public_status_binds_deployment_attestation": true,
                 "public_probe_binds_deployment_attestation": true,
                 "validator_set_binds_deployment_operators": true,
@@ -799,6 +804,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "genesis_binds_validator_count": true,
                 "genesis_binds_operator_roster_root": true,
                 "genesis_binds_reward_ledger_root": true,
+                "genesis_binds_validator_deployment_binding_root": true,
                 "validator_reward_ledger_reported": true,
                 "validator_operator_roster_reported": true,
                 "genesis_binds_total_power": true,
@@ -1302,6 +1308,14 @@ pub fn build_genesis_manifest_json_pretty(
 ) -> Result<String, AttestationError> {
     let deployment_report = verify_deployment_attestation_json(deployment_attestation_json)?;
     let validator_set_report = verify_validator_set_json(validator_set_json)?;
+    let deployment_attestation = serde_json::from_str::<DeploymentAttestation>(
+        deployment_attestation_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let validator_set_manifest = serde_json::from_str::<ValidatorSetManifest>(
+        validator_set_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
     let readiness = readiness_report();
     let fee_policy_root = readiness.status_roots["economics"]
         .as_str()
@@ -1332,6 +1346,10 @@ pub fn build_genesis_manifest_json_pretty(
         validator_admission_root,
         operator_roster_root: validator_set_report.operator_roster_root,
         reward_ledger_root: validator_set_report.reward_ledger_root,
+        validator_deployment_binding_root: validator_deployment_binding_root(
+            &deployment_attestation,
+            &validator_set_manifest,
+        ),
         initial_validator_count: validator_set_report.validator_count,
         initial_operator_count: validator_set_report.operator_count,
         initial_region_count: validator_set_report.region_count,
@@ -1458,6 +1476,11 @@ pub fn verify_genesis_manifest_json(
         "reward_ledger_root",
         &manifest.reward_ledger_root,
     );
+    require_hex_root(
+        &mut errors,
+        "validator_deployment_binding_root",
+        &manifest.validator_deployment_binding_root,
+    );
     verify_genesis_root_domains(&mut errors, &manifest);
     if manifest.initial_validator_count < MIN_PUBLIC_TESTNET_VALIDATORS {
         errors.push(format!(
@@ -1523,6 +1546,7 @@ pub fn verify_genesis_manifest_json(
         validator_set_epoch: manifest.validator_set_epoch,
         operator_roster_root: manifest.operator_roster_root,
         reward_ledger_root: manifest.reward_ledger_root,
+        validator_deployment_binding_root: manifest.validator_deployment_binding_root,
         initial_validator_count: manifest.initial_validator_count,
         initial_operator_count: manifest.initial_operator_count,
         initial_region_count: manifest.initial_region_count,
@@ -1581,6 +1605,10 @@ fn verify_genesis_root_domains(errors: &mut Vec<String>, manifest: &GenesisManif
             manifest.operator_roster_root.as_str(),
         ),
         ("reward_ledger_root", manifest.reward_ledger_root.as_str()),
+        (
+            "validator_deployment_binding_root",
+            manifest.validator_deployment_binding_root.as_str(),
+        ),
     ] {
         if let Some(previous_label) = roots_by_value.insert(root, label) {
             errors.push(format!("{label} must differ from {previous_label}"));
@@ -1622,6 +1650,8 @@ pub fn verify_launch_package_jsons(
     let economics_root = readiness.status_roots["economics"]
         .as_str()
         .expect("economics root is a string");
+    let expected_validator_deployment_binding_root =
+        validator_deployment_binding_root(&deployment_attestation, &validator_set_manifest);
 
     verify_public_status_manifest(
         &mut errors,
@@ -1739,6 +1769,14 @@ pub fn verify_launch_package_jsons(
             validator_set_report.reward_ledger_root
         ));
     }
+    if genesis_report.validator_deployment_binding_root
+        != expected_validator_deployment_binding_root
+    {
+        errors.push(format!(
+            "genesis validator_deployment_binding_root does not match validator deployment binding root {}",
+            expected_validator_deployment_binding_root
+        ));
+    }
     if genesis_report.initial_validator_count != validator_set_report.validator_count {
         errors.push(format!(
             "genesis initial_validator_count expected {} but got {}",
@@ -1802,6 +1840,7 @@ pub fn verify_launch_package_jsons(
         validator_set_epoch: genesis_report.validator_set_epoch,
         operator_roster_root: genesis_report.operator_roster_root,
         reward_ledger_root: genesis_report.reward_ledger_root,
+        validator_deployment_binding_root: expected_validator_deployment_binding_root,
         genesis_root: genesis_report.genesis_root,
         matched_validator_count: validator_set_manifest.validators.len(),
         matched_reward_account_count: validator_set_report.reward_account_count,
@@ -3865,6 +3904,63 @@ fn validator_reward_ledger_root(manifest: &ValidatorSetManifest) -> String {
     }))
 }
 
+fn validator_deployment_binding_root(
+    attestation: &DeploymentAttestation,
+    manifest: &ValidatorSetManifest,
+) -> String {
+    let bootstrap_nodes_by_id = attestation
+        .bootstrap_nodes
+        .iter()
+        .map(|node| (node.node_id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let operators_by_id = attestation
+        .operators
+        .iter()
+        .map(|operator| (operator.operator_id.as_str(), operator))
+        .collect::<BTreeMap<_, _>>();
+    let mut bindings = manifest
+        .validators
+        .iter()
+        .map(|validator| {
+            let operator = operators_by_id.get(validator.operator_id.as_str());
+            let bootstrap_node = bootstrap_nodes_by_id.get(validator.node_id.as_str());
+            json!({
+                "validator_id": validator.validator_id,
+                "operator_id": validator.operator_id,
+                "node_id": validator.node_id,
+                "region": validator.region,
+                "p2p_endpoint": validator.p2p_endpoint,
+                "p2p_host": endpoint_host(&validator.p2p_endpoint, "tcp://"),
+                "consensus_public_key": validator.consensus_public_key,
+                "network_public_key": validator.network_public_key,
+                "reward_account": validator.reward_account,
+                "genesis_power": validator.genesis_power,
+                "operator_region": operator.map(|operator| operator.region.as_str()),
+                "operator_public_key": operator.map(|operator| operator.public_key.as_str()),
+                "bootstrap_region": bootstrap_node.map(|node| node.region.as_str()),
+                "bootstrap_endpoint": bootstrap_node.map(|node| node.endpoint.as_str()),
+                "bootstrap_endpoint_host": bootstrap_node
+                    .and_then(|node| endpoint_host(&node.endpoint, "https://")),
+                "bootstrap_attestation_root": bootstrap_node
+                    .map(|node| node.attestation_root.as_str()),
+            })
+        })
+        .collect::<Vec<_>>();
+    bindings.sort_by(|left, right| left.to_string().cmp(&right.to_string()));
+
+    stable_root(&json!({
+        "binding_domain": "nebula-validator-deployment-binding-v1",
+        "chain_id": attestation.chain_id,
+        "launch_bundle_root": attestation.launch_bundle.root,
+        "validator_set_root": manifest.root,
+        "validator_set_epoch": manifest.epoch,
+        "minimum_validator_count": MIN_PUBLIC_TESTNET_VALIDATORS,
+        "minimum_operator_count": MIN_PUBLIC_TESTNET_OPERATORS,
+        "minimum_region_count": MIN_PUBLIC_TESTNET_REGIONS,
+        "bindings": bindings,
+    }))
+}
+
 fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
     stable_root(&json!({
         "chain_id": manifest.chain_id,
@@ -3886,6 +3982,7 @@ fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
         "validator_admission_root": manifest.validator_admission_root,
         "operator_roster_root": manifest.operator_roster_root,
         "reward_ledger_root": manifest.reward_ledger_root,
+        "validator_deployment_binding_root": manifest.validator_deployment_binding_root,
         "initial_validator_count": manifest.initial_validator_count,
         "initial_operator_count": manifest.initial_operator_count,
         "initial_region_count": manifest.initial_region_count,
@@ -5850,6 +5947,7 @@ mod public_launch {
         assert_eq!(report.validator_set_root.len(), 64);
         assert_eq!(report.operator_roster_root.len(), 64);
         assert_eq!(report.reward_ledger_root.len(), 64);
+        assert_eq!(report.validator_deployment_binding_root.len(), 64);
     }
 
     #[test]
@@ -5877,6 +5975,7 @@ mod public_launch {
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.operator_roster_root.len(), 64);
         assert_eq!(report.reward_ledger_root.len(), 64);
+        assert_eq!(report.validator_deployment_binding_root.len(), 64);
     }
 
     #[test]
@@ -6059,6 +6158,7 @@ mod public_launch {
         assert_eq!(report.validator_set_epoch, PUBLIC_TESTNET_GENESIS_EPOCH);
         assert_eq!(report.operator_roster_root.len(), 64);
         assert_eq!(report.reward_ledger_root.len(), 64);
+        assert_eq!(report.validator_deployment_binding_root.len(), 64);
         assert_eq!(report.genesis_root.len(), 64);
         assert_eq!(report.matched_validator_count, 2);
         assert_eq!(report.matched_reward_account_count, 2);
@@ -6483,6 +6583,40 @@ mod public_launch {
                 assert!(errors
                     .iter()
                     .any(|error| error.starts_with("genesis reward_ledger_root does not match")));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_rejects_mismatched_genesis_validator_deployment_binding_root() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let mut genesis = serde_json::from_str::<Value>(
+            &build_genesis_manifest_json_pretty(&deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        genesis["validator_deployment_binding_root"] =
+            json!(hex_64("different-validator-deployment-binding-root"));
+        genesis["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(genesis.clone()).unwrap()
+        ));
+
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &genesis.to_string(),
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| error
+                    .starts_with("genesis validator_deployment_binding_root does not match")));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
