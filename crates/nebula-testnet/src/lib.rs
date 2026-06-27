@@ -664,6 +664,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "genesis_binds_validator_set_root": true,
                 "genesis_binds_validator_count": true,
                 "genesis_binds_total_power": true,
+                "genesis_time_within_deployment_window": true,
             })),
             "public_status_surface": stable_root(&json!({
                 "status": "deployment-attested",
@@ -1305,6 +1306,10 @@ pub fn verify_launch_package_jsons(
         validator_set_json.trim_start_matches('\u{feff}'),
     )
     .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let genesis_manifest = serde_json::from_str::<GenesisManifest>(
+        genesis_manifest_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
     let validator_set_report = verify_validator_set_json(validator_set_json)?;
     let genesis_report = verify_genesis_manifest_json(genesis_manifest_json)?;
     let mut errors = Vec::new();
@@ -1372,6 +1377,18 @@ pub fn verify_launch_package_jsons(
         errors.push(format!(
             "genesis initial_total_power expected {} but got {}",
             validator_set_report.total_genesis_power, genesis_report.initial_total_power
+        ));
+    }
+    if genesis_manifest.genesis_time_unix_ms < deployment_attestation.generated_at_unix_ms {
+        errors.push(format!(
+            "genesis genesis_time_unix_ms must be at or after deployment generated_at_unix_ms {}",
+            deployment_attestation.generated_at_unix_ms
+        ));
+    }
+    if genesis_manifest.genesis_time_unix_ms > deployment_attestation.expires_at_unix_ms {
+        errors.push(format!(
+            "genesis genesis_time_unix_ms must be at or before deployment expires_at_unix_ms {}",
+            deployment_attestation.expires_at_unix_ms
         ));
     }
 
@@ -3871,6 +3888,87 @@ mod public_launch {
                     .iter()
                     .any(|error| error
                         .starts_with("genesis deployment_attestation_root does not match")));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_rejects_genesis_time_before_deployment_generation() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let deployment_value = serde_json::from_str::<Value>(&deployment).unwrap();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let mut genesis = serde_json::from_str::<Value>(
+            &build_genesis_manifest_json_pretty(&deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        let generated_at = deployment_value["generated_at_unix_ms"]
+            .as_u64()
+            .expect("sample generated_at fits u64");
+        genesis["genesis_time_unix_ms"] = json!(generated_at.saturating_sub(1));
+        genesis["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(genesis.clone()).unwrap()
+        ));
+
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &genesis.to_string(),
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with(
+                        "genesis genesis_time_unix_ms must be at or after deployment generated_at_unix_ms",
+                    )
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_rejects_genesis_time_after_deployment_expiry() {
+        let mut deployment =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        let now = unix_ms();
+        deployment["generated_at_unix_ms"] = json!(now);
+        deployment["expires_at_unix_ms"] = json!(now + 60_000);
+        let deployment = deployment.to_string();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let mut genesis = serde_json::from_str::<Value>(
+            &build_genesis_manifest_json_pretty(&deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        genesis["genesis_time_unix_ms"] = json!(now + 60_001);
+        genesis["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(genesis.clone()).unwrap()
+        ));
+
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &genesis.to_string(),
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with(
+                        "genesis genesis_time_unix_ms must be at or before deployment expires_at_unix_ms",
+                    )
+                }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }

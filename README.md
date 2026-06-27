@@ -92,6 +92,7 @@ The public launch suite covers:
   validation
 - genesis manifest root binding across deployment evidence, validator set, and
   fee policy
+- genesis timestamp binding to the deployment attestation validity window
 - launch package coherence across deployment attestation, public surface,
   validator set, and genesis manifest artifacts
 - launch package binding between admitted validators, deployment operators, and
@@ -232,7 +233,9 @@ The final local launch artifact is a genesis manifest. It can only be built from
 a deployment attestation and validator-set manifest that already pass their
 verifiers. The manifest binds the deployment evidence root, validator-set root,
 fee-policy root, validator-admission root, initial validator count, total genesis
-power, activation height, and fee token identities.
+power, activation height, and fee token identities. The final launch-package
+check requires the genesis timestamp to fall inside the deployment attestation
+validity window.
 
 Operators can build and verify the launch manifest with:
 
@@ -247,11 +250,11 @@ The final package check verifies the deployment attestation, public status
 manifest, public probe, validator-set manifest, and genesis manifest together.
 It rejects a package when the public surface roots do not match the deployment
 attestation, or when the genesis manifest does not bind the exact deployment
-evidence root, validator-set root, validator count, and total genesis power
-produced by the other verified files. It also rejects validator-set manifests
-whose admitted validators do not map to the attested deployment operators and
-bootstrap nodes, and rejects deployment operators or bootstrap nodes that are
-not represented by an admitted validator.
+evidence root, validator-set root, validator count, total genesis power, and
+deployment validity window produced by the other verified files. It also rejects
+validator-set manifests whose admitted validators do not map to the attested
+deployment operators and bootstrap nodes, and rejects deployment operators or
+bootstrap nodes that are not represented by an admitted validator.
 
 Operators can verify the full package with:
 

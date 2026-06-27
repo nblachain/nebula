@@ -70,7 +70,9 @@ must bind the validator identity, operator contact, keys, reward account,
 commission, genesis power, reward unit, and fee-policy root.
 
 The genesis manifest builder binds verified deployment evidence and validator
-admission into the root artifact used to start a public testnet.
+admission into the root artifact used to start a public testnet. The final
+launch-package check requires the genesis timestamp to fall inside the
+deployment attestation validity window.
 
 The launch-package verifier checks that the deployment, public surface,
 validator set, and genesis artifacts all agree before operators advance to a
