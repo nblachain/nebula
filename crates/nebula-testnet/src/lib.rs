@@ -295,6 +295,7 @@ pub struct DeploymentAttestationReport {
     pub witness_evidence_root: String,
     pub public_surface_root: String,
     pub operator_approval_root: String,
+    pub observer_confirmation_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub attestation_expires_at_unix_ms: u128,
@@ -360,6 +361,7 @@ pub struct GenesisManifest {
     pub deployment_attestation_root: String,
     pub public_surface_root: String,
     pub operator_approval_root: String,
+    pub observer_confirmation_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub validator_set_root: String,
@@ -386,6 +388,7 @@ pub struct GenesisManifestReport {
     pub deployment_attestation_root: String,
     pub public_surface_root: String,
     pub operator_approval_root: String,
+    pub observer_confirmation_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub validator_set_root: String,
@@ -410,6 +413,7 @@ pub struct LaunchPackageReport {
     pub witness_evidence_root: String,
     pub public_surface_root: String,
     pub operator_approval_root: String,
+    pub observer_confirmation_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
     pub public_status_manifest_root: String,
@@ -749,6 +753,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "operator_signature_roots_verified": true,
                 "operator_approval_root_reported": true,
                 "observer_signature_roots_verified": true,
+                "observer_confirmation_root_reported": true,
                 "deployment_observer_count_reported": true,
                 "deployment_region_count_reported": true,
                 "public_status_surface_verified": true,
@@ -767,6 +772,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "genesis_binds_deployment_attestation_root": true,
                 "genesis_binds_public_surface_root": true,
                 "genesis_binds_operator_approval_root": true,
+                "genesis_binds_observer_confirmation_root": true,
                 "genesis_binds_bootstrap_roster_root": true,
                 "genesis_binds_operational_evidence_root": true,
                 "genesis_binds_validator_set_root": true,
@@ -1296,6 +1302,7 @@ pub fn build_genesis_manifest_json_pretty(
         deployment_attestation_root: deployment_report.evidence_root,
         public_surface_root: deployment_report.public_surface_root,
         operator_approval_root: deployment_report.operator_approval_root,
+        observer_confirmation_root: deployment_report.observer_confirmation_root,
         bootstrap_roster_root: deployment_report.bootstrap_roster_root,
         operational_evidence_root: deployment_report.operational_evidence_root,
         validator_set_root: validator_set_report.validator_set_root,
@@ -1367,6 +1374,11 @@ pub fn verify_genesis_manifest_json(
         &mut errors,
         "operator_approval_root",
         &manifest.operator_approval_root,
+    );
+    require_hex_root(
+        &mut errors,
+        "observer_confirmation_root",
+        &manifest.observer_confirmation_root,
     );
     require_hex_root(
         &mut errors,
@@ -1465,6 +1477,7 @@ pub fn verify_genesis_manifest_json(
         deployment_attestation_root: manifest.deployment_attestation_root,
         public_surface_root: manifest.public_surface_root,
         operator_approval_root: manifest.operator_approval_root,
+        observer_confirmation_root: manifest.observer_confirmation_root,
         bootstrap_roster_root: manifest.bootstrap_roster_root,
         operational_evidence_root: manifest.operational_evidence_root,
         validator_set_root: manifest.validator_set_root,
@@ -1493,6 +1506,10 @@ fn verify_genesis_root_domains(errors: &mut Vec<String>, manifest: &GenesisManif
         (
             "operator_approval_root",
             manifest.operator_approval_root.as_str(),
+        ),
+        (
+            "observer_confirmation_root",
+            manifest.observer_confirmation_root.as_str(),
         ),
         (
             "bootstrap_roster_root",
@@ -1611,6 +1628,12 @@ pub fn verify_launch_package_jsons(
             deployment_report.operator_approval_root
         ));
     }
+    if genesis_report.observer_confirmation_root != deployment_report.observer_confirmation_root {
+        errors.push(format!(
+            "genesis observer_confirmation_root does not match deployment observer confirmation root {}",
+            deployment_report.observer_confirmation_root
+        ));
+    }
     if genesis_report.bootstrap_roster_root != deployment_report.bootstrap_roster_root {
         errors.push(format!(
             "genesis bootstrap_roster_root does not match deployment bootstrap roster root {}",
@@ -1695,6 +1718,7 @@ pub fn verify_launch_package_jsons(
         witness_evidence_root: deployment_report.witness_evidence_root,
         public_surface_root: deployment_report.public_surface_root,
         operator_approval_root: deployment_report.operator_approval_root,
+        observer_confirmation_root: deployment_report.observer_confirmation_root,
         bootstrap_roster_root: deployment_report.bootstrap_roster_root,
         operational_evidence_root: deployment_report.operational_evidence_root,
         public_status_manifest_root: public_status_manifest.root,
@@ -1870,6 +1894,7 @@ pub fn verify_deployment_attestation_json(
         witness_evidence_root,
         public_surface_root: deployment_public_surface_root(&attestation),
         operator_approval_root: deployment_operator_approval_root(&attestation),
+        observer_confirmation_root: deployment_observer_confirmation_root(&attestation),
         bootstrap_roster_root: deployment_bootstrap_roster_root(&attestation),
         operational_evidence_root: deployment_operational_evidence_root(&attestation),
         attestation_expires_at_unix_ms: attestation.expires_at_unix_ms,
@@ -3421,6 +3446,68 @@ fn deployment_operator_approval_root(attestation: &DeploymentAttestation) -> Str
     }))
 }
 
+fn deployment_observer_confirmation_root(attestation: &DeploymentAttestation) -> String {
+    let witness_evidence_root = deployment_witness_root(
+        &attestation.launch_bundle,
+        &attestation.public_status_manifest,
+        &attestation.public_endpoint,
+        &attestation.policy_claim,
+        &attestation.public_probe,
+    );
+    let mut observers = attestation
+        .observers
+        .iter()
+        .map(|observer| {
+            (
+                observer.observer_id.as_str(),
+                observer.region.as_str(),
+                observer.observed_endpoint.as_str(),
+                observer.observed_evidence_root.as_str(),
+                observer.signature.algorithm.as_str(),
+                observer.signature.public_key.as_str(),
+                observer.signature.signature_sha3_256.as_str(),
+                observer.signature.verified,
+            )
+        })
+        .collect::<Vec<_>>();
+    observers.sort_unstable();
+    let observers = observers
+        .into_iter()
+        .map(
+            |(
+                observer_id,
+                region,
+                observed_endpoint,
+                observed_evidence_root,
+                algorithm,
+                public_key,
+                signature_sha3_256,
+                verified,
+            )| {
+                json!({
+                    "observer_id": observer_id,
+                    "region": region,
+                    "observed_endpoint": observed_endpoint,
+                    "observed_evidence_root": observed_evidence_root,
+                    "algorithm": algorithm,
+                    "public_key": public_key,
+                    "signature_sha3_256": signature_sha3_256,
+                    "verified": verified,
+                })
+            },
+        )
+        .collect::<Vec<_>>();
+
+    stable_root(&json!({
+        "confirmation_domain": "nebula-deployment-observer-confirmation-v1",
+        "chain_id": attestation.chain_id,
+        "launch_bundle_root": attestation.launch_bundle.root,
+        "witness_evidence_root": witness_evidence_root,
+        "public_endpoint_url": attestation.public_endpoint.url,
+        "observers": observers,
+    }))
+}
+
 fn deployment_bootstrap_roster_root(attestation: &DeploymentAttestation) -> String {
     let mut nodes = attestation
         .bootstrap_nodes
@@ -3604,6 +3691,7 @@ fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
         "deployment_attestation_root": manifest.deployment_attestation_root,
         "public_surface_root": manifest.public_surface_root,
         "operator_approval_root": manifest.operator_approval_root,
+        "observer_confirmation_root": manifest.observer_confirmation_root,
         "bootstrap_roster_root": manifest.bootstrap_roster_root,
         "operational_evidence_root": manifest.operational_evidence_root,
         "validator_set_root": manifest.validator_set_root,
@@ -3881,6 +3969,7 @@ mod public_launch {
         assert_eq!(report.witness_evidence_root.len(), 64);
         assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.operator_approval_root.len(), 64);
+        assert_eq!(report.observer_confirmation_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
     }
@@ -5563,6 +5652,7 @@ mod public_launch {
         assert_eq!(report.deployment_attestation_root.len(), 64);
         assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.operator_approval_root.len(), 64);
+        assert_eq!(report.observer_confirmation_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.validator_set_root.len(), 64);
@@ -5587,6 +5677,7 @@ mod public_launch {
         assert_eq!(report.validator_set_epoch, PUBLIC_TESTNET_GENESIS_EPOCH);
         assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.operator_approval_root.len(), 64);
+        assert_eq!(report.observer_confirmation_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.operator_roster_root.len(), 64);
@@ -5758,6 +5849,7 @@ mod public_launch {
         assert_eq!(report.witness_evidence_root.len(), 64);
         assert_eq!(report.public_surface_root.len(), 64);
         assert_eq!(report.operator_approval_root.len(), 64);
+        assert_eq!(report.observer_confirmation_root.len(), 64);
         assert_eq!(report.bootstrap_roster_root.len(), 64);
         assert_eq!(report.operational_evidence_root.len(), 64);
         assert_eq!(report.public_status_manifest_root.len(), 64);
@@ -5877,6 +5969,41 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error.starts_with("genesis operator_approval_root does not match")
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn launch_package_rejects_mismatched_genesis_observer_confirmation_root() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let mut genesis = serde_json::from_str::<Value>(
+            &build_genesis_manifest_json_pretty(&deployment, &validators).unwrap(),
+        )
+        .unwrap();
+        genesis["observer_confirmation_root"] =
+            json!(hex_64("different-observer-confirmation-root"));
+        genesis["root"] = json!(genesis_manifest_root(
+            &serde_json::from_value::<GenesisManifest>(genesis.clone()).unwrap()
+        ));
+
+        let error = verify_launch_package_jsons(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &genesis.to_string(),
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("genesis observer_confirmation_root does not match")
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

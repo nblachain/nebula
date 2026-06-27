@@ -104,6 +104,8 @@ The public launch suite covers:
 - deterministic public-surface root for endpoint, TLS pins, policy claim, and
   public probe evidence
 - deterministic operator-approval root for signed deployment witness approvals
+- deterministic observer-confirmation root for independently observed public
+  endpoint evidence
 - policy claim and public probe body exact-shape validation
 - preflight and runbook receipt exact-shape validation
 - bootstrap node/operator and observer attestation exact-shape validation
@@ -242,6 +244,9 @@ bundle, public status root, public endpoint URL, TLS pins, policy claim root,
 and public probe root.
 It also reports a deterministic operator-approval root over the attested
 operator IDs, regions, public keys, signed witness root, and signature roots.
+It also reports a deterministic observer-confirmation root over observer IDs,
+regions, observed endpoint URL, observed witness root, signature material, and
+verification status.
 
 Operators can generate and verify the public status/probe surface before filling
 deployment evidence:
@@ -315,9 +320,10 @@ verifiers. The manifest binds the deployment evidence root, validator-set root,
 validator-set epoch `0`, fee-policy root, validator-admission root, initial
 bootstrap-roster root, operator-roster root, reward-ledger root, validator,
 operator, and region counts, total genesis power, fixed activation height `1`,
-public-surface root, operator-approval root, operational-evidence root, and fee
-token identities. The verifier keeps deployment, public-surface,
-operator-approval, bootstrap-roster,
+public-surface root, operator-approval root, observer-confirmation root,
+operational-evidence root, and fee token identities. The verifier keeps
+deployment, public-surface, operator-approval, observer-confirmation,
+bootstrap-roster,
 operational-evidence, validator-set, operator-roster, reward-ledger,
 fee-policy, and validator-admission roots in separate domains. The final
 launch-package check requires the genesis timestamp to be fresh and to fall
@@ -338,9 +344,9 @@ It rejects a package when the public surface roots do not match the deployment
 attestation, or when the genesis manifest does not bind the exact deployment
 evidence root, validator-set root, validator-set epoch, validator count, total
 operator count, region count, public-surface root, bootstrap-roster root,
-operator-approval root, operator-roster root, reward-ledger root,
-operational-evidence root, genesis power, and deployment validity window
-produced by the other verified files. It also rejects
+operator-approval root, observer-confirmation root, operator-roster root,
+reward-ledger root, operational-evidence root, genesis power, and deployment
+validity window produced by the other verified files. It also rejects
 validator consensus/network keys that reuse deployment witness keys,
 validator-set manifests whose admitted validators do not map to the attested
 deployment operators and bootstrap nodes, validator P2P hosts that do not match
@@ -348,9 +354,10 @@ their attested bootstrap endpoint host, and deployment operators or bootstrap
 nodes that are not represented by an admitted validator. The launch-package
 report also exposes the deployment observer quorum count and deployment region
 count verified from the attestation, the public-surface root, the
-operator-approval root, the bootstrap-roster root, the operational-evidence
-root, the operator-roster root, the matched reward-account count, the
-reward-ledger root, and the genesis fee token identities.
+operator-approval root, the observer-confirmation root, the bootstrap-roster
+root, the operational-evidence root, the operator-roster root, the matched
+reward-account count, the reward-ledger root, and the genesis fee token
+identities.
 
 Operators can verify the full package with:
 
