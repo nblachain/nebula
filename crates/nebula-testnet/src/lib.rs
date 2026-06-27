@@ -598,6 +598,48 @@ pub struct ValidatorJoinReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct OperatorJoinConfirmationManifest {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub validator_join_root: String,
+    pub validator_activation_root: String,
+    pub launch_package_bundle_root: String,
+    pub operator_acceptance_root: String,
+    pub confirmed_at_unix_ms: u128,
+    pub entries: Vec<OperatorJoinConfirmationEntry>,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorJoinConfirmationEntry {
+    pub operator_id: String,
+    pub validator_id: String,
+    pub node_id: String,
+    pub confirmed_join_root: String,
+    pub validator_join_root: String,
+    pub operator_public_key: String,
+    pub confirmed: bool,
+    pub confirmation_root: String,
+    pub signature: SignatureVerification,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OperatorJoinConfirmationReport {
+    pub operator_join_confirmation_ready: bool,
+    pub level: &'static str,
+    pub operator_join_confirmation_root: String,
+    pub validator_join_root: String,
+    pub validator_activation_root: String,
+    pub launch_package_bundle_root: String,
+    pub operator_acceptance_root: String,
+    pub confirmed_operator_count: usize,
+    pub confirmed_validator_count: usize,
+    pub confirmed_at_unix_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct OperatorHandoffManifest {
     pub chain_id: String,
     pub runtime_version: String,
@@ -1094,6 +1136,17 @@ pub fn readiness_report() -> NebulaReadiness {
                 "validator_join_signature_roots_verified": true,
                 "validator_join_signatures_verified": true,
                 "all_validators_joined": true,
+            })),
+            "operator_join_confirmation": stable_root(&json!({
+                "validator_join_root_required": true,
+                "validator_activation_root_required": true,
+                "launch_package_bundle_root_required": true,
+                "operator_acceptance_root_required": true,
+                "confirmed_at_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
+                "one_confirmation_entry_per_joined_validator": true,
+                "operator_confirmation_signature_roots_verified": true,
+                "operator_confirmation_signatures_verified": true,
+                "all_joined_validators_operator_confirmed": true,
             })),
             "public_status_surface": stable_root(&json!({
                 "status": "deployment-attested",
@@ -3099,6 +3152,235 @@ pub fn verify_validator_join_receipt_jsons(
         min_observed_block_height,
         min_peer_count,
         joined_at_unix_ms: receipt.joined_at_unix_ms,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_operator_join_confirmation_json_pretty(
+    validator_join_receipt_json: &str,
+    validator_activation_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<String, AttestationError> {
+    let join_report = verify_validator_join_receipt_jsons(
+        validator_join_receipt_json,
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let acceptance_report = verify_operator_acceptance_jsons(
+        operator_acceptance_json,
+        operator_handoff_json,
+        deployment_attestation_json,
+        validator_set_json,
+    )?;
+    let receipt = serde_json::from_str::<ValidatorJoinReceipt>(
+        validator_join_receipt_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let acceptance = serde_json::from_str::<OperatorAcceptanceManifest>(
+        operator_acceptance_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let deployment_attestation =
+        verified_deployment_attestation_manifest(deployment_attestation_json)?;
+    let mut manifest = operator_join_confirmation_manifest(
+        &receipt,
+        &join_report,
+        &acceptance,
+        &acceptance_report,
+        &deployment_attestation,
+        unix_ms(),
+    );
+    manifest.root = operator_join_confirmation_manifest_root(&manifest);
+
+    serde_json::to_string_pretty(&manifest)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_operator_join_confirmation_jsons(
+    operator_join_confirmation_json: &str,
+    validator_join_receipt_json: &str,
+    validator_activation_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<OperatorJoinConfirmationReport, AttestationError> {
+    let manifest = serde_json::from_str::<OperatorJoinConfirmationManifest>(
+        operator_join_confirmation_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let join_report = verify_validator_join_receipt_jsons(
+        validator_join_receipt_json,
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let acceptance_report = verify_operator_acceptance_jsons(
+        operator_acceptance_json,
+        operator_handoff_json,
+        deployment_attestation_json,
+        validator_set_json,
+    )?;
+    let receipt = serde_json::from_str::<ValidatorJoinReceipt>(
+        validator_join_receipt_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let acceptance = serde_json::from_str::<OperatorAcceptanceManifest>(
+        operator_acceptance_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let deployment_attestation =
+        verified_deployment_attestation_manifest(deployment_attestation_json)?;
+    let now = unix_ms();
+    let expected = operator_join_confirmation_manifest(
+        &receipt,
+        &join_report,
+        &acceptance,
+        &acceptance_report,
+        &deployment_attestation,
+        manifest.confirmed_at_unix_ms,
+    );
+    let mut errors = Vec::new();
+
+    if manifest.confirmed_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
+        errors.push("confirmed_at_unix_ms is more than five minutes in the future".to_string());
+    }
+    if manifest.confirmed_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("confirmed_at_unix_ms is older than 24 hours".to_string());
+    }
+    require_eq(
+        &mut errors,
+        "chain_id",
+        &manifest.chain_id,
+        &expected.chain_id,
+    );
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &manifest.runtime_version,
+        &expected.runtime_version,
+    );
+    require_root(
+        &mut errors,
+        "validator_join_root",
+        &manifest.validator_join_root,
+        &expected.validator_join_root,
+    );
+    require_root(
+        &mut errors,
+        "validator_activation_root",
+        &manifest.validator_activation_root,
+        &expected.validator_activation_root,
+    );
+    require_root(
+        &mut errors,
+        "launch_package_bundle_root",
+        &manifest.launch_package_bundle_root,
+        &expected.launch_package_bundle_root,
+    );
+    require_root(
+        &mut errors,
+        "operator_acceptance_root",
+        &manifest.operator_acceptance_root,
+        &expected.operator_acceptance_root,
+    );
+    if manifest.entries != expected.entries {
+        errors.push(
+            "operator join confirmation entries do not match verified validator join and operator acceptance"
+                .to_string(),
+        );
+    }
+    for (index, entry) in manifest.entries.iter().enumerate() {
+        if !entry.confirmed {
+            errors.push(format!("entries[{index}].confirmed must be true"));
+        }
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].confirmation_root"),
+            &entry.confirmation_root,
+            &operator_join_confirmation_entry_root(
+                entry,
+                &manifest.validator_join_root,
+                &manifest.validator_activation_root,
+                &manifest.launch_package_bundle_root,
+                &manifest.operator_acceptance_root,
+                manifest.confirmed_at_unix_ms,
+            ),
+        );
+        require_root(
+            &mut errors,
+            &format!("entries[{index}].signature.signature_sha3_256"),
+            &entry.signature.signature_sha3_256,
+            &operator_join_confirmation_signature_root(entry),
+        );
+        if !entry.signature.verified {
+            errors.push(format!("entries[{index}].signature.verified must be true"));
+        }
+    }
+    require_root(
+        &mut errors,
+        "root",
+        &manifest.root,
+        &operator_join_confirmation_manifest_root(&manifest),
+    );
+    if manifest.root != expected.root {
+        errors.push(format!(
+            "operator join confirmation root does not match expected root {}",
+            expected.root
+        ));
+    }
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    let confirmed_operators = manifest
+        .entries
+        .iter()
+        .map(|entry| entry.operator_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let confirmed_validators = manifest
+        .entries
+        .iter()
+        .map(|entry| entry.validator_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    Ok(OperatorJoinConfirmationReport {
+        operator_join_confirmation_ready: true,
+        level: "operator-join-confirmed",
+        operator_join_confirmation_root: manifest.root,
+        validator_join_root: manifest.validator_join_root,
+        validator_activation_root: manifest.validator_activation_root,
+        launch_package_bundle_root: manifest.launch_package_bundle_root,
+        operator_acceptance_root: manifest.operator_acceptance_root,
+        confirmed_operator_count: confirmed_operators.len(),
+        confirmed_validator_count: confirmed_validators.len(),
+        confirmed_at_unix_ms: manifest.confirmed_at_unix_ms,
     })
 }
 
@@ -5852,6 +6134,154 @@ fn validator_join_receipt_root(receipt: &ValidatorJoinReceipt) -> String {
     }))
 }
 
+fn operator_join_confirmation_manifest(
+    receipt: &ValidatorJoinReceipt,
+    join_report: &ValidatorJoinReport,
+    acceptance: &OperatorAcceptanceManifest,
+    acceptance_report: &OperatorAcceptanceReport,
+    attestation: &DeploymentAttestation,
+    confirmed_at_unix_ms: u128,
+) -> OperatorJoinConfirmationManifest {
+    let operator_keys_by_id = attestation
+        .operators
+        .iter()
+        .map(|operator| (operator.operator_id.as_str(), operator.public_key.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let accepted_by_operator_validator = acceptance
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                (entry.operator_id.as_str(), entry.validator_id.as_str()),
+                entry,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut entries = receipt
+        .entries
+        .iter()
+        .map(|join_entry| {
+            let accepted_entry = accepted_by_operator_validator.get(&(
+                join_entry.operator_id.as_str(),
+                join_entry.validator_id.as_str(),
+            ));
+            let node_id = accepted_entry
+                .map(|entry| entry.node_id.clone())
+                .unwrap_or_else(|| join_entry.node_id.clone());
+            let operator_public_key = operator_keys_by_id
+                .get(join_entry.operator_id.as_str())
+                .copied()
+                .unwrap_or_default()
+                .to_string();
+            let mut entry = OperatorJoinConfirmationEntry {
+                operator_id: join_entry.operator_id.clone(),
+                validator_id: join_entry.validator_id.clone(),
+                node_id,
+                confirmed_join_root: join_entry.join_root.clone(),
+                validator_join_root: receipt.root.clone(),
+                operator_public_key,
+                confirmed: true,
+                confirmation_root: String::new(),
+                signature: SignatureVerification {
+                    algorithm: "ed25519-testnet-operator-join-confirmation".to_string(),
+                    public_key: String::new(),
+                    signature_sha3_256: String::new(),
+                    verified: true,
+                },
+            };
+            entry.signature.public_key = entry.operator_public_key.clone();
+            entry.confirmation_root = operator_join_confirmation_entry_root(
+                &entry,
+                &join_report.validator_join_root,
+                &join_report.validator_activation_root,
+                &join_report.launch_package_bundle_root,
+                &acceptance_report.operator_acceptance_root,
+                confirmed_at_unix_ms,
+            );
+            entry.signature.signature_sha3_256 = operator_join_confirmation_signature_root(&entry);
+            entry
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        (
+            left.operator_id.as_str(),
+            left.validator_id.as_str(),
+            left.node_id.as_str(),
+        )
+            .cmp(&(
+                right.operator_id.as_str(),
+                right.validator_id.as_str(),
+                right.node_id.as_str(),
+            ))
+    });
+
+    let mut manifest = OperatorJoinConfirmationManifest {
+        chain_id: CHAIN_ID.to_string(),
+        runtime_version: VERSION.to_string(),
+        validator_join_root: join_report.validator_join_root.clone(),
+        validator_activation_root: join_report.validator_activation_root.clone(),
+        launch_package_bundle_root: join_report.launch_package_bundle_root.clone(),
+        operator_acceptance_root: acceptance_report.operator_acceptance_root.clone(),
+        confirmed_at_unix_ms,
+        entries,
+        root: String::new(),
+    };
+    manifest.root = operator_join_confirmation_manifest_root(&manifest);
+    manifest
+}
+
+fn operator_join_confirmation_entry_root(
+    entry: &OperatorJoinConfirmationEntry,
+    validator_join_root: &str,
+    validator_activation_root: &str,
+    launch_package_bundle_root: &str,
+    operator_acceptance_root: &str,
+    confirmed_at_unix_ms: u128,
+) -> String {
+    stable_root(&json!({
+        "confirmation_entry_domain": "nebula-operator-join-confirmation-entry-v1",
+        "validator_join_root": validator_join_root,
+        "validator_activation_root": validator_activation_root,
+        "launch_package_bundle_root": launch_package_bundle_root,
+        "operator_acceptance_root": operator_acceptance_root,
+        "confirmed_at_unix_ms": confirmed_at_unix_ms,
+        "operator_id": entry.operator_id,
+        "validator_id": entry.validator_id,
+        "node_id": entry.node_id,
+        "confirmed_join_root": entry.confirmed_join_root,
+        "entry_validator_join_root": entry.validator_join_root,
+        "operator_public_key": entry.operator_public_key,
+        "confirmed": entry.confirmed,
+    }))
+}
+
+fn operator_join_confirmation_signature_root(entry: &OperatorJoinConfirmationEntry) -> String {
+    stable_root(&json!({
+        "signature_domain": "nebula-operator-join-confirmation-signature-v1",
+        "algorithm": entry.signature.algorithm,
+        "operator_id": entry.operator_id,
+        "validator_id": entry.validator_id,
+        "node_id": entry.node_id,
+        "public_key": entry.signature.public_key,
+        "confirmation_root": entry.confirmation_root,
+        "confirmed": entry.confirmed,
+    }))
+}
+
+fn operator_join_confirmation_manifest_root(manifest: &OperatorJoinConfirmationManifest) -> String {
+    stable_root(&json!({
+        "confirmation_domain": "nebula-operator-join-confirmation-v1",
+        "chain_id": manifest.chain_id,
+        "runtime_version": manifest.runtime_version,
+        "validator_join_root": manifest.validator_join_root,
+        "validator_activation_root": manifest.validator_activation_root,
+        "launch_package_bundle_root": manifest.launch_package_bundle_root,
+        "operator_acceptance_root": manifest.operator_acceptance_root,
+        "confirmed_at_unix_ms": manifest.confirmed_at_unix_ms,
+        "entries": manifest.entries,
+    }))
+}
+
 fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
     stable_root(&json!({
         "chain_id": manifest.chain_id,
@@ -6141,6 +6571,7 @@ mod public_launch {
             "launch_package_bundle",
             "validator_activation",
             "validator_join",
+            "operator_join_confirmation",
         ] {
             let root = report.status_roots[root_name].as_str().unwrap();
             assert_eq!(root.len(), 64);
@@ -8582,6 +9013,176 @@ mod public_launch {
             AttestationError::Invalid(errors) => {
                 assert!(errors.iter().any(|error| {
                     error == "entries[0].observed_block_height must be at least 1"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn operator_join_confirmation_verifies_after_validator_join() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let activation = build_validator_activation_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join = build_validator_join_receipt_json_pretty(
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let confirmation = build_operator_join_confirmation_json_pretty(
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        let report = verify_operator_join_confirmation_jsons(
+            &confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        assert!(report.operator_join_confirmation_ready);
+        assert_eq!(report.level, "operator-join-confirmed");
+        assert_eq!(report.operator_join_confirmation_root.len(), 64);
+        assert_eq!(report.validator_join_root.len(), 64);
+        assert_eq!(report.confirmed_validator_count, 2);
+        assert_eq!(report.confirmed_operator_count, 2);
+    }
+
+    #[test]
+    fn operator_join_confirmation_rejects_unconfirmed_entry() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let activation = build_validator_activation_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join = build_validator_join_receipt_json_pretty(
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let mut confirmation = serde_json::from_str::<Value>(
+            &build_operator_join_confirmation_json_pretty(
+                &join,
+                &activation,
+                &bundle,
+                &deployment,
+                &public_status,
+                &public_probe,
+                &validators,
+                &handoff,
+                &acceptance,
+                &genesis,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        confirmation["entries"][0]["confirmed"] = json!(false);
+
+        let error = verify_operator_join_confirmation_jsons(
+            &confirmation.to_string(),
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "entries[0].confirmed must be true"));
+                assert!(errors.iter().any(|error| {
+                    error
+                        == "operator join confirmation entries do not match verified validator join and operator acceptance"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
