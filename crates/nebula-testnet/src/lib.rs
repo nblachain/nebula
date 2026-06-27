@@ -660,6 +660,7 @@ pub fn readiness_report() -> NebulaReadiness {
                 "unique_bootstrap_node_ids_required": true,
                 "bootstrap_operator_id_domains_disjoint": true,
                 "unique_bootstrap_endpoints_required": true,
+                "unique_bootstrap_endpoint_hosts_required": true,
                 "bootstrap_endpoint_authority_required": true,
                 "bootstrap_region_spread_required": true,
                 "bootstrap_operator_region_binding_required": true,
@@ -2281,6 +2282,7 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
 
     let mut bootstrap_node_ids = BTreeSet::new();
     let mut bootstrap_endpoints = BTreeSet::new();
+    let mut bootstrap_endpoint_hosts = BTreeSet::new();
     let mut bootstrap_regions = BTreeSet::new();
     for (index, node) in attestation.bootstrap_nodes.iter().enumerate() {
         require_non_empty(
@@ -2328,6 +2330,16 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("bootstrap_nodes[{index}].endpoint"),
             &node.endpoint,
         );
+        if let Some(host) = endpoint_host(&node.endpoint, "https://") {
+            if !host.trim().is_empty() {
+                insert_unique(
+                    errors,
+                    &mut bootstrap_endpoint_hosts,
+                    &format!("bootstrap_nodes[{index}].endpoint.host"),
+                    host,
+                );
+            }
+        }
         bootstrap_regions.insert(node.region.clone());
         insert_unique(
             errors,
@@ -3751,6 +3763,26 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error == "bootstrap_nodes[0].endpoint must include a host after https://"
                 }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_duplicate_bootstrap_endpoint_host() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["bootstrap_nodes"][1]["endpoint"] =
+            json!("https://bootstrap-a.testnet.nebula.example/alternate");
+        refresh_bootstrap_node_root(&mut value, 1);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "bootstrap_nodes[1].endpoint.host must be unique"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }

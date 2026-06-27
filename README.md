@@ -180,8 +180,8 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - bootstrap node attestation roots that do not bind the deployment witness root
 - operator, observer, and validator admission signature roots that do not bind
   the signed payload
-- duplicate bootstrap node IDs, bootstrap endpoints, operator IDs, operator
-  keys, observer IDs, and observer keys
+- duplicate bootstrap node IDs, bootstrap endpoints, bootstrap endpoint hosts,
+  operator IDs, operator keys, observer IDs, and observer keys
 - bootstrap node IDs that reuse operator IDs
 - observer IDs that reuse bootstrap node IDs or operator IDs
 - bootstrap, operator, observer, and region labels containing whitespace
