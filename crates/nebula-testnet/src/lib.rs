@@ -11194,6 +11194,66 @@ mod public_launch {
         })
     }
 
+    fn runtime_surface_with_endpoint_url(
+        runtime_surface_json: &str,
+        endpoint_url: &str,
+    ) -> Result<String, AttestationError> {
+        let mut evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(runtime_surface_json)
+            .expect("runtime surface evidence parses");
+        evidence.endpoint_url = endpoint_url.to_string();
+        evidence.status["launch_endpoint_url"] = json!(endpoint_url);
+
+        let mut snapshot =
+            serde_json::from_value::<runtime::RuntimeSnapshot>(evidence.snapshot.clone())
+                .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+        if let Some(launch_binding) = snapshot.config.launch_binding.as_mut() {
+            launch_binding.endpoint_url = endpoint_url.to_string();
+        }
+        snapshot.root = runtime::runtime_snapshot_root(&snapshot);
+        evidence.snapshot = serde_json::to_value(&snapshot)
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+
+        let mut ops = serde_json::from_value::<runtime::RuntimeOpsStatus>(evidence.ops.clone())
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+        ops.launch_endpoint_url = Some(endpoint_url.to_string());
+        ops.snapshot_root = snapshot.root.clone();
+        ops.ops_root = runtime::runtime_ops_status_root(&ops);
+        evidence.ops = serde_json::to_value(&ops)
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+
+        let mut backup =
+            serde_json::from_value::<runtime::RuntimeBackupManifest>(evidence.backup.clone())
+                .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+        backup.launch_endpoint_url = Some(endpoint_url.to_string());
+        backup.snapshot_root = snapshot.root.clone();
+        backup.backup_root = runtime::runtime_backup_manifest_root(&backup);
+        evidence.backup = serde_json::to_value(&backup)
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+
+        evidence.health["launch_endpoint_url"] = json!(endpoint_url);
+        evidence.health["snapshot_root"] = json!(snapshot.root);
+        evidence.health["ops_root"] = json!(ops.ops_root);
+        evidence.health["backup_root"] = json!(backup.backup_root);
+
+        match evidence.rpc_status.get_mut("result") {
+            Some(result) => *result = evidence.status.clone(),
+            None => evidence.rpc_status = evidence.status.clone(),
+        }
+        match evidence.rpc_ops_status.get_mut("result") {
+            Some(result) => *result = evidence.ops.clone(),
+            None => evidence.rpc_ops_status = evidence.ops.clone(),
+        }
+        match evidence.rpc_backup_manifest.get_mut("result") {
+            Some(result) => *result = evidence.backup.clone(),
+            None => evidence.rpc_backup_manifest = evidence.backup.clone(),
+        }
+        evidence.root = runtime_surface_evidence_root(&evidence);
+        let output = serde_json::to_string_pretty(&evidence)
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+        verify_runtime_surface_evidence_json(&output)?;
+        Ok(output)
+    }
+
     #[test]
     fn public_launch_blocks_without_deployment_attestation() {
         let report = readiness_report();
@@ -14653,6 +14713,34 @@ mod public_launch {
             .unwrap()
             .public_testnet_launch_certificate_root
         );
+
+        let wrong_endpoint = "https://other.testnet.nebula.example/status";
+        let wrong_endpoint_runtime_surface =
+            runtime_surface_with_endpoint_url(&external_runtime_surface, wrong_endpoint).unwrap();
+        let wrong_endpoint_ready_error = verify_public_testnet_launch_readiness_jsons(
+            &external_certificate,
+            &observer_confirmation,
+            &wrong_endpoint_runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match wrong_endpoint_ready_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error
+                    == "runtime_surface.endpoint_url expected https://testnet.nebula.example/status but got https://other.testnet.nebula.example/status"
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
 
         let mismatched_tls_observation = TlsEndpointPin {
             cert_sha256: "cc".repeat(32),
