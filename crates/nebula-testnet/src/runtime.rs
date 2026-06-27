@@ -325,6 +325,61 @@ pub struct RuntimeBridgePolicy {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct RuntimeOpsStatus {
+    pub service: String,
+    pub generated_at_unix_ms: u128,
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub node_role: String,
+    pub latest_height: u64,
+    pub latest_hash: String,
+    pub latest_block_age_ms: u128,
+    pub block_target_ms: u64,
+    pub sub_second_blocks: bool,
+    pub block_production_enabled: bool,
+    pub snapshot_version: u32,
+    pub snapshot_root: String,
+    pub state_root: String,
+    pub current_state_root: String,
+    pub storage_snapshot_path: Option<String>,
+    pub storage_snapshot_present: bool,
+    pub storage_snapshot_root: Option<String>,
+    pub storage_snapshot_height: Option<u64>,
+    pub storage_snapshot_matches_runtime: bool,
+    pub sync_peer_count: usize,
+    pub rpc_max_request_bytes: usize,
+    pub rpc_max_requests_per_minute: u32,
+    pub bridge_policy_root: String,
+    pub bridge_live_value_enabled: bool,
+    pub public_ops_ready: bool,
+    pub blocking_gaps: Vec<String>,
+    pub ops_root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeBackupManifest {
+    pub manifest_version: u32,
+    pub generated_at_unix_ms: u128,
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub latest_height: u64,
+    pub latest_hash: String,
+    pub snapshot_version: u32,
+    pub snapshot_root: String,
+    pub state_root: String,
+    pub current_state_root: String,
+    pub snapshot_path: Option<String>,
+    pub snapshot_persisted: bool,
+    pub storage_snapshot_root: Option<String>,
+    pub storage_snapshot_matches_runtime: bool,
+    pub bridge_policy_root: String,
+    pub sync_peer_count: usize,
+    pub rpc_max_request_bytes: usize,
+    pub rpc_max_requests_per_minute: u32,
+    pub backup_root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct SubmitTransactionReport {
     pub accepted_to_mempool: bool,
     pub tx_id: String,
@@ -484,6 +539,140 @@ impl RuntimeRpcState {
             json!(self.sync_peers.sync_peer_urls.len()),
         );
         Ok(status)
+    }
+
+    fn ops_status(&self) -> Result<RuntimeOpsStatus, String> {
+        let generated_at_unix_ms = unix_ms();
+        let (status, snapshot) = {
+            let runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "runtime mutex poisoned".to_string())?;
+            (runtime.status(), runtime.export_snapshot())
+        };
+        let storage_snapshot = match &self.storage {
+            Some(storage) => storage.load_snapshot()?,
+            None => None,
+        };
+        let storage_snapshot_path = self
+            .storage
+            .as_ref()
+            .map(|storage| storage.snapshot_path().display().to_string());
+        let storage_snapshot_root = storage_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.root.clone());
+        let storage_snapshot_height = storage_snapshot
+            .as_ref()
+            .map(RuntimeSnapshot::latest_height);
+        let storage_snapshot_matches_runtime = storage_snapshot
+            .as_ref()
+            .map(|persisted| {
+                persisted.latest_height() == snapshot.latest_height()
+                    && persisted
+                        .blocks
+                        .last()
+                        .map(|block| block.block_hash.as_str())
+                        == snapshot
+                            .blocks
+                            .last()
+                            .map(|block| block.block_hash.as_str())
+                    && persisted.state_root == snapshot.state_root
+            })
+            .unwrap_or(false);
+        let latest_timestamp_unix_ms = snapshot
+            .blocks
+            .last()
+            .map(|block| block.timestamp_unix_ms)
+            .unwrap_or(generated_at_unix_ms);
+        let latest_block_age_ms = generated_at_unix_ms.saturating_sub(latest_timestamp_unix_ms);
+        let mut blocking_gaps = Vec::new();
+        if !status.sub_second_blocks {
+            blocking_gaps.push("block-target-not-sub-second".to_string());
+        }
+        if status.latest_height == 0 {
+            blocking_gaps.push("no-produced-blocks-observed".to_string());
+        }
+        let max_acceptable_age_ms = u128::from(status.block_target_ms)
+            .saturating_mul(20)
+            .max(5_000);
+        if latest_block_age_ms > max_acceptable_age_ms {
+            blocking_gaps.push("latest-block-stale".to_string());
+        }
+        if self.storage.is_none() {
+            blocking_gaps.push("missing-persistent-data-dir".to_string());
+        }
+        if self.storage.is_some() && storage_snapshot.is_none() {
+            blocking_gaps.push("missing-persisted-snapshot".to_string());
+        }
+        if self.storage.is_some() && storage_snapshot.is_some() && !storage_snapshot_matches_runtime
+        {
+            blocking_gaps.push("persisted-snapshot-mismatch".to_string());
+        }
+        if status.node_role == "follower" && self.sync_peers.sync_peer_urls.is_empty() {
+            blocking_gaps.push("follower-missing-sync-peers".to_string());
+        }
+        if bridge_policy().live_value_enabled {
+            blocking_gaps.push("bridge-live-value-enabled".to_string());
+        }
+        let mut report = RuntimeOpsStatus {
+            service: "nebula-testnet-rpc".to_string(),
+            generated_at_unix_ms,
+            chain_id: status.chain_id,
+            runtime_version: status.runtime_version,
+            node_role: status.node_role,
+            latest_height: status.latest_height,
+            latest_hash: status.latest_hash,
+            latest_block_age_ms,
+            block_target_ms: status.block_target_ms,
+            sub_second_blocks: status.sub_second_blocks,
+            block_production_enabled: status.block_production_enabled,
+            snapshot_version: snapshot.snapshot_version,
+            snapshot_root: snapshot.root.clone(),
+            state_root: snapshot.state_root.clone(),
+            current_state_root: status.current_state_root,
+            storage_snapshot_path,
+            storage_snapshot_present: storage_snapshot.is_some(),
+            storage_snapshot_root,
+            storage_snapshot_height,
+            storage_snapshot_matches_runtime,
+            sync_peer_count: self.sync_peers.sync_peer_urls.len(),
+            rpc_max_request_bytes: self.rpc_limits.max_request_bytes,
+            rpc_max_requests_per_minute: self.rpc_limits.max_requests_per_minute,
+            bridge_policy_root: bridge_policy_root(),
+            bridge_live_value_enabled: bridge_policy().live_value_enabled,
+            public_ops_ready: blocking_gaps.is_empty(),
+            blocking_gaps,
+            ops_root: String::new(),
+        };
+        report.ops_root = ops_status_root(&report);
+        Ok(report)
+    }
+
+    fn backup_manifest(&self) -> Result<RuntimeBackupManifest, String> {
+        let ops_status = self.ops_status()?;
+        let mut manifest = RuntimeBackupManifest {
+            manifest_version: 1,
+            generated_at_unix_ms: ops_status.generated_at_unix_ms,
+            chain_id: ops_status.chain_id,
+            runtime_version: ops_status.runtime_version,
+            latest_height: ops_status.latest_height,
+            latest_hash: ops_status.latest_hash,
+            snapshot_version: ops_status.snapshot_version,
+            snapshot_root: ops_status.snapshot_root,
+            state_root: ops_status.state_root,
+            current_state_root: ops_status.current_state_root,
+            snapshot_path: ops_status.storage_snapshot_path,
+            snapshot_persisted: ops_status.storage_snapshot_present,
+            storage_snapshot_root: ops_status.storage_snapshot_root,
+            storage_snapshot_matches_runtime: ops_status.storage_snapshot_matches_runtime,
+            bridge_policy_root: ops_status.bridge_policy_root,
+            sync_peer_count: ops_status.sync_peer_count,
+            rpc_max_request_bytes: ops_status.rpc_max_request_bytes,
+            rpc_max_requests_per_minute: ops_status.rpc_max_requests_per_minute,
+            backup_root: String::new(),
+        };
+        manifest.backup_root = backup_manifest_root(&manifest);
+        Ok(manifest)
     }
 }
 
@@ -1659,6 +1848,14 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
             Ok(status) => write_json_response(&mut stream, 200, &status)?,
             Err(error) => write_json_response(&mut stream, 500, &json!({"error": error}))?,
         },
+        ("GET", "/ops") => match state.ops_status() {
+            Ok(status) => write_json_response(&mut stream, 200, &json!(status))?,
+            Err(error) => write_json_response(&mut stream, 500, &json!({"error": error}))?,
+        },
+        ("GET", "/backup") => match state.backup_manifest() {
+            Ok(manifest) => write_json_response(&mut stream, 200, &json!(manifest))?,
+            Err(error) => write_json_response(&mut stream, 500, &json!({"error": error}))?,
+        },
         ("GET", "/snapshot") => {
             let snapshot = state
                 .runtime
@@ -1712,6 +1909,8 @@ fn dispatch_json_rpc_method(
 ) -> Result<Value, String> {
     let result = match method {
         "nebula_status" => state.status_json(),
+        "nebula_opsStatus" => state.ops_status().map(|status| json!(status)),
+        "nebula_backupManifest" => state.backup_manifest().map(|manifest| json!(manifest)),
         "nebula_chainHead" => {
             let runtime = state.runtime.lock().expect("runtime mutex poisoned");
             Ok(json!(runtime.latest_block()))
@@ -2489,6 +2688,63 @@ fn transaction_root(transactions: &[RuntimeTransaction], rejected_tx_ids: &[Stri
     }))
 }
 
+fn ops_status_root(report: &RuntimeOpsStatus) -> String {
+    stable_runtime_root(&json!({
+        "ops_status_domain": "nebula-runtime-ops-status-v1",
+        "service": report.service,
+        "generated_at_unix_ms": report.generated_at_unix_ms,
+        "chain_id": report.chain_id,
+        "runtime_version": report.runtime_version,
+        "node_role": report.node_role,
+        "latest_height": report.latest_height,
+        "latest_hash": report.latest_hash,
+        "latest_block_age_ms": report.latest_block_age_ms,
+        "block_target_ms": report.block_target_ms,
+        "sub_second_blocks": report.sub_second_blocks,
+        "block_production_enabled": report.block_production_enabled,
+        "snapshot_version": report.snapshot_version,
+        "snapshot_root": report.snapshot_root,
+        "state_root": report.state_root,
+        "current_state_root": report.current_state_root,
+        "storage_snapshot_path": report.storage_snapshot_path,
+        "storage_snapshot_present": report.storage_snapshot_present,
+        "storage_snapshot_root": report.storage_snapshot_root,
+        "storage_snapshot_height": report.storage_snapshot_height,
+        "storage_snapshot_matches_runtime": report.storage_snapshot_matches_runtime,
+        "sync_peer_count": report.sync_peer_count,
+        "rpc_max_request_bytes": report.rpc_max_request_bytes,
+        "rpc_max_requests_per_minute": report.rpc_max_requests_per_minute,
+        "bridge_policy_root": report.bridge_policy_root,
+        "bridge_live_value_enabled": report.bridge_live_value_enabled,
+        "public_ops_ready": report.public_ops_ready,
+        "blocking_gaps": report.blocking_gaps,
+    }))
+}
+
+fn backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
+    stable_runtime_root(&json!({
+        "backup_manifest_domain": "nebula-runtime-backup-manifest-v1",
+        "manifest_version": manifest.manifest_version,
+        "generated_at_unix_ms": manifest.generated_at_unix_ms,
+        "chain_id": manifest.chain_id,
+        "runtime_version": manifest.runtime_version,
+        "latest_height": manifest.latest_height,
+        "latest_hash": manifest.latest_hash,
+        "snapshot_version": manifest.snapshot_version,
+        "snapshot_root": manifest.snapshot_root,
+        "state_root": manifest.state_root,
+        "current_state_root": manifest.current_state_root,
+        "snapshot_path": manifest.snapshot_path,
+        "snapshot_persisted": manifest.snapshot_persisted,
+        "storage_snapshot_root": manifest.storage_snapshot_root,
+        "storage_snapshot_matches_runtime": manifest.storage_snapshot_matches_runtime,
+        "bridge_policy_root": manifest.bridge_policy_root,
+        "sync_peer_count": manifest.sync_peer_count,
+        "rpc_max_request_bytes": manifest.rpc_max_request_bytes,
+        "rpc_max_requests_per_minute": manifest.rpc_max_requests_per_minute,
+    }))
+}
+
 pub fn bridge_policy() -> RuntimeBridgePolicy {
     RuntimeBridgePolicy {
         policy_id: BRIDGE_CUSTODY_POLICY_ID,
@@ -2723,6 +2979,77 @@ mod tests {
                 ["rpc_max_requests_per_minute"],
             7
         );
+    }
+
+    #[test]
+    fn runtime_ops_status_reports_missing_public_ops_evidence() {
+        let runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let state = test_rpc_state_with_limits(
+            runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+        let ops = state.ops_status().unwrap();
+
+        assert!(!ops.public_ops_ready);
+        assert!(ops
+            .blocking_gaps
+            .contains(&"missing-persistent-data-dir".to_string()));
+        assert!(ops
+            .blocking_gaps
+            .contains(&"no-produced-blocks-observed".to_string()));
+        assert!(!ops.storage_snapshot_present);
+        assert_eq!(ops.ops_root.len(), 64);
+    }
+
+    #[test]
+    fn runtime_ops_status_and_backup_manifest_bind_persisted_snapshot() {
+        let dir = std::env::temp_dir().join(format!("nebula-runtime-ops-test-{}", unix_ms()));
+        let storage = RuntimeStorage::from_data_dir(&dir);
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        runtime.faucet("alice").unwrap();
+        runtime.produce_block();
+        let snapshot = runtime.export_snapshot();
+        storage.save_snapshot(&snapshot).unwrap();
+        let mut state = test_rpc_state_with_limits(
+            runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+        state.storage = Some(storage.clone());
+
+        let ops = state.ops_status().unwrap();
+        assert!(ops.public_ops_ready, "{:?}", ops.blocking_gaps);
+        assert_eq!(ops.snapshot_root.len(), 64);
+        assert_eq!(
+            ops.storage_snapshot_root.as_ref().map(String::len),
+            Some(64)
+        );
+        assert_eq!(ops.storage_snapshot_height, Some(snapshot.latest_height()));
+        assert!(ops.storage_snapshot_matches_runtime);
+        assert_eq!(
+            ops.rpc_max_requests_per_minute,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE
+        );
+        assert_eq!(ops.bridge_policy_root, bridge_policy_root());
+        assert_eq!(ops.ops_root.len(), 64);
+
+        let manifest = state.backup_manifest().unwrap();
+        assert_eq!(manifest.snapshot_root.len(), 64);
+        assert!(manifest.snapshot_persisted);
+        assert!(manifest.storage_snapshot_matches_runtime);
+        assert_eq!(manifest.backup_root.len(), 64);
+        let rpc_ops = dispatch_json_rpc_method(&state, "nebula_opsStatus", json!({})).unwrap();
+        assert_eq!(rpc_ops["ops_root"].as_str().unwrap().len(), 64);
+        assert_eq!(rpc_ops["public_ops_ready"], true);
+        assert_eq!(rpc_ops["storage_snapshot_matches_runtime"], true);
+        let rpc_backup =
+            dispatch_json_rpc_method(&state, "nebula_backupManifest", json!({})).unwrap();
+        assert_eq!(rpc_backup["backup_root"].as_str().unwrap().len(), 64);
+        assert_eq!(rpc_backup["snapshot_persisted"], true);
+        assert_eq!(rpc_backup["storage_snapshot_matches_runtime"], true);
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

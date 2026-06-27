@@ -58,6 +58,11 @@ The target architecture is:
   `nebula_finalizeWithdrawal`: minimum confirmations, operator custody quorum,
   relayer/observer quorum, replay protection, withdrawal finalization evidence,
   and `/health`/`/status` visibility
+- operator ops and backup evidence through `/ops`, `/backup`,
+  `nebula_opsStatus`, and `nebula_backupManifest` so public operators can
+  verify block freshness, chain head, state/snapshot roots, persisted snapshot
+  state, sync peers, RPC limits, bridge policy root, and backup manifest root
+  before opening endpoints
 - post-quantum attestation roots and role-separated validator, operator,
   observer, witness, TLS, consensus, and network keys
 
@@ -152,38 +157,46 @@ evidence is absent or stale.
     `bridge_min_deposit_confirmations`, `bridge_deposit_observer_quorum`,
     `bridge_withdrawal_operator_quorum`, `bridge_live_value_enabled`,
     `bridge_deposit_count`, and `withdrawal_request_count`.
-14. Build and verify validator activation receipts that bind every admitted
+14. Gate operator ops and backup evidence before public endpoint exposure.
+    `/ops`, `/backup`, `nebula_opsStatus`, and `nebula_backupManifest` must
+    agree with `/health`, `/status`, and `nebula_status` on block freshness,
+    latest height/hash, state root, snapshot root, persisted snapshot path and
+    presence, sync peer count, RPC request-size and rate-limit policy, bridge
+    policy root, and backup manifest root. Operators must treat stale blocks,
+    missing persisted snapshots, mismatched backup roots, missing bridge policy
+    roots, or unexpected sync/RPC-limit values as public-launch blockers.
+15. Build and verify validator activation receipts that bind every admitted
     validator to the verified launch-package bundle, activation root, reward
     account, P2P endpoint, consensus key, network key, and operator acceptance
     root.
-15. Build and verify validator join receipts after activation. Each activated
+16. Build and verify validator join receipts after activation. Each activated
     validator must observe the chain at or after activation height `1`, prove the
     required peer count, and sign the observed validator join root.
-16. Build and verify operator join confirmations after validator join. Every
+17. Build and verify operator join confirmations after validator join. Every
     operator must confirm the validator join root, activation root,
     launch-package bundle root, operator acceptance root, and operator
     confirmation signature root.
-17. Build and verify public observer confirmations after operator-confirmed
+18. Build and verify public observer confirmations after operator-confirmed
     validator join. Deployment observers must re-check the live public endpoint,
     public status root, public probe root, observer region, and observer
     signature root with the required observer and region coverage.
-18. Build and verify the public testnet launch-candidate certificate. The
+19. Build and verify the public testnet launch-candidate certificate. The
     certificate binds the launch-package bundle, validator activation, validator
     join, operator join confirmation, public observer confirmation, public
     status, public probe, validator set, genesis, endpoint URL, and validator,
     operator, observer, and region counts into one candidate root.
-19. Open the public launch gate only after the signed launch package, verified
+20. Open the public launch gate only after the signed launch package, verified
     launch-package bundle, Base-style sequencer/follower rehearsal evidence,
     verified snapshots, and launch-candidate certificate all bind to the same
     deployment, public-surface, validator, genesis, and fee-policy roots.
-20. Run the economics trial with `NBLA` gas, `nXMR` gas, nXMR-funded NBLA
+21. Run the economics trial with `NBLA` gas, `nXMR` gas, nXMR-funded NBLA
     buybacks, NBLA backing, and validator-reward accounting at `0.001 XMR` per
     `NBLA`, while live-value policy stays disabled.
-21. Publish the remaining blocking evidence list. If any deployment, operator,
-    validator, observer, sequencer/follower, snapshot, bridge custody,
-    certificate, or economics evidence is missing, mismatched, unsigned, signed
-    by an unexpected sequencer key, or stale, keep the public launch gate closed
-    and report the exact blocking gap.
+22. Publish the remaining blocking evidence list. If any deployment, operator,
+    validator, observer, sequencer/follower, snapshot, ops/backup, bridge
+    custody, certificate, or economics evidence is missing, mismatched,
+    unsigned, signed by an unexpected sequencer key, or stale, keep the public
+    launch gate closed and report the exact blocking gap.
 
 ## Local RPC Devnet
 
@@ -228,6 +241,18 @@ with `account`, `monero_address`, and `amount_nxmr_units`, then remain
 `operator_approval_roots`. `/health`, `/status`, and `nebula_status` are the
 operator-facing surfaces for bridge policy visibility.
 
+Operator ops and backup evidence uses the runtime surfaces public operators
+need during launch rehearsals: `GET /ops`, `GET /backup`, JSON-RPC
+`nebula_opsStatus`, and JSON-RPC `nebula_backupManifest`. Before opening a
+public testnet endpoint, operators must compare those reports with `/health`,
+`/status`, `/snapshot`, and `nebula_status` and verify block freshness, latest
+height/hash, state root, snapshot root, persisted snapshot path and presence,
+configured sync peer count, RPC max-request/rate-limit policy, bridge policy
+root, and backup manifest root. A valid backup manifest must bind the node
+role, validator ID, latest chain head, state/snapshot roots, persisted snapshot
+location, sync peer coverage, RPC limit policy, and bridge policy root without
+exporting any sequencer secret key material.
+
 A follower can import once from an ahead peer before it starts serving RPC:
 
 ```bash
@@ -256,6 +281,8 @@ HTTP surfaces:
 - `GET /health`
 - `GET /status`
 - `GET /snapshot`
+- `GET /ops`
+- `GET /backup`
 
 RPC methods are JSON-RPC 2.0 over `POST /rpc`:
 
@@ -271,6 +298,10 @@ RPC methods are JSON-RPC 2.0 over `POST /rpc`:
 - `nebula_sendTransaction`
 - `nebula_observeBridgeDeposit`
 - `nebula_requestWithdrawal`
+- `nebula_finalizeWithdrawal`
+- `nebula_bridgePolicy`
+- `nebula_opsStatus`
+- `nebula_backupManifest`
 - `nebula_produceBlock`
 
 Example trial:

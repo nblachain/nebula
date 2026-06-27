@@ -32,6 +32,13 @@ requires explicit Monero confirmation, custody proof, relayer/observer evidence,
 replay protection, and withdrawal finalization evidence before `nXMR` can be
 treated as public gas.
 
+Operator ops and backup evidence is also a launch gate. The runtime surfaces
+`/ops`, `/backup`, `nebula_opsStatus`, and `nebula_backupManifest` are intended
+for public operators to verify block freshness, latest height/hash,
+state/snapshot roots, persisted snapshot path and presence, sync peer count, RPC
+limit policy, bridge policy root, and backup manifest root before opening an
+endpoint.
+
 The public launch sequence for this crate is:
 
 1. Prove local readiness with formatting, build, tests, the readiness contract,
@@ -82,16 +89,24 @@ The public launch sequence for this crate is:
    `bridge_min_deposit_confirmations`, `bridge_deposit_observer_quorum`,
    `bridge_withdrawal_operator_quorum`, `bridge_live_value_enabled`,
    `bridge_deposit_count`, and `withdrawal_request_count`.
-10. Build and verify validator activation receipts, validator join receipts,
+10. Exercise the operator ops and backup evidence gate. `/ops`, `/backup`,
+   `nebula_opsStatus`, and `nebula_backupManifest` must agree with `/health`,
+   `/status`, `/snapshot`, and `nebula_status` on block freshness, latest
+   height/hash, state root, snapshot root, persisted snapshot path and presence,
+   sync peer count, RPC request-size and rate-limit policy, bridge policy root,
+   and backup manifest root. Stale blocks, missing persisted snapshots,
+   mismatched backup roots, missing bridge policy roots, or unexpected sync/RPC
+   limit values keep the public endpoint launch-blocked.
+11. Build and verify validator activation receipts, validator join receipts,
    operator join confirmations, public observer confirmations, and the public
    testnet launch-candidate certificate against the same deployment,
    public-surface, validator, genesis, fee-policy, and bundle roots.
-11. Open the public launch gate only after the signed launch package, verified
+12. Open the public launch gate only after the signed launch package, verified
     bundle, sequencer/follower rehearsal evidence, verified snapshots, and
     launch certificate all agree. Run the `NBLA`/`nXMR` economics trial with
     live value disabled, and keep reporting any remaining blocking evidence
     until every deployment, operator, validator, observer, RPC, snapshot, bridge
-    custody, certificate, and economics gap is closed.
+    custody, ops/backup, certificate, and economics gap is closed.
 
 ## Local RPC Devnet
 
@@ -133,19 +148,30 @@ confirmation floor, observer quorum, withdrawal operator quorum, live-value
 disabled state, deposit count, withdrawal count, finalized withdrawal count,
 and replay cache count before advertising `nXMR` gas.
 
+Operator ops and backup evidence is exposed through `GET /ops`, `GET /backup`,
+JSON-RPC `nebula_opsStatus`, and JSON-RPC `nebula_backupManifest`. Before
+advertising a public endpoint, operators should compare those reports with
+`/health`, `/status`, `/snapshot`, and `nebula_status` and verify block
+freshness, latest height/hash, state root, snapshot root, persisted snapshot
+path and presence, configured sync peer count, RPC max-request/rate-limit
+policy, bridge policy root, and backup manifest root. Backup manifests must
+bind the node role, validator ID, latest chain head, state/snapshot roots,
+persisted snapshot location, sync peer coverage, RPC limit policy, and bridge
+policy root without exporting sequencer secret key material.
+
 The default dev sequencer key is only for throwaway local rehearsals. Public
 rehearsals should pass `--sequencer-public-key <hex>` to all nodes and pass the
 matching `--sequencer-secret-key <hex>` only to the sequencer. Snapshots export
 the public sequencer key and block signatures, never the secret key.
 
-Each node exposes `/health`, `/status`, `/snapshot`, and JSON-RPC 2.0 on `/rpc`
-for
+Each node exposes `/health`, `/status`, `/snapshot`, `/ops`, `/backup`, and
+JSON-RPC 2.0 on `/rpc` for
 `nebula_status`, `nebula_chainHead`, `nebula_getBlockByHeight`,
 `nebula_getAccount`, `nebula_getReceipt`, `nebula_exportSnapshot`,
 `nebula_importSnapshot`, `nebula_feeQuote`, `nebula_faucet`,
 `nebula_sendTransaction`, `nebula_observeBridgeDeposit`,
 `nebula_requestWithdrawal`, `nebula_finalizeWithdrawal`, `nebula_bridgePolicy`,
-and `nebula_produceBlock`.
+`nebula_opsStatus`, `nebula_backupManifest`, and `nebula_produceBlock`.
 
 ## Commands
 
