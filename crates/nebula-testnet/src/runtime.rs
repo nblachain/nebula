@@ -45,6 +45,7 @@ pub struct RuntimeNodeOptions {
     pub sync_rpc_url: Option<String>,
     pub sync_rpc_urls: Vec<String>,
     pub sequencer_secret_key_hex: Option<String>,
+    pub admin_token: Option<String>,
     pub max_request_bytes: usize,
     pub max_requests_per_minute: u32,
 }
@@ -57,6 +58,7 @@ impl Default for RuntimeNodeOptions {
             sync_rpc_url: None,
             sync_rpc_urls: Vec::new(),
             sequencer_secret_key_hex: None,
+            admin_token: None,
             max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
             max_requests_per_minute: DEFAULT_MAX_REQUESTS_PER_MINUTE,
         }
@@ -392,6 +394,7 @@ pub struct RuntimeOpsStatus {
     pub sync_peer_count: usize,
     pub rpc_max_request_bytes: usize,
     pub rpc_max_requests_per_minute: u32,
+    pub admin_rpc_enabled: bool,
     pub max_mempool_transactions: usize,
     pub mempool_size: usize,
     pub mempool_capacity_remaining: usize,
@@ -437,6 +440,7 @@ pub struct RuntimeBackupManifest {
     pub sync_peer_count: usize,
     pub rpc_max_request_bytes: usize,
     pub rpc_max_requests_per_minute: u32,
+    pub admin_rpc_enabled: bool,
     pub max_mempool_transactions: usize,
     pub mempool_size: usize,
     pub mempool_capacity_remaining: usize,
@@ -525,6 +529,7 @@ struct RuntimeRpcState {
     storage: Option<RuntimeStorage>,
     rpc_limits: RuntimeRpcLimits,
     sync_peers: RuntimeSyncPeerSet,
+    admin_token: Option<String>,
     rate_limits: Arc<Mutex<BTreeMap<String, RuntimeRateLimitBucket>>>,
 }
 
@@ -623,6 +628,10 @@ impl RuntimeRpcState {
         fields.insert(
             "sync_peer_count".to_string(),
             json!(self.sync_peers.sync_peer_urls.len()),
+        );
+        fields.insert(
+            "admin_rpc_enabled".to_string(),
+            json!(self.admin_token.is_some()),
         );
         Ok(status)
     }
@@ -730,6 +739,7 @@ impl RuntimeRpcState {
             sync_peer_count: self.sync_peers.sync_peer_urls.len(),
             rpc_max_request_bytes: self.rpc_limits.max_request_bytes,
             rpc_max_requests_per_minute: self.rpc_limits.max_requests_per_minute,
+            admin_rpc_enabled: self.admin_token.is_some(),
             max_mempool_transactions: status.max_mempool_transactions,
             mempool_size: status.mempool_size,
             mempool_capacity_remaining: status.mempool_capacity_remaining,
@@ -781,6 +791,7 @@ impl RuntimeRpcState {
             sync_peer_count: ops_status.sync_peer_count,
             rpc_max_request_bytes: ops_status.rpc_max_request_bytes,
             rpc_max_requests_per_minute: ops_status.rpc_max_requests_per_minute,
+            admin_rpc_enabled: ops_status.admin_rpc_enabled,
             max_mempool_transactions: ops_status.max_mempool_transactions,
             mempool_size: ops_status.mempool_size,
             mempool_capacity_remaining: ops_status.mempool_capacity_remaining,
@@ -804,6 +815,16 @@ impl RuntimeRpcLimits {
             max_request_bytes: options.max_request_bytes,
             max_requests_per_minute: options.max_requests_per_minute,
         })
+    }
+}
+
+fn normalize_admin_token(admin_token: Option<String>) -> Result<Option<String>, String> {
+    match admin_token {
+        Some(token) if token.trim().is_empty() => {
+            Err("admin_token must not be empty when configured".to_string())
+        }
+        Some(token) => Ok(Some(token)),
+        None => Ok(None),
     }
 }
 
@@ -1099,6 +1120,7 @@ impl NebulaRuntime {
     }
 
     pub fn faucet(&mut self, account: &str) -> Result<FaucetReport, String> {
+        self.ensure_accountability_clean()?;
         validate_account_id(account)?;
         let state = self
             .accounts
@@ -1128,6 +1150,7 @@ impl NebulaRuntime {
         &mut self,
         tx: RuntimeTransaction,
     ) -> Result<SubmitTransactionReport, String> {
+        self.ensure_accountability_clean()?;
         validate_transaction_shape(&tx)?;
         let tx_id = tx.id();
         if self.receipts.contains_key(&tx_id)
@@ -1181,6 +1204,7 @@ impl NebulaRuntime {
         &mut self,
         deposit: RuntimeBridgeDeposit,
     ) -> Result<BridgeDepositReport, String> {
+        self.ensure_accountability_clean()?;
         validate_bridge_deposit(&deposit)?;
         if self.bridge_deposits.contains_key(&deposit.monero_tx_id) {
             return Err(format!(
@@ -1222,6 +1246,7 @@ impl NebulaRuntime {
         monero_address: &str,
         amount_nxmr_units: u128,
     ) -> Result<WithdrawalReport, String> {
+        self.ensure_accountability_clean()?;
         validate_account_id(account)?;
         validate_monero_address(monero_address)?;
         if amount_nxmr_units == 0 {
@@ -1279,6 +1304,7 @@ impl NebulaRuntime {
         finalization_proof_root: &str,
         operator_approval_roots: Vec<String>,
     ) -> Result<WithdrawalFinalizationReport, String> {
+        self.ensure_accountability_clean()?;
         validate_fixed_hex(finalized_monero_tx_id, "finalized_monero_tx_id", 64)?;
         validate_fixed_hex(finalization_proof_root, "finalization_proof_root", 64)?;
         validate_quorum_roots(
@@ -1348,6 +1374,7 @@ impl NebulaRuntime {
         operator_id: &str,
         approval_root: &str,
     ) -> Result<SequencerKeyRotationReport, String> {
+        self.ensure_accountability_clean()?;
         if !self.config.produce_blocks {
             return Err("sequencer key rotation requires block production mode".to_string());
         }
@@ -1484,6 +1511,7 @@ impl NebulaRuntime {
     }
 
     pub fn try_produce_block(&mut self) -> Result<RuntimeBlock, String> {
+        self.ensure_accountability_clean()?;
         let parent = self.latest_block();
         let height = parent.height + 1;
         let mut included = Vec::new();
@@ -1566,6 +1594,16 @@ impl NebulaRuntime {
         block.block_hash = block_root(block);
         block.signature = sign_block_hash(&block.block_hash, secret_key_hex)?;
         Ok(())
+    }
+
+    fn ensure_accountability_clean(&self) -> Result<(), String> {
+        if self.accountability_reports.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "sequencer accountability evidence is open: {} report(s); block production and state mutations are disabled",
+            self.accountability_reports.len()
+        ))
     }
 
     fn apply_transaction(
@@ -1702,6 +1740,8 @@ pub fn serve_runtime_rpc_with_options(
     options: RuntimeNodeOptions,
 ) -> std::io::Result<()> {
     let rpc_limits = RuntimeRpcLimits::from_options(&options).map_err(std::io::Error::other)?;
+    let admin_token =
+        normalize_admin_token(options.admin_token.clone()).map_err(std::io::Error::other)?;
     let sync_peers = RuntimeSyncPeerSet::from_options(&options).map_err(std::io::Error::other)?;
     let storage = options.data_dir.as_ref().map(RuntimeStorage::from_data_dir);
     let startup_bootstrap_peers = if sync_peers.bootstrap_peer_urls.is_empty() {
@@ -1728,6 +1768,7 @@ pub fn serve_runtime_rpc_with_options(
         storage,
         rpc_limits,
         sync_peers,
+        admin_token,
         rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
     };
     let produce_blocks = state
@@ -2114,6 +2155,7 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
                     "ok": true,
                     "service": "nebula-testnet-rpc",
                     "rpc_limits": state.rpc_limits,
+                    "admin_rpc_enabled": state.admin_token.is_some(),
                     "bootstrap_peer_urls": state.sync_peers.bootstrap_peer_urls,
                     "sync_peer_urls": state.sync_peers.sync_peer_urls,
                     "sync_peer_count": state.sync_peers.sync_peer_urls.len(),
@@ -2241,7 +2283,11 @@ fn dispatch_json_rpc_method(
             Ok(json!(runtime.export_snapshot()))
         }
         "nebula_importSnapshot" => {
-            let snapshot_value = params.get("snapshot").cloned().unwrap_or(params);
+            ensure_admin_rpc(state, &params, method)?;
+            let snapshot_value = params
+                .get("snapshot")
+                .cloned()
+                .unwrap_or_else(|| params_without_admin_token(&params));
             let snapshot = serde_json::from_value::<RuntimeSnapshot>(snapshot_value)
                 .map_err(|error| format!("invalid runtime snapshot: {error}"))?;
             let imported_height = snapshot.latest_height();
@@ -2293,8 +2339,12 @@ fn dispatch_json_rpc_method(
             Ok(json!(report))
         }
         "nebula_observeBridgeDeposit" => {
+            ensure_admin_rpc(state, &params, method)?;
             ensure_block_producer(state)?;
-            let deposit_value = params.get("deposit").cloned().unwrap_or(params);
+            let deposit_value = params
+                .get("deposit")
+                .cloned()
+                .unwrap_or_else(|| params_without_admin_token(&params));
             let mut deposit = serde_json::from_value::<RuntimeBridgeDeposit>(deposit_value)
                 .map_err(|error| format!("invalid bridge deposit: {error}"))?;
             if deposit.observed_at_unix_ms == 0 {
@@ -2320,6 +2370,7 @@ fn dispatch_json_rpc_method(
             Ok(json!(report))
         }
         "nebula_finalizeWithdrawal" => {
+            ensure_admin_rpc(state, &params, method)?;
             ensure_block_producer(state)?;
             let withdrawal_id = required_str_param(&params, "withdrawal_id")?;
             let finalized_monero_tx_id = required_str_param(&params, "finalized_monero_tx_id")?;
@@ -2339,6 +2390,7 @@ fn dispatch_json_rpc_method(
             Ok(json!(report))
         }
         "nebula_rotateSequencerKey" => {
+            ensure_admin_rpc(state, &params, method)?;
             ensure_block_producer(state)?;
             let new_sequencer_secret_key_hex =
                 required_str_param(&params, "new_sequencer_secret_key_hex")?;
@@ -2356,7 +2408,7 @@ fn dispatch_json_rpc_method(
             Ok(json!(report))
         }
         "nebula_reportEquivocation" => {
-            ensure_block_producer(state)?;
+            ensure_admin_rpc(state, &params, method)?;
             let height = required_u64_param(&params, "height")?;
             let first_block_hash = required_str_param(&params, "first_block_hash")?;
             let second_block_hash = required_str_param(&params, "second_block_hash")?;
@@ -2380,6 +2432,7 @@ fn dispatch_json_rpc_method(
             "bridge_policy_root": bridge_policy_root(),
         })),
         "nebula_produceBlock" => {
+            ensure_admin_rpc(state, &params, method)?;
             ensure_block_producer(state)?;
             let block = {
                 let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
@@ -2406,7 +2459,33 @@ fn ensure_block_producer(state: &RuntimeRpcState) -> Result<(), String> {
     if runtime.sequencer_secret_key_hex.is_none() {
         return Err("node has no sequencer signing key configured".to_string());
     }
+    runtime.ensure_accountability_clean()?;
     Ok(())
+}
+
+fn ensure_admin_rpc(state: &RuntimeRpcState, params: &Value, method: &str) -> Result<(), String> {
+    let Some(expected_token) = state.admin_token.as_deref() else {
+        return Err(format!(
+            "admin token required for {method}; no admin token is configured"
+        ));
+    };
+    let provided_token = params
+        .get("admin_token")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("admin token required for {method}"))?;
+    if provided_token != expected_token {
+        return Err(format!("admin token rejected for {method}"));
+    }
+    Ok(())
+}
+
+fn params_without_admin_token(params: &Value) -> Value {
+    let Value::Object(fields) = params else {
+        return params.clone();
+    };
+    let mut fields = fields.clone();
+    fields.remove("admin_token");
+    Value::Object(fields)
 }
 
 fn rpc_error(id: Value, code: i64, message: &str) -> Value {
@@ -3187,6 +3266,7 @@ fn ops_status_root(report: &RuntimeOpsStatus) -> String {
         "sync_peer_count": report.sync_peer_count,
         "rpc_max_request_bytes": report.rpc_max_request_bytes,
         "rpc_max_requests_per_minute": report.rpc_max_requests_per_minute,
+        "admin_rpc_enabled": report.admin_rpc_enabled,
         "max_mempool_transactions": report.max_mempool_transactions,
         "mempool_size": report.mempool_size,
         "mempool_capacity_remaining": report.mempool_capacity_remaining,
@@ -3233,6 +3313,7 @@ fn backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
         "sync_peer_count": manifest.sync_peer_count,
         "rpc_max_request_bytes": manifest.rpc_max_request_bytes,
         "rpc_max_requests_per_minute": manifest.rpc_max_requests_per_minute,
+        "admin_rpc_enabled": manifest.admin_rpc_enabled,
         "max_mempool_transactions": manifest.max_mempool_transactions,
         "mempool_size": manifest.mempool_size,
         "mempool_capacity_remaining": manifest.mempool_capacity_remaining,
@@ -3420,6 +3501,7 @@ mod tests {
                 max_requests_per_minute,
             },
             sync_peers: RuntimeSyncPeerSet::default(),
+            admin_token: None,
             rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -3488,6 +3570,10 @@ mod tests {
         assert!(RuntimeRpcLimits::from_options(&options)
             .unwrap_err()
             .contains("max_requests_per_minute"));
+
+        assert!(normalize_admin_token(Some(String::new()))
+            .unwrap_err()
+            .contains("admin_token"));
     }
 
     #[test]
@@ -3539,6 +3625,7 @@ mod tests {
 
         assert_eq!(status["rpc_max_request_bytes"], 2048);
         assert_eq!(status["rpc_max_requests_per_minute"], 7);
+        assert_eq!(status["admin_rpc_enabled"], false);
         assert_eq!(
             status["max_mempool_transactions"],
             DEFAULT_MAX_MEMPOOL_TRANSACTIONS
@@ -3613,6 +3700,7 @@ mod tests {
             ops.rpc_max_requests_per_minute,
             DEFAULT_MAX_REQUESTS_PER_MINUTE
         );
+        assert!(!ops.admin_rpc_enabled);
         assert_eq!(ops.bridge_policy_root, bridge_policy_root());
         assert_eq!(
             ops.max_mempool_transactions,
@@ -3628,6 +3716,7 @@ mod tests {
         assert_eq!(manifest.snapshot_root.len(), 64);
         assert!(manifest.snapshot_persisted);
         assert!(manifest.storage_snapshot_matches_runtime);
+        assert!(!manifest.admin_rpc_enabled);
         assert_eq!(
             manifest.max_mempool_transactions,
             DEFAULT_MAX_MEMPOOL_TRANSACTIONS
@@ -3845,11 +3934,12 @@ mod tests {
     #[test]
     fn runtime_rpc_rotates_key_and_reports_equivocation() {
         let runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
-        let state = test_rpc_state_with_limits(
+        let mut state = test_rpc_state_with_limits(
             runtime,
             DEFAULT_MAX_REQUEST_BYTES,
             DEFAULT_MAX_REQUESTS_PER_MINUTE,
         );
+        state.admin_token = Some("admin".to_string());
         let new_secret_key_hex = "5e".repeat(32);
         let new_public_key_hex = public_key_hex_for_secret(&new_secret_key_hex).unwrap();
 
@@ -3857,6 +3947,7 @@ mod tests {
             &state,
             "nebula_rotateSequencerKey",
             json!({
+                "admin_token": "admin",
                 "new_sequencer_secret_key_hex": new_secret_key_hex,
                 "operator_id": "operator-a",
                 "approval_root": "d".repeat(64),
@@ -3866,7 +3957,12 @@ mod tests {
         assert_eq!(rotation["rotated"], true);
         assert_eq!(rotation["sequencer_public_key_hex"], new_public_key_hex);
 
-        let block = dispatch_json_rpc_method(&state, "nebula_produceBlock", json!({})).unwrap();
+        let block = dispatch_json_rpc_method(
+            &state,
+            "nebula_produceBlock",
+            json!({"admin_token": "admin"}),
+        )
+        .unwrap();
         assert_eq!(block["height"], 1);
         assert_eq!(block["producer_public_key"], new_public_key_hex);
 
@@ -3874,6 +3970,7 @@ mod tests {
             &state,
             "nebula_reportEquivocation",
             json!({
+                "admin_token": "admin",
                 "height": 1,
                 "first_block_hash": block["block_hash"].as_str().unwrap(),
                 "second_block_hash": "f".repeat(64),
@@ -4306,22 +4403,25 @@ mod tests {
         let mut config = RuntimeConfig::public_testnet_default();
         config.produce_blocks = false;
         let runtime = NebulaRuntime::new(config).unwrap();
-        let state = test_rpc_state_with_limits(
+        let mut state = test_rpc_state_with_limits(
             runtime,
             DEFAULT_MAX_REQUEST_BYTES,
             DEFAULT_MAX_REQUESTS_PER_MINUTE,
         );
+        state.admin_token = Some("admin".to_string());
 
         assert!(
             dispatch_json_rpc_method(&state, "nebula_faucet", json!({"account": "alice"}))
                 .unwrap_err()
                 .contains("follower mode")
         );
-        assert!(
-            dispatch_json_rpc_method(&state, "nebula_produceBlock", json!({}))
-                .unwrap_err()
-                .contains("follower mode")
-        );
+        assert!(dispatch_json_rpc_method(
+            &state,
+            "nebula_produceBlock",
+            json!({"admin_token": "admin"})
+        )
+        .unwrap_err()
+        .contains("follower mode"));
         let status = dispatch_json_rpc_method(&state, "nebula_status", json!({})).unwrap();
         assert_eq!(status["node_role"], "follower");
         assert_eq!(status["block_production_enabled"], false);

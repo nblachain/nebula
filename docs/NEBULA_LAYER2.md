@@ -61,8 +61,8 @@ The target architecture is:
 - operator ops and backup evidence through `/ops`, `/backup`,
   `nebula_opsStatus`, and `nebula_backupManifest` so public operators can
   verify block freshness, chain head, state/snapshot roots, persisted snapshot
-  state, sync peers, RPC limits, bridge policy root, and backup manifest root
-  before opening endpoints
+  state, sync peers, RPC limits, admin RPC state, bridge policy root, and
+  backup manifest root before opening endpoints
 - post-quantum attestation roots and role-separated validator, operator,
   observer, witness, TLS, consensus, and network keys
 
@@ -164,20 +164,24 @@ evidence is absent or stale.
     agree with `/health`, `/status`, and `nebula_status` on block freshness,
     latest height/hash, state root, snapshot root, persisted snapshot path and
     presence, sync peer count, mempool cap/remaining capacity/rejection count,
-    RPC request-size and rate-limit policy, bridge policy root, and backup
-    manifest root. Operators must treat stale blocks, missing persisted
-    snapshots, mismatched backup roots, missing bridge policy roots, full
-    mempools, or unexpected sync/RPC-limit values as public-launch blockers.
+    RPC request-size and rate-limit policy, admin RPC state, bridge policy root,
+    and backup manifest root. Operators must treat stale blocks, missing
+    persisted snapshots, mismatched backup roots, missing bridge policy roots,
+    full mempools, disabled or unexpected admin RPC state, or unexpected
+    sync/RPC-limit values as public-launch blockers.
 15. Gate sequencer key rotation and operator accountability before public
     endpoint exposure. `/health`, `/status`, and `nebula_status` must expose
     the current sequencer public key, sequencer key-rotation history/root,
     accountability evidence root, equivocation evidence, and mis-signing
     evidence. Operators must rehearse `nebula_rotateSequencerKey` with the old
     key, new key, activation height, rotation proof root, and operator approval
-    roots, then prove followers fail closed on stale-key blocks.
+    roots, then prove followers fail closed on stale-key blocks. Operator-only
+    methods must require `params.admin_token` from a node started with
+    `--admin-token`.
     `nebula_reportEquivocation` must bind conflicting block/signature evidence
     to the accountability root, and unresolved equivocation or mis-signing
-    evidence keeps the public launch gate closed.
+    evidence must halt block production and state mutations while status/ops
+    evidence stays visible.
 16. Build and verify validator activation receipts that bind every admitted
     validator to the verified launch-package bundle, activation root, reward
     account, P2P endpoint, consensus key, network key, and operator acceptance
@@ -225,10 +229,18 @@ body size, and per-client request rate limit; tune rehearsal limits with
 `--max-mempool-transactions`, `--max-request-bytes`, and
 `--max-requests-per-minute`.
 
+Operator-only JSON-RPC methods require a node started with
+`--admin-token <operator-token>` and request params containing
+`"admin_token": "<operator-token>"`. This protects `nebula_importSnapshot`,
+`nebula_observeBridgeDeposit`, `nebula_finalizeWithdrawal`,
+`nebula_rotateSequencerKey`, `nebula_reportEquivocation`, and
+`nebula_produceBlock` from the public RPC surface. Public read/query and user
+flow methods remain callable without that token.
+
 Run a local persistent sequencer:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
 ```
 
 The default dev sequencer key is only for throwaway local rehearsals. Public
@@ -273,11 +285,11 @@ public testnet endpoint, operators must compare those reports with `/health`,
 `/status`, `/snapshot`, and `nebula_status` and verify block freshness, latest
 height/hash, state root, snapshot root, persisted snapshot path and presence,
 configured sync peer count, mempool cap/remaining capacity/rejection count, RPC
-max-request/rate-limit policy, bridge policy root, and backup manifest root. A
-valid backup manifest must bind the node role, validator ID, latest chain head,
-state/snapshot roots, persisted snapshot location, sync peer coverage, mempool
-capacity policy, RPC limit policy, and bridge policy root without exporting any
-sequencer secret key material.
+max-request/rate-limit policy, admin RPC state, bridge policy root, and backup
+manifest root. A valid backup manifest must bind the node role, validator ID,
+latest chain head, state/snapshot roots, persisted snapshot location, sync peer
+coverage, mempool capacity policy, RPC limit policy, admin RPC state, and
+bridge policy root without exporting any sequencer secret key material.
 
 A follower can import once from an ahead peer before it starts serving RPC:
 
@@ -572,7 +584,8 @@ Accountability evidence uses `nebula_reportEquivocation` with `height`,
 The evidence root must bind the conflicting signatures or mis-signing proof
 outside the canonical block hash pair. Public testnet launch stays fail-closed
 when unresolved equivocation, stale-key signing, or other sequencer mis-signing
-evidence is present, even if the node is otherwise fresh and synced.
+evidence is present, and the runtime halts block production and state mutations
+while status/ops evidence remains visible.
 
 ## CI
 
