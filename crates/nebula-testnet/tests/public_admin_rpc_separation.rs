@@ -35,20 +35,30 @@ const ADMIN_METHODS: &[&str] = &[
 
 #[test]
 fn admin_rpc_methods_require_token_before_params() {
-    let rpc_addr = start_rpc_server(Some(ADMIN_TOKEN));
+    let (_public_addr, admin_addr) = start_rpc_server_with_admin(Some(ADMIN_TOKEN));
 
     for method in ADMIN_METHODS {
-        let missing = rpc_call(&rpc_addr, method, json!({}));
+        let missing = rpc_call(&admin_addr, method, json!({}));
         assert_rpc_error_contains(&missing, "admin token");
 
-        let wrong = rpc_call(&rpc_addr, method, json!({ "admin_token": "wrong-token" }));
+        let wrong = rpc_call(&admin_addr, method, json!({ "admin_token": "wrong-token" }));
         assert_rpc_error_contains(&wrong, "admin token");
     }
 }
 
 #[test]
+fn public_rpc_rejects_admin_methods_even_with_valid_token() {
+    let (public_addr, _admin_addr) = start_rpc_server_with_admin(Some(ADMIN_TOKEN));
+
+    for method in ADMIN_METHODS {
+        let rejected = rpc_call(&public_addr, method, json!({ "admin_token": ADMIN_TOKEN }));
+        assert_rpc_error_contains(&rejected, "public RPC listener");
+    }
+}
+
+#[test]
 fn public_rpc_methods_remain_callable_without_admin_token() {
-    let rpc_addr = start_rpc_server(Some(ADMIN_TOKEN));
+    let (rpc_addr, admin_addr) = start_rpc_server_with_admin(Some(ADMIN_TOKEN));
     let tx_account = account_id(0x44);
     let withdrawal_account = account_id(0x45);
 
@@ -83,7 +93,7 @@ fn public_rpc_methods_remain_callable_without_admin_token() {
     );
     assert_eq!(rpc_result(&withdrawal_faucet)["credited_nxmr_units"], 0);
     let bridge_deposit = rpc_call(
-        &rpc_addr,
+        &admin_addr,
         "nebula_observeBridgeDeposit",
         json!({
             "admin_token": ADMIN_TOKEN,
@@ -120,7 +130,7 @@ fn public_rpc_methods_remain_callable_without_admin_token() {
 
 #[test]
 fn metrics_endpoint_exposes_public_rpc_operational_gauges() {
-    let rpc_addr = start_rpc_server(Some(ADMIN_TOKEN));
+    let (rpc_addr, _admin_addr) = start_rpc_server_with_admin(Some(ADMIN_TOKEN));
 
     let (headers, body) =
         http_text(&rpc_addr, "GET", "/metrics", None).expect("metrics endpoint responds");
@@ -147,6 +157,9 @@ fn metrics_endpoint_exposes_public_rpc_operational_gauges() {
     assert!(body.contains("nebula_bridge_custody_reconciled 1"));
     assert!(body.contains("nebula_nxmr_custody_deficit_units 0"));
     assert!(body.contains("nebula_admin_rpc_enabled 1"));
+    assert!(body.contains("nebula_admin_rpc_private_listener 1"));
+    assert!(body.contains("nebula_public_rpc_admin_methods_enabled 0"));
+    assert!(body.contains("nebula_default_dev_sequencer_key 1"));
     assert!(body.contains("nebula_bridge_deposit_count 0"));
     assert!(body.contains("nebula_sequencer_accountability_clean 1"));
     assert!(body.contains("nebula_public_ops_ready "));
@@ -154,7 +167,7 @@ fn metrics_endpoint_exposes_public_rpc_operational_gauges() {
 
 #[test]
 fn health_endpoint_exposes_chain_root_ops_and_backup_evidence() {
-    let rpc_addr = start_rpc_server(Some(ADMIN_TOKEN));
+    let (rpc_addr, _admin_addr) = start_rpc_server_with_admin(Some(ADMIN_TOKEN));
 
     let health = http_json(&rpc_addr, "GET", "/health", None).expect("health endpoint responds");
     let status = rpc_result(&rpc_call(&rpc_addr, "nebula_status", json!({}))).clone();
@@ -204,6 +217,9 @@ fn health_endpoint_exposes_chain_root_ops_and_backup_evidence() {
     assert_eq!(health["sync_successful_peer_count"], 0);
     assert_eq!(health["sync_attempt_count"], 0);
     assert_eq!(health["admin_rpc_enabled"], true);
+    assert_eq!(health["admin_rpc_private_listener"], true);
+    assert_eq!(health["public_rpc_admin_methods_enabled"], false);
+    assert_eq!(health["default_dev_sequencer_key"], true);
     assert_eq!(health["latest_hash"].as_str().unwrap().len(), 64);
     assert_eq!(health["latest_state_root"].as_str().unwrap().len(), 64);
     assert_eq!(health["current_state_root"].as_str().unwrap().len(), 64);
@@ -226,10 +242,14 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
     sequencer_config.block_target_ms = 999;
     sequencer_config.validator_id = "validator-a".to_string();
     sequencer_config.launch_binding = Some(sequencer_binding.clone());
-    let sequencer_addr = start_rpc_server_with_config(
+    let initial_sequencer_secret_key_hex = "3c".repeat(32);
+    sequencer_config.sequencer_public_key_hex =
+        hex::encode(signing_key(0x3c).verifying_key().to_bytes());
+    let (sequencer_addr, sequencer_admin_addr) = start_rpc_server_with_config_and_admin(
         sequencer_config,
         RuntimeNodeOptions {
             admin_token: Some(ADMIN_TOKEN.to_string()),
+            sequencer_secret_key_hex: Some(initial_sequencer_secret_key_hex),
             data_dir: Some(temp_data_dir("sequencer")),
             auto_produce_blocks: false,
             max_requests_per_minute: 10_000,
@@ -238,7 +258,7 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
     );
 
     let initial_block = rpc_call(
-        &sequencer_addr,
+        &sequencer_admin_addr,
         "nebula_produceBlock",
         json!({ "admin_token": ADMIN_TOKEN }),
     );
@@ -258,7 +278,7 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
     let initial_status = rpc_result(&rpc_call(&sequencer_addr, "nebula_status", json!({}))).clone();
 
     let rotation = rpc_call(
-        &sequencer_addr,
+        &sequencer_admin_addr,
         "nebula_rotateSequencerKey",
         json!({
             "admin_token": ADMIN_TOKEN,
@@ -289,7 +309,7 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
     assert_eq!(rpc_result(&faucet)["credited_nxmr_units"], 0);
 
     let bridge_deposit = rpc_call(
-        &sequencer_addr,
+        &sequencer_admin_addr,
         "nebula_observeBridgeDeposit",
         json!({
             "admin_token": ADMIN_TOKEN,
@@ -307,7 +327,7 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
     );
     assert_eq!(rpc_result(&nxmr_gas_tx)["accepted_to_mempool"], true);
     let block_with_nxmr_fee = rpc_call(
-        &sequencer_addr,
+        &sequencer_admin_addr,
         "nebula_produceBlock",
         json!({ "admin_token": ADMIN_TOKEN }),
     );
@@ -348,7 +368,7 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
         .to_string();
 
     let finalization = rpc_call(
-        &sequencer_addr,
+        &sequencer_admin_addr,
         "nebula_finalizeWithdrawal",
         json!({
             "admin_token": ADMIN_TOKEN,
@@ -406,6 +426,7 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
     follower_config.block_target_ms = 999;
     follower_config.validator_id = "validator-b".to_string();
     follower_config.produce_blocks = false;
+    follower_config.sequencer_public_key_hex = rotated_public_key.clone();
     follower_config.launch_binding = Some(follower_binding.clone());
     let follower_addr = start_rpc_server_with_config(
         follower_config,
@@ -501,10 +522,13 @@ fn launch_bound_accountability_report_blocks_public_ops_and_mutations() {
     config.block_target_ms = 999;
     config.validator_id = "validator-a".to_string();
     config.launch_binding = Some(launch_binding);
-    let rpc_addr = start_rpc_server_with_config(
+    let initial_sequencer_secret_key_hex = "3d".repeat(32);
+    config.sequencer_public_key_hex = hex::encode(signing_key(0x3d).verifying_key().to_bytes());
+    let (rpc_addr, admin_addr) = start_rpc_server_with_config_and_admin(
         config,
         RuntimeNodeOptions {
             admin_token: Some(ADMIN_TOKEN.to_string()),
+            sequencer_secret_key_hex: Some(initial_sequencer_secret_key_hex),
             data_dir: Some(temp_data_dir("accountability")),
             max_requests_per_minute: 10_000,
             ..RuntimeNodeOptions::default()
@@ -523,7 +547,7 @@ fn launch_bound_accountability_report_blocks_public_ops_and_mutations() {
         .to_string();
 
     let report = rpc_call(
-        &rpc_addr,
+        &admin_addr,
         "nebula_reportEquivocation",
         json!({
             "admin_token": ADMIN_TOKEN,
@@ -554,14 +578,14 @@ fn launch_bound_accountability_report_blocks_public_ops_and_mutations() {
         .any(|gap| gap == "sequencer-accountability-evidence-open"));
 
     let block_after_evidence = rpc_call(
-        &rpc_addr,
+        &admin_addr,
         "nebula_produceBlock",
         json!({ "admin_token": ADMIN_TOKEN }),
     );
     assert_rpc_error_contains(&block_after_evidence, "accountability evidence");
 
     let rotation_after_evidence = rpc_call(
-        &rpc_addr,
+        &admin_addr,
         "nebula_rotateSequencerKey",
         json!({
             "admin_token": ADMIN_TOKEN,
@@ -575,10 +599,10 @@ fn launch_bound_accountability_report_blocks_public_ops_and_mutations() {
 
 #[test]
 fn accountability_evidence_closes_admin_producer_mutations_but_remains_visible() {
-    let rpc_addr = start_rpc_server(Some(ADMIN_TOKEN));
+    let (rpc_addr, admin_addr) = start_rpc_server_with_admin(Some(ADMIN_TOKEN));
 
     let block = rpc_call(
-        &rpc_addr,
+        &admin_addr,
         "nebula_produceBlock",
         json!({ "admin_token": ADMIN_TOKEN }),
     );
@@ -589,7 +613,7 @@ fn accountability_evidence_closes_admin_producer_mutations_but_remains_visible()
         .expect("block hash is a string");
 
     let report = rpc_call(
-        &rpc_addr,
+        &admin_addr,
         "nebula_reportEquivocation",
         json!({
             "admin_token": ADMIN_TOKEN,
@@ -620,14 +644,14 @@ fn accountability_evidence_closes_admin_producer_mutations_but_remains_visible()
         .any(|gap| gap == "sequencer-accountability-evidence-open"));
 
     let block_after_evidence = rpc_call(
-        &rpc_addr,
+        &admin_addr,
         "nebula_produceBlock",
         json!({ "admin_token": ADMIN_TOKEN }),
     );
     assert_rpc_error_contains(&block_after_evidence, "accountability evidence");
 
     let rotation_after_evidence = rpc_call(
-        &rpc_addr,
+        &admin_addr,
         "nebula_rotateSequencerKey",
         json!({
             "admin_token": ADMIN_TOKEN,
@@ -639,11 +663,24 @@ fn accountability_evidence_closes_admin_producer_mutations_but_remains_visible()
     assert_rpc_error_contains(&rotation_after_evidence, "accountability evidence");
 }
 
-fn start_rpc_server(admin_token: Option<&str>) -> String {
+fn start_rpc_server_with_config(config: RuntimeConfig, options: RuntimeNodeOptions) -> String {
+    let bind_addr = reserve_local_addr();
+
+    let server_addr = bind_addr.clone();
+    thread::spawn(move || {
+        serve_runtime_rpc_with_options(&server_addr, config, options)
+            .expect("runtime RPC server should keep serving");
+    });
+
+    wait_for_rpc(&bind_addr);
+    bind_addr
+}
+
+fn start_rpc_server_with_admin(admin_token: Option<&str>) -> (String, String) {
     let mut config = RuntimeConfig::public_testnet_default();
     config.block_target_ms = 999;
 
-    start_rpc_server_with_config(
+    start_rpc_server_with_config_and_admin(
         config,
         RuntimeNodeOptions {
             admin_token: admin_token.map(str::to_string),
@@ -653,21 +690,32 @@ fn start_rpc_server(admin_token: Option<&str>) -> String {
     )
 }
 
-fn start_rpc_server_with_config(config: RuntimeConfig, options: RuntimeNodeOptions) -> String {
+fn start_rpc_server_with_config_and_admin(
+    config: RuntimeConfig,
+    mut options: RuntimeNodeOptions,
+) -> (String, String) {
+    let public_addr = reserve_local_addr();
+    let admin_addr = reserve_local_addr();
+    options.admin_rpc_bind_addr = Some(admin_addr.clone());
+
+    let server_addr = public_addr.clone();
+    thread::spawn(move || {
+        serve_runtime_rpc_with_options(&server_addr, config, options)
+            .expect("runtime RPC server should keep serving");
+    });
+
+    wait_for_rpc(&public_addr);
+    wait_for_rpc(&admin_addr);
+    (public_addr, admin_addr)
+}
+
+fn reserve_local_addr() -> String {
     let reserved = TcpListener::bind("127.0.0.1:0").expect("reserve local RPC port");
     let bind_addr = reserved
         .local_addr()
         .expect("reserved listener has local address")
         .to_string();
     drop(reserved);
-
-    let server_addr = bind_addr.clone();
-    thread::spawn(move || {
-        serve_runtime_rpc_with_options(&server_addr, config, options)
-            .expect("runtime RPC server should keep serving");
-    });
-
-    wait_for_rpc(&bind_addr);
     bind_addr
 }
 

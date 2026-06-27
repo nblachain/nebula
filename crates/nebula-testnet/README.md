@@ -84,7 +84,11 @@ The public launch sequence for this crate is:
 7. Verify the strict launch package, then build and verify the launch-package
    bundle that external validators compare before joining.
 8. Rehearse the Base-style RPC devnet with one persistent sequencer and
-   persisted followers. Followers must import a verified startup snapshot with
+   persisted followers. The sequencer must use an explicit non-dev
+   `--sequencer-public-key`/`--sequencer-secret-key` pair and expose
+   operator-only methods only through a private `--admin-rpc-bind` listener
+   protected by `--admin-token`; the public `/rpc` listener must reject admin
+   methods even when a valid token is supplied. Followers must import a verified startup snapshot with
    `--bootstrap-rpc`, continuously sync newer verified snapshots from a
    repeatable `--sync-rpc` peer set, and expose matching `/health`, `/status`,
    `/snapshot`, and JSON-RPC `/rpc` views. Each snapshot block must commit to
@@ -119,15 +123,17 @@ The public launch sequence for this crate is:
    freshness, latest height/hash, state root, snapshot root, persisted snapshot
    path and presence, sync peer count/quorum, sync quorum height/hash/state
    root, successful peer count, mempool cap/remaining capacity/full and admission rejection counts,
-   RPC request-size and rate-limit policy, bridge policy root, backup manifest
-   root, and public ops readiness gauges.
+   RPC request-size and rate-limit policy, admin RPC private-listener state,
+   public-admin isolation, non-dev sequencer-key status, bridge policy root,
+   backup manifest root, and public ops readiness gauges.
    Build and verify runtime-surface evidence from captured `/health`,
    `/status`, `/snapshot`, `/ops`, `/backup`, `nebula_status`,
    `nebula_opsStatus`, `nebula_backupManifest`, and `/metrics` files before
    observers accept the endpoint.
    Stale blocks, missing persisted snapshots, mismatched backup roots, missing
-   bridge policy roots, full mempools, missing sync quorum evidence, unexpected
-   admission-rejection spikes, or unexpected sync/RPC limit values keep the
+   bridge policy roots, full mempools, missing sync quorum evidence, missing
+   private admin control on launch-bound sequencers, public RPC admin methods,
+   default dev sequencer keys, unexpected admission-rejection spikes, or unexpected sync/RPC limit values keep the
    public endpoint launch-blocked. Fast-moving sync attempt/import counters
    remain exposed as telemetry but are not durable equality fields across
    separately captured live surfaces.
@@ -161,7 +167,7 @@ Run a local Base-style public-testnet rehearsal with one sequencer and
 persisted followers:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --admin-rpc-bind 127.0.0.1:9947 --block-ms 250 --validator-id validator-a --sequencer-public-key <sequencer-public-key-hex> --sequencer-secret-key <sequencer-secret-key-hex> --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9945 --block-ms 250 --validator-id validator-b --data-dir /tmp/nebula-validator-b --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9946/snapshot --sync-peer-quorum 2 --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --sync-peer-quorum 2 --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
 ```
@@ -206,12 +212,14 @@ account nonces, nonce mismatches, and insufficient `NBLA`/`nXMR` balances before
 consuming local mempool capacity.
 
 Operator-only JSON-RPC methods require a node started with
-`--admin-token <operator-token>` and request params containing
-`"admin_token": "<operator-token>"`. This protects `nebula_importSnapshot`,
+`--admin-rpc-bind <private-addr>` plus `--admin-token <operator-token>` and
+request params containing `"admin_token": "<operator-token>"`. This protects
+`nebula_importSnapshot`,
 `nebula_observeBridgeDeposit`, `nebula_finalizeWithdrawal`,
 `nebula_rotateSequencerKey`, `nebula_reportEquivocation`, and
-`nebula_produceBlock` from the public RPC surface. Public read/query and user
-flow methods remain callable without that token.
+`nebula_produceBlock` from the public RPC surface. The public listener rejects
+operator-only methods even when a valid token is supplied. Public read/query
+and user flow methods remain callable without that token.
 
 Bridge custody policy is rehearsed over the existing RPC names.
 `nebula_bridgePolicy` reports the active policy root and quorum constants.
@@ -243,8 +251,8 @@ compare those reports with `/health`, `/status`, `/snapshot`, and
 freshness, latest height/hash, state root, snapshot root, persisted snapshot
 path and presence, configured sync peer count/quorum, sync quorum
 height/hash/state root, mempool cap/remaining capacity, full/admission rejection
-counts, RPC max-request/rate-limit policy, admin RPC
-state, bridge policy root, bridge custody reconciliation, and backup manifest
+counts, RPC max-request/rate-limit policy, admin RPC private-listener state,
+public-admin isolation, non-dev sequencer-key status, bridge policy root, bridge custody reconciliation, and backup manifest
 root. `--build-runtime-surface-evidence` binds those captured files, JSON-RPC
 mirror responses, and `/metrics` text into one root; the verifier rejects stale
 captures, split durable `/status` versus JSON-RPC views, invalid snapshot roots,
@@ -256,8 +264,8 @@ limit, peer count/quorum, sync quorum, bridge counter, storage snapshot, account
 custody, and public ops readiness gauges.
 Backup manifests must bind the node role, validator ID, latest chain head,
 state/snapshot roots, persisted snapshot location, sync peer coverage and
-quorum evidence, mempool capacity policy, full/admission rejection counters, RPC limit policy, admin RPC
-state, bridge policy root, and nXMR custody reconciliation without exporting
+quorum evidence, mempool capacity policy, full/admission rejection counters, RPC limit policy, admin RPC private-listener state,
+public-admin isolation, non-dev sequencer-key status, bridge policy root, and nXMR custody reconciliation without exporting
 sequencer secret key material. Snapshots imported by followers must have a state
 root that matches the latest signed block state root; wait for the next
 sub-second block after direct bridge/faucet/withdrawal mutations before using a
@@ -311,7 +319,7 @@ cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet 
 cargo fmt --manifest-path crates/nebula-testnet/Cargo.toml -- --check
 cargo build --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet
 cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --block-ms 250 --validator-id validator-a --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --sequencer --rpc-bind 127.0.0.1:9944 --admin-rpc-bind 127.0.0.1:9947 --block-ms 250 --validator-id validator-a --sequencer-public-key <sequencer-public-key-hex> --sequencer-secret-key <sequencer-secret-key-hex> --data-dir /tmp/nebula-validator-a --admin-token <operator-token> --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --run-rpc --follower --rpc-bind 127.0.0.1:9946 --block-ms 250 --validator-id validator-c --data-dir /tmp/nebula-validator-c --sequencer-public-key <sequencer-public-key-hex> --bootstrap-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9944/snapshot --sync-rpc http://127.0.0.1:9945/snapshot --sync-peer-quorum 2 --max-mempool-transactions 10000 --max-request-bytes 1048576 --max-requests-per-minute 600
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --mainnet-readiness --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --sample-public-status > /tmp/nebula-public-status.json

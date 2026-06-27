@@ -37,6 +37,13 @@ jobs:
           launch_bound_follower_exports_verifiable_runtime_surface_evidence
           -- --exact --nocapture
 
+      - name: Smoke public/admin RPC split
+        run: >
+          cargo test --manifest-path crates/nebula-testnet/Cargo.toml
+          --test public_admin_rpc_separation
+          public_rpc_rejects_admin_methods_even_with_valid_token
+          -- --exact --nocapture
+
       - name: Run Nebula test suite
         run: cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
 

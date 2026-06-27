@@ -47,6 +47,7 @@ pub struct RuntimeNodeOptions {
     pub sync_peer_quorum: usize,
     pub auto_produce_blocks: bool,
     pub sequencer_secret_key_hex: Option<String>,
+    pub admin_rpc_bind_addr: Option<String>,
     pub admin_token: Option<String>,
     pub max_request_bytes: usize,
     pub max_requests_per_minute: u32,
@@ -62,6 +63,7 @@ impl Default for RuntimeNodeOptions {
             sync_peer_quorum: DEFAULT_SYNC_PEER_QUORUM,
             auto_produce_blocks: true,
             sequencer_secret_key_hex: None,
+            admin_rpc_bind_addr: None,
             admin_token: None,
             max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
             max_requests_per_minute: DEFAULT_MAX_REQUESTS_PER_MINUTE,
@@ -585,6 +587,9 @@ pub struct RuntimeOpsStatus {
     pub rpc_max_request_bytes: usize,
     pub rpc_max_requests_per_minute: u32,
     pub admin_rpc_enabled: bool,
+    pub admin_rpc_private_listener: bool,
+    pub public_rpc_admin_methods_enabled: bool,
+    pub default_dev_sequencer_key: bool,
     pub max_mempool_transactions: usize,
     pub mempool_size: usize,
     pub mempool_capacity_remaining: usize,
@@ -676,6 +681,9 @@ pub struct RuntimeBackupManifest {
     pub rpc_max_request_bytes: usize,
     pub rpc_max_requests_per_minute: u32,
     pub admin_rpc_enabled: bool,
+    pub admin_rpc_private_listener: bool,
+    pub public_rpc_admin_methods_enabled: bool,
+    pub default_dev_sequencer_key: bool,
     pub max_mempool_transactions: usize,
     pub mempool_size: usize,
     pub mempool_capacity_remaining: usize,
@@ -779,7 +787,20 @@ struct RuntimeRpcState {
     sync_peers: RuntimeSyncPeerSet,
     sync_telemetry: Arc<Mutex<BTreeMap<String, RuntimeSyncPeerTelemetry>>>,
     admin_token: Option<String>,
+    admin_rpc_private_listener: bool,
     rate_limits: Arc<Mutex<BTreeMap<String, RuntimeRateLimitBucket>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeRpcAccess {
+    Public,
+    Admin,
+}
+
+impl RuntimeRpcAccess {
+    fn allows_admin_methods(self) -> bool {
+        matches!(self, Self::Admin)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -940,6 +961,18 @@ struct RuntimeNxmrCustodyReconciliation {
 }
 
 impl RuntimeRpcState {
+    fn admin_rpc_enabled(&self) -> bool {
+        self.admin_rpc_private_listener && self.admin_token.is_some()
+    }
+
+    fn public_rpc_admin_methods_enabled(&self) -> bool {
+        false
+    }
+
+    fn default_dev_sequencer_key(&self, sequencer_public_key_hex: &str) -> bool {
+        sequencer_public_key_hex.eq_ignore_ascii_case(&default_dev_sequencer_public_key_hex())
+    }
+
     fn commit_direct_state_mutation(&self) -> Result<(), String> {
         let mut runtime = self
             .runtime
@@ -1209,6 +1242,8 @@ impl RuntimeRpcState {
                 .map_err(|_| "runtime mutex poisoned".to_string())?;
             runtime.status()
         };
+        let default_dev_sequencer_key =
+            self.default_dev_sequencer_key(&status.sequencer_public_key_hex);
         let mut status = serde_json::to_value(status)
             .map_err(|error| format!("status serialization failed: {error}"))?;
         let Value::Object(fields) = &mut status else {
@@ -1309,7 +1344,19 @@ impl RuntimeRpcState {
         );
         fields.insert(
             "admin_rpc_enabled".to_string(),
-            json!(self.admin_token.is_some()),
+            json!(self.admin_rpc_enabled()),
+        );
+        fields.insert(
+            "admin_rpc_private_listener".to_string(),
+            json!(self.admin_rpc_private_listener),
+        );
+        fields.insert(
+            "public_rpc_admin_methods_enabled".to_string(),
+            json!(self.public_rpc_admin_methods_enabled()),
+        );
+        fields.insert(
+            "default_dev_sequencer_key".to_string(),
+            json!(default_dev_sequencer_key),
         );
         Ok(status)
     }
@@ -1368,6 +1415,20 @@ impl RuntimeRpcState {
         }
         if !status.launch_binding_present {
             blocking_gaps.push("missing-launch-package-binding".to_string());
+        }
+        let default_dev_sequencer_key =
+            self.default_dev_sequencer_key(&status.sequencer_public_key_hex);
+        if status.launch_binding_present && default_dev_sequencer_key {
+            blocking_gaps.push("default-dev-sequencer-key".to_string());
+        }
+        if status.launch_binding_present
+            && status.node_role == "sequencer"
+            && !self.admin_rpc_enabled()
+        {
+            blocking_gaps.push("missing-admin-rpc-control".to_string());
+        }
+        if self.public_rpc_admin_methods_enabled() {
+            blocking_gaps.push("public-rpc-admin-methods-enabled".to_string());
         }
         let max_acceptable_age_ms = u128::from(status.block_target_ms)
             .saturating_mul(20)
@@ -1472,7 +1533,10 @@ impl RuntimeRpcState {
             sync_peer_telemetry: sync_telemetry.peer_telemetry,
             rpc_max_request_bytes: self.rpc_limits.max_request_bytes,
             rpc_max_requests_per_minute: self.rpc_limits.max_requests_per_minute,
-            admin_rpc_enabled: self.admin_token.is_some(),
+            admin_rpc_enabled: self.admin_rpc_enabled(),
+            admin_rpc_private_listener: self.admin_rpc_private_listener,
+            public_rpc_admin_methods_enabled: self.public_rpc_admin_methods_enabled(),
+            default_dev_sequencer_key,
             max_mempool_transactions: status.max_mempool_transactions,
             mempool_size: status.mempool_size,
             mempool_capacity_remaining: status.mempool_capacity_remaining,
@@ -1570,6 +1634,9 @@ impl RuntimeRpcState {
             rpc_max_request_bytes: ops_status.rpc_max_request_bytes,
             rpc_max_requests_per_minute: ops_status.rpc_max_requests_per_minute,
             admin_rpc_enabled: ops_status.admin_rpc_enabled,
+            admin_rpc_private_listener: ops_status.admin_rpc_private_listener,
+            public_rpc_admin_methods_enabled: ops_status.public_rpc_admin_methods_enabled,
+            default_dev_sequencer_key: ops_status.default_dev_sequencer_key,
             max_mempool_transactions: ops_status.max_mempool_transactions,
             mempool_size: ops_status.mempool_size,
             mempool_capacity_remaining: ops_status.mempool_capacity_remaining,
@@ -1639,7 +1706,10 @@ impl RuntimeRpcState {
             "rpc_limits": self.rpc_limits,
             "rpc_max_request_bytes": status["rpc_max_request_bytes"],
             "rpc_max_requests_per_minute": status["rpc_max_requests_per_minute"],
-            "admin_rpc_enabled": self.admin_token.is_some(),
+            "admin_rpc_enabled": self.admin_rpc_enabled(),
+            "admin_rpc_private_listener": self.admin_rpc_private_listener,
+            "public_rpc_admin_methods_enabled": self.public_rpc_admin_methods_enabled(),
+            "default_dev_sequencer_key": status["default_dev_sequencer_key"],
             "bootstrap_peer_urls": self.sync_peers.bootstrap_peer_urls,
             "sync_peer_urls": self.sync_peers.sync_peer_urls,
             "sync_peer_count": self.sync_peers.sync_peer_urls.len(),
@@ -1872,8 +1942,26 @@ impl RuntimeRpcState {
         push_metric_bool(
             &mut output,
             "nebula_admin_rpc_enabled",
-            "Whether admin RPC methods require a configured token.",
-            self.admin_token.is_some(),
+            "Whether operator-only JSON-RPC methods are available on a private token-protected listener.",
+            ops_status.admin_rpc_enabled,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_admin_rpc_private_listener",
+            "Whether operator-only JSON-RPC methods are isolated from the public RPC listener.",
+            ops_status.admin_rpc_private_listener,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_public_rpc_admin_methods_enabled",
+            "Whether the public JSON-RPC listener accepts operator-only methods.",
+            ops_status.public_rpc_admin_methods_enabled,
+        );
+        push_metric_bool(
+            &mut output,
+            "nebula_default_dev_sequencer_key",
+            "Whether the active sequencer key is the public development key.",
+            ops_status.default_dev_sequencer_key,
         );
         push_metric(
             &mut output,
@@ -3068,6 +3156,7 @@ pub fn serve_runtime_rpc_with_options(
     let rpc_limits = RuntimeRpcLimits::from_options(&options).map_err(std::io::Error::other)?;
     let admin_token =
         normalize_admin_token(options.admin_token.clone()).map_err(std::io::Error::other)?;
+    let admin_rpc_bind_addr = options.admin_rpc_bind_addr.clone();
     let sync_peers = RuntimeSyncPeerSet::from_options(&options).map_err(std::io::Error::other)?;
     let auto_produce_blocks = options.auto_produce_blocks;
     let storage = options.data_dir.as_ref().map(RuntimeStorage::from_data_dir);
@@ -3097,6 +3186,7 @@ pub fn serve_runtime_rpc_with_options(
         sync_peers,
         sync_telemetry: Arc::new(Mutex::new(BTreeMap::new())),
         admin_token,
+        admin_rpc_private_listener: admin_rpc_bind_addr.is_some(),
         rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
     };
     let produce_blocks = state
@@ -3123,13 +3213,32 @@ pub fn serve_runtime_rpc_with_options(
         });
     }
 
-    let listener = TcpListener::bind(bind_addr)?;
+    let admin_listener = match admin_rpc_bind_addr.as_deref() {
+        Some(admin_bind_addr) => Some(TcpListener::bind(admin_bind_addr)?),
+        None => None,
+    };
+    let public_listener = TcpListener::bind(bind_addr)?;
+    if let Some(admin_listener) = admin_listener {
+        let admin_state = state.clone();
+        thread::spawn(move || {
+            let _ =
+                serve_runtime_rpc_listener(admin_listener, admin_state, RuntimeRpcAccess::Admin);
+        });
+    }
+    serve_runtime_rpc_listener(public_listener, state, RuntimeRpcAccess::Public)
+}
+
+fn serve_runtime_rpc_listener(
+    listener: TcpListener,
+    state: RuntimeRpcState,
+    access: RuntimeRpcAccess,
+) -> std::io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 let state = state.clone();
                 thread::spawn(move || {
-                    let _ = handle_http_connection(stream, state);
+                    let _ = handle_http_connection(stream, state, access);
                 });
             }
             Err(error) => return Err(error),
@@ -3541,7 +3650,11 @@ fn parse_https_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std::io::Result<()> {
+fn handle_http_connection(
+    mut stream: TcpStream,
+    state: RuntimeRpcState,
+    access: RuntimeRpcAccess,
+) -> std::io::Result<()> {
     let _ = stream.set_read_timeout(Some(Duration::from_millis(750)));
     let client_id = stream
         .peer_addr()
@@ -3644,7 +3757,7 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
                     "params": {"message": error.to_string()}
                 })
             });
-            let response = handle_json_rpc_request(&state, &request);
+            let response = handle_json_rpc_request(&state, &request, access);
             write_json_response(&mut stream, 200, &response)?;
         }
         _ => write_json_response(&mut stream, 404, &json!({"error": "not found"}))?,
@@ -3653,7 +3766,11 @@ fn handle_http_connection(mut stream: TcpStream, state: RuntimeRpcState) -> std:
     Ok(())
 }
 
-fn handle_json_rpc_request(state: &RuntimeRpcState, request: &Value) -> Value {
+fn handle_json_rpc_request(
+    state: &RuntimeRpcState,
+    request: &Value,
+    access: RuntimeRpcAccess,
+) -> Value {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     let Some(method) = request.get("method").and_then(Value::as_str) else {
         return rpc_error(id, -32600, "missing method");
@@ -3665,6 +3782,15 @@ fn handle_json_rpc_request(state: &RuntimeRpcState, request: &Value) -> Value {
         return rpc_error(id, -32700, message);
     }
     let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
+    if is_admin_rpc_method(method) && !access.allows_admin_methods() {
+        return rpc_error(
+            id,
+            -32000,
+            &format!(
+                "admin method {method} is not available on the public RPC listener; use the private admin RPC listener"
+            ),
+        );
+    }
 
     let result = dispatch_json_rpc_method(state, method, params);
     match result {
@@ -3892,6 +4018,18 @@ fn dispatch_json_rpc_method(
         _ => Err(format!("unknown method {method}")),
     };
     result
+}
+
+fn is_admin_rpc_method(method: &str) -> bool {
+    matches!(
+        method,
+        "nebula_importSnapshot"
+            | "nebula_observeBridgeDeposit"
+            | "nebula_finalizeWithdrawal"
+            | "nebula_rotateSequencerKey"
+            | "nebula_reportEquivocation"
+            | "nebula_produceBlock"
+    )
 }
 
 fn ensure_block_producer(state: &RuntimeRpcState) -> Result<(), String> {
@@ -4961,6 +5099,9 @@ fn ops_status_root(report: &RuntimeOpsStatus) -> String {
         "rpc_max_request_bytes": report.rpc_max_request_bytes,
         "rpc_max_requests_per_minute": report.rpc_max_requests_per_minute,
         "admin_rpc_enabled": report.admin_rpc_enabled,
+        "admin_rpc_private_listener": report.admin_rpc_private_listener,
+        "public_rpc_admin_methods_enabled": report.public_rpc_admin_methods_enabled,
+        "default_dev_sequencer_key": report.default_dev_sequencer_key,
         "max_mempool_transactions": report.max_mempool_transactions,
         "mempool_size": report.mempool_size,
         "mempool_capacity_remaining": report.mempool_capacity_remaining,
@@ -5053,6 +5194,9 @@ fn backup_manifest_root(manifest: &RuntimeBackupManifest) -> String {
         "rpc_max_request_bytes": manifest.rpc_max_request_bytes,
         "rpc_max_requests_per_minute": manifest.rpc_max_requests_per_minute,
         "admin_rpc_enabled": manifest.admin_rpc_enabled,
+        "admin_rpc_private_listener": manifest.admin_rpc_private_listener,
+        "public_rpc_admin_methods_enabled": manifest.public_rpc_admin_methods_enabled,
+        "default_dev_sequencer_key": manifest.default_dev_sequencer_key,
         "max_mempool_transactions": manifest.max_mempool_transactions,
         "mempool_size": manifest.mempool_size,
         "mempool_capacity_remaining": manifest.mempool_capacity_remaining,
@@ -5260,6 +5404,7 @@ mod tests {
             sync_peers: RuntimeSyncPeerSet::default(),
             sync_telemetry: Arc::new(Mutex::new(BTreeMap::new())),
             admin_token: None,
+            admin_rpc_private_listener: false,
             rate_limits: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -5289,6 +5434,25 @@ mod tests {
         let mut config = RuntimeConfig::public_testnet_default();
         config.launch_binding = Some(test_launch_binding());
         config
+    }
+
+    fn public_ops_test_sequencer_secret_key_hex() -> String {
+        "3c".repeat(32)
+    }
+
+    fn rotate_runtime_off_default_dev_key(runtime: &mut NebulaRuntime) {
+        runtime
+            .rotate_sequencer_key(
+                &public_ops_test_sequencer_secret_key_hex(),
+                "operator-a",
+                &"a".repeat(64),
+            )
+            .unwrap();
+    }
+
+    fn enable_private_admin_control(state: &mut RuntimeRpcState) {
+        state.admin_token = Some("admin".to_string());
+        state.admin_rpc_private_listener = true;
     }
 
     fn test_account_secret_key_hex() -> String {
@@ -5702,6 +5866,7 @@ mod tests {
     fn runtime_ops_status_follower_requires_successful_peer_sync_evidence() {
         let sequencer_config = runtime_config_with_launch_binding();
         let mut sequencer = NebulaRuntime::new(sequencer_config.clone()).unwrap();
+        rotate_runtime_off_default_dev_key(&mut sequencer);
         sequencer.produce_block();
         let snapshot = sequencer.export_snapshot();
         let mut follower_config = sequencer_config;
@@ -5761,6 +5926,7 @@ mod tests {
     fn runtime_ops_status_follower_requires_sync_quorum_evidence() {
         let sequencer_config = runtime_config_with_launch_binding();
         let mut sequencer = NebulaRuntime::new(sequencer_config.clone()).unwrap();
+        rotate_runtime_off_default_dev_key(&mut sequencer);
         sequencer.produce_block();
         let snapshot = sequencer.export_snapshot();
         let mut follower_config = sequencer_config;
@@ -5820,6 +5986,7 @@ mod tests {
         let storage = RuntimeStorage::from_data_dir(&dir);
         let binding = test_launch_binding();
         let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        rotate_runtime_off_default_dev_key(&mut runtime);
         runtime.faucet("alice").unwrap();
         runtime.produce_block();
         let snapshot = runtime.export_snapshot();
@@ -5830,6 +5997,7 @@ mod tests {
             DEFAULT_MAX_REQUESTS_PER_MINUTE,
         );
         state.storage = Some(storage.clone());
+        enable_private_admin_control(&mut state);
 
         let ops = state.ops_status().unwrap();
         assert!(ops.public_ops_ready, "{:?}", ops.blocking_gaps);
@@ -5852,7 +6020,10 @@ mod tests {
             ops.rpc_max_requests_per_minute,
             DEFAULT_MAX_REQUESTS_PER_MINUTE
         );
-        assert!(!ops.admin_rpc_enabled);
+        assert!(ops.admin_rpc_enabled);
+        assert!(ops.admin_rpc_private_listener);
+        assert!(!ops.public_rpc_admin_methods_enabled);
+        assert!(!ops.default_dev_sequencer_key);
         assert_eq!(ops.bridge_policy_root, bridge_policy_root());
         assert_eq!(
             ops.max_mempool_transactions,
@@ -5878,7 +6049,10 @@ mod tests {
         assert_eq!(manifest.snapshot_root.len(), 64);
         assert!(manifest.snapshot_persisted);
         assert!(manifest.storage_snapshot_matches_runtime);
-        assert!(!manifest.admin_rpc_enabled);
+        assert!(manifest.admin_rpc_enabled);
+        assert!(manifest.admin_rpc_private_listener);
+        assert!(!manifest.public_rpc_admin_methods_enabled);
+        assert!(!manifest.default_dev_sequencer_key);
         assert_eq!(
             manifest.max_mempool_transactions,
             DEFAULT_MAX_MEMPOOL_TRANSACTIONS
@@ -5924,6 +6098,7 @@ mod tests {
         let storage = RuntimeStorage::from_data_dir(&dir);
         let binding = test_launch_binding();
         let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        rotate_runtime_off_default_dev_key(&mut runtime);
         runtime.faucet("alice").unwrap();
         runtime.produce_block();
         let snapshot = runtime.export_snapshot();
@@ -5934,6 +6109,7 @@ mod tests {
             DEFAULT_MAX_REQUESTS_PER_MINUTE,
         );
         state.storage = Some(storage);
+        enable_private_admin_control(&mut state);
 
         let health = state.health_json().unwrap();
         let status = state.status_json().unwrap();
@@ -5960,6 +6136,10 @@ mod tests {
         assert_eq!(health["snapshot_root"], ops.snapshot_root);
         assert_eq!(health["state_root"], ops.state_root);
         assert_eq!(health["public_ops_ready"], true);
+        assert_eq!(health["admin_rpc_enabled"], true);
+        assert_eq!(health["admin_rpc_private_listener"], true);
+        assert_eq!(health["public_rpc_admin_methods_enabled"], false);
+        assert_eq!(health["default_dev_sequencer_key"], false);
         assert_eq!(health["snapshot_persisted"], true);
         assert_eq!(health["storage_snapshot_matches_runtime"], true);
         assert_eq!(health["sync_peer_count"], status["sync_peer_count"]);
@@ -6000,6 +6180,7 @@ mod tests {
             std::env::temp_dir().join(format!("nebula-runtime-surface-evidence-{}", unix_ms()));
         let storage = RuntimeStorage::from_data_dir(&dir);
         let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        rotate_runtime_off_default_dev_key(&mut runtime);
         runtime.faucet("alice").unwrap();
         runtime.produce_block();
         let snapshot = runtime.export_snapshot();
@@ -6010,6 +6191,7 @@ mod tests {
             DEFAULT_MAX_REQUESTS_PER_MINUTE,
         );
         state.storage = Some(storage);
+        enable_private_admin_control(&mut state);
 
         let health = state.health_json().unwrap();
         let status = state.status_json().unwrap();
@@ -6073,6 +6255,7 @@ mod tests {
         ));
         let storage = RuntimeStorage::from_data_dir(&dir);
         let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
+        rotate_runtime_off_default_dev_key(&mut runtime);
         runtime.faucet("alice").unwrap();
         runtime.produce_block();
         let snapshot = runtime.export_snapshot();
@@ -6083,6 +6266,7 @@ mod tests {
             DEFAULT_MAX_REQUESTS_PER_MINUTE,
         );
         state.storage = Some(storage);
+        enable_private_admin_control(&mut state);
 
         let health = state.health_json().unwrap();
         let mut status = state.status_json().unwrap();

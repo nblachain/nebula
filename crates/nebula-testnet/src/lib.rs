@@ -4933,6 +4933,9 @@ const RUNTIME_STATUS_DURABLE_FIELDS: &[&str] = &[
     "rpc_max_request_bytes",
     "rpc_max_requests_per_minute",
     "admin_rpc_enabled",
+    "admin_rpc_private_listener",
+    "public_rpc_admin_methods_enabled",
+    "default_dev_sequencer_key",
     "max_mempool_transactions",
     "mempool_size",
     "mempool_capacity_remaining",
@@ -5007,6 +5010,9 @@ const RUNTIME_OPS_DURABLE_FIELDS: &[&str] = &[
     "rpc_max_request_bytes",
     "rpc_max_requests_per_minute",
     "admin_rpc_enabled",
+    "admin_rpc_private_listener",
+    "public_rpc_admin_methods_enabled",
+    "default_dev_sequencer_key",
     "max_mempool_transactions",
     "mempool_size",
     "mempool_capacity_remaining",
@@ -5085,6 +5091,9 @@ const RUNTIME_BACKUP_DURABLE_FIELDS: &[&str] = &[
     "rpc_max_request_bytes",
     "rpc_max_requests_per_minute",
     "admin_rpc_enabled",
+    "admin_rpc_private_listener",
+    "public_rpc_admin_methods_enabled",
+    "default_dev_sequencer_key",
     "max_mempool_transactions",
     "mempool_size",
     "mempool_capacity_remaining",
@@ -5225,6 +5234,10 @@ fn require_health_status_agreement(errors: &mut Vec<String>, health: &Value, sta
         "sync_quorum_latest_hash",
         "sync_quorum_state_root",
         "sync_successful_peer_count",
+        "admin_rpc_enabled",
+        "admin_rpc_private_listener",
+        "public_rpc_admin_methods_enabled",
+        "default_dev_sequencer_key",
         "max_mempool_transactions",
         "mempool_size",
         "mempool_capacity_remaining",
@@ -5383,6 +5396,9 @@ fn require_ops_backup_snapshot_agreement(
         "rpc_max_request_bytes",
         "rpc_max_requests_per_minute",
         "admin_rpc_enabled",
+        "admin_rpc_private_listener",
+        "public_rpc_admin_methods_enabled",
+        "default_dev_sequencer_key",
         "mempool_capacity_remaining",
         "bridge_policy_root",
         "bridge_custody_reconciled",
@@ -5534,6 +5550,30 @@ fn require_metrics_agreement(
         "nebula_rpc_max_request_bytes",
         status,
         "rpc_max_request_bytes",
+    );
+    require_metric_value(
+        errors,
+        metrics_text,
+        "nebula_admin_rpc_enabled",
+        u8::from(json_bool(status, "admin_rpc_enabled").unwrap_or(false)),
+    );
+    require_metric_value(
+        errors,
+        metrics_text,
+        "nebula_admin_rpc_private_listener",
+        u8::from(json_bool(status, "admin_rpc_private_listener").unwrap_or(false)),
+    );
+    require_metric_value(
+        errors,
+        metrics_text,
+        "nebula_public_rpc_admin_methods_enabled",
+        u8::from(json_bool(status, "public_rpc_admin_methods_enabled").unwrap_or(false)),
+    );
+    require_metric_value(
+        errors,
+        metrics_text,
+        "nebula_default_dev_sequencer_key",
+        u8::from(json_bool(status, "default_dev_sequencer_key").unwrap_or(false)),
     );
     require_metric_value(errors, metrics_text, "nebula_bridge_custody_reconciled", 1);
     require_metric_value(
