@@ -549,6 +549,55 @@ pub struct ValidatorActivationReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct ValidatorJoinReceipt {
+    pub chain_id: String,
+    pub runtime_version: String,
+    pub validator_activation_root: String,
+    pub launch_package_bundle_root: String,
+    pub launch_package_root: String,
+    pub validator_set_root: String,
+    pub joined_at_unix_ms: u128,
+    pub activation_height: u64,
+    pub entries: Vec<ValidatorJoinEntry>,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ValidatorJoinEntry {
+    pub validator_id: String,
+    pub operator_id: String,
+    pub node_id: String,
+    pub p2p_endpoint: String,
+    pub consensus_public_key: String,
+    pub activation_root: String,
+    pub launch_package_bundle_root: String,
+    pub observed_block_height: u64,
+    pub peer_count: usize,
+    pub joined: bool,
+    pub join_root: String,
+    pub signature: SignatureVerification,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ValidatorJoinReport {
+    pub validator_join_ready: bool,
+    pub level: &'static str,
+    pub validator_join_root: String,
+    pub validator_activation_root: String,
+    pub launch_package_bundle_root: String,
+    pub launch_package_root: String,
+    pub validator_set_root: String,
+    pub joined_validator_count: usize,
+    pub joined_operator_count: usize,
+    pub activation_height: u64,
+    pub min_observed_block_height: u64,
+    pub min_peer_count: usize,
+    pub joined_at_unix_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct OperatorHandoffManifest {
     pub chain_id: String,
     pub runtime_version: String,
@@ -1032,6 +1081,19 @@ pub fn readiness_report() -> NebulaReadiness {
                 "validator_activation_signature_roots_verified": true,
                 "validator_activation_signatures_verified": true,
                 "all_validators_activated": true,
+            })),
+            "validator_join": stable_root(&json!({
+                "validator_activation_root_required": true,
+                "launch_package_bundle_root_required": true,
+                "launch_package_root_required": true,
+                "validator_set_root_required": true,
+                "joined_at_max_age_ms": PUBLIC_ATTESTATION_MAX_AGE_MS,
+                "one_join_entry_per_activated_validator": true,
+                "observed_block_height_at_or_after_activation": true,
+                "minimum_peer_count_required": true,
+                "validator_join_signature_roots_verified": true,
+                "validator_join_signatures_verified": true,
+                "all_validators_joined": true,
             })),
             "public_status_surface": stable_root(&json!({
                 "status": "deployment-attested",
@@ -2866,6 +2928,177 @@ pub fn verify_validator_activation_jsons(
         activated_validator_count: manifest.entries.len(),
         activated_operator_count: activated_operators.len(),
         activated_at_unix_ms: manifest.activated_at_unix_ms,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_validator_join_receipt_json_pretty(
+    validator_activation_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<String, AttestationError> {
+    let activation_report = verify_validator_activation_jsons(
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let activation = serde_json::from_str::<ValidatorActivationManifest>(
+        validator_activation_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let genesis_report = verify_genesis_manifest_json(genesis_manifest_json)?;
+    let mut receipt = validator_join_receipt(
+        &activation,
+        &activation_report,
+        genesis_report.activation_height,
+        unix_ms(),
+    );
+    receipt.root = validator_join_receipt_root(&receipt);
+
+    serde_json::to_string_pretty(&receipt)
+        .map_err(|error| AttestationError::MalformedJson(error.to_string()))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn verify_validator_join_receipt_jsons(
+    validator_join_receipt_json: &str,
+    validator_activation_json: &str,
+    launch_package_bundle_json: &str,
+    deployment_attestation_json: &str,
+    public_status_json: &str,
+    public_probe_json: &str,
+    validator_set_json: &str,
+    operator_handoff_json: &str,
+    operator_acceptance_json: &str,
+    genesis_manifest_json: &str,
+) -> Result<ValidatorJoinReport, AttestationError> {
+    let receipt = serde_json::from_str::<ValidatorJoinReceipt>(
+        validator_join_receipt_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let activation_report = verify_validator_activation_jsons(
+        validator_activation_json,
+        launch_package_bundle_json,
+        deployment_attestation_json,
+        public_status_json,
+        public_probe_json,
+        validator_set_json,
+        operator_handoff_json,
+        operator_acceptance_json,
+        genesis_manifest_json,
+    )?;
+    let activation = serde_json::from_str::<ValidatorActivationManifest>(
+        validator_activation_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let genesis_report = verify_genesis_manifest_json(genesis_manifest_json)?;
+    let now = unix_ms();
+    let mut errors = Vec::new();
+
+    if receipt.joined_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
+        errors.push("joined_at_unix_ms is more than five minutes in the future".to_string());
+    }
+    if receipt.joined_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push("joined_at_unix_ms is older than 24 hours".to_string());
+    }
+    require_eq(&mut errors, "chain_id", &receipt.chain_id, CHAIN_ID);
+    require_eq(
+        &mut errors,
+        "runtime_version",
+        &receipt.runtime_version,
+        VERSION,
+    );
+    require_root(
+        &mut errors,
+        "validator_activation_root",
+        &receipt.validator_activation_root,
+        &activation_report.validator_activation_root,
+    );
+    require_root(
+        &mut errors,
+        "launch_package_bundle_root",
+        &receipt.launch_package_bundle_root,
+        &activation_report.launch_package_bundle_root,
+    );
+    require_root(
+        &mut errors,
+        "launch_package_root",
+        &receipt.launch_package_root,
+        &activation_report.launch_package_root,
+    );
+    require_root(
+        &mut errors,
+        "validator_set_root",
+        &receipt.validator_set_root,
+        &activation_report.validator_set_root,
+    );
+    if receipt.activation_height != genesis_report.activation_height {
+        errors.push(format!(
+            "activation_height expected {} but got {}",
+            genesis_report.activation_height, receipt.activation_height
+        ));
+    }
+    verify_validator_join_entries(
+        &mut errors,
+        &receipt,
+        &activation,
+        genesis_report.activation_height,
+    );
+    require_root(
+        &mut errors,
+        "root",
+        &receipt.root,
+        &validator_join_receipt_root(&receipt),
+    );
+
+    if !errors.is_empty() {
+        return Err(AttestationError::Invalid(errors));
+    }
+
+    let joined_operators = receipt
+        .entries
+        .iter()
+        .map(|entry| entry.operator_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let min_observed_block_height = receipt
+        .entries
+        .iter()
+        .map(|entry| entry.observed_block_height)
+        .min()
+        .unwrap_or_default();
+    let min_peer_count = receipt
+        .entries
+        .iter()
+        .map(|entry| entry.peer_count)
+        .min()
+        .unwrap_or_default();
+
+    Ok(ValidatorJoinReport {
+        validator_join_ready: true,
+        level: "validator-join-attested",
+        validator_join_root: receipt.root,
+        validator_activation_root: receipt.validator_activation_root,
+        launch_package_bundle_root: receipt.launch_package_bundle_root,
+        launch_package_root: receipt.launch_package_root,
+        validator_set_root: receipt.validator_set_root,
+        joined_validator_count: receipt.entries.len(),
+        joined_operator_count: joined_operators.len(),
+        activation_height: receipt.activation_height,
+        min_observed_block_height,
+        min_peer_count,
+        joined_at_unix_ms: receipt.joined_at_unix_ms,
     })
 }
 
@@ -5403,6 +5636,222 @@ fn validator_activation_manifest_root(manifest: &ValidatorActivationManifest) ->
     }))
 }
 
+fn validator_join_receipt(
+    activation: &ValidatorActivationManifest,
+    activation_report: &ValidatorActivationReport,
+    activation_height: u64,
+    joined_at_unix_ms: u128,
+) -> ValidatorJoinReceipt {
+    let peer_count = activation.entries.len().saturating_sub(1);
+    let mut entries = activation
+        .entries
+        .iter()
+        .map(|activation_entry| {
+            let mut entry = ValidatorJoinEntry {
+                validator_id: activation_entry.validator_id.clone(),
+                operator_id: activation_entry.operator_id.clone(),
+                node_id: activation_entry.node_id.clone(),
+                p2p_endpoint: activation_entry.p2p_endpoint.clone(),
+                consensus_public_key: activation_entry.consensus_public_key.clone(),
+                activation_root: activation_entry.activation_root.clone(),
+                launch_package_bundle_root: activation.launch_package_bundle_root.clone(),
+                observed_block_height: activation_height,
+                peer_count,
+                joined: true,
+                join_root: String::new(),
+                signature: SignatureVerification {
+                    algorithm: "ed25519-testnet-validator-join".to_string(),
+                    public_key: activation_entry.consensus_public_key.clone(),
+                    signature_sha3_256: String::new(),
+                    verified: true,
+                },
+            };
+            entry.join_root =
+                validator_join_entry_root(&entry, activation_height, joined_at_unix_ms);
+            entry.signature.signature_sha3_256 = validator_join_signature_root(&entry);
+            entry
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        (
+            left.operator_id.as_str(),
+            left.validator_id.as_str(),
+            left.node_id.as_str(),
+        )
+            .cmp(&(
+                right.operator_id.as_str(),
+                right.validator_id.as_str(),
+                right.node_id.as_str(),
+            ))
+    });
+
+    ValidatorJoinReceipt {
+        chain_id: CHAIN_ID.to_string(),
+        runtime_version: VERSION.to_string(),
+        validator_activation_root: activation_report.validator_activation_root.clone(),
+        launch_package_bundle_root: activation_report.launch_package_bundle_root.clone(),
+        launch_package_root: activation_report.launch_package_root.clone(),
+        validator_set_root: activation_report.validator_set_root.clone(),
+        joined_at_unix_ms,
+        activation_height,
+        entries,
+        root: String::new(),
+    }
+}
+
+fn verify_validator_join_entries(
+    errors: &mut Vec<String>,
+    receipt: &ValidatorJoinReceipt,
+    activation: &ValidatorActivationManifest,
+    activation_height: u64,
+) {
+    let expected_by_validator = activation
+        .entries
+        .iter()
+        .map(|entry| (entry.validator_id.as_str(), entry))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen_validators = BTreeSet::new();
+    let minimum_peer_count = activation.entries.len().saturating_sub(1);
+
+    if receipt.entries.len() != activation.entries.len() {
+        errors.push(format!(
+            "entries expected {} validators but got {}",
+            activation.entries.len(),
+            receipt.entries.len()
+        ));
+    }
+
+    for (index, entry) in receipt.entries.iter().enumerate() {
+        insert_unique(
+            errors,
+            &mut seen_validators,
+            &format!("entries[{index}].validator_id"),
+            &entry.validator_id,
+        );
+        let Some(expected) = expected_by_validator.get(entry.validator_id.as_str()) else {
+            errors.push(format!(
+                "entries[{index}].validator_id {} is not activated",
+                entry.validator_id
+            ));
+            continue;
+        };
+        require_eq(
+            errors,
+            &format!("entries[{index}].operator_id"),
+            &entry.operator_id,
+            &expected.operator_id,
+        );
+        require_eq(
+            errors,
+            &format!("entries[{index}].node_id"),
+            &entry.node_id,
+            &expected.node_id,
+        );
+        require_eq(
+            errors,
+            &format!("entries[{index}].p2p_endpoint"),
+            &entry.p2p_endpoint,
+            &expected.p2p_endpoint,
+        );
+        require_eq(
+            errors,
+            &format!("entries[{index}].consensus_public_key"),
+            &entry.consensus_public_key,
+            &expected.consensus_public_key,
+        );
+        require_root(
+            errors,
+            &format!("entries[{index}].activation_root"),
+            &entry.activation_root,
+            &expected.activation_root,
+        );
+        require_root(
+            errors,
+            &format!("entries[{index}].launch_package_bundle_root"),
+            &entry.launch_package_bundle_root,
+            &receipt.launch_package_bundle_root,
+        );
+        if entry.observed_block_height < activation_height {
+            errors.push(format!(
+                "entries[{index}].observed_block_height must be at least {activation_height}"
+            ));
+        }
+        if entry.peer_count < minimum_peer_count {
+            errors.push(format!(
+                "entries[{index}].peer_count must be at least {minimum_peer_count}"
+            ));
+        }
+        if !entry.joined {
+            errors.push(format!("entries[{index}].joined must be true"));
+        }
+        require_root(
+            errors,
+            &format!("entries[{index}].join_root"),
+            &entry.join_root,
+            &validator_join_entry_root(entry, receipt.activation_height, receipt.joined_at_unix_ms),
+        );
+        require_root(
+            errors,
+            &format!("entries[{index}].signature.signature_sha3_256"),
+            &entry.signature.signature_sha3_256,
+            &validator_join_signature_root(entry),
+        );
+        if !entry.signature.verified {
+            errors.push(format!("entries[{index}].signature.verified must be true"));
+        }
+    }
+}
+
+fn validator_join_entry_root(
+    entry: &ValidatorJoinEntry,
+    activation_height: u64,
+    joined_at_unix_ms: u128,
+) -> String {
+    stable_root(&json!({
+        "join_entry_domain": "nebula-validator-join-entry-v1",
+        "activation_height": activation_height,
+        "joined_at_unix_ms": joined_at_unix_ms,
+        "validator_id": entry.validator_id,
+        "operator_id": entry.operator_id,
+        "node_id": entry.node_id,
+        "p2p_endpoint": entry.p2p_endpoint,
+        "consensus_public_key": entry.consensus_public_key,
+        "activation_root": entry.activation_root,
+        "launch_package_bundle_root": entry.launch_package_bundle_root,
+        "observed_block_height": entry.observed_block_height,
+        "peer_count": entry.peer_count,
+        "joined": entry.joined,
+    }))
+}
+
+fn validator_join_signature_root(entry: &ValidatorJoinEntry) -> String {
+    stable_root(&json!({
+        "signature_domain": "nebula-validator-join-signature-v1",
+        "algorithm": entry.signature.algorithm,
+        "validator_id": entry.validator_id,
+        "operator_id": entry.operator_id,
+        "node_id": entry.node_id,
+        "public_key": entry.signature.public_key,
+        "join_root": entry.join_root,
+        "joined": entry.joined,
+    }))
+}
+
+fn validator_join_receipt_root(receipt: &ValidatorJoinReceipt) -> String {
+    stable_root(&json!({
+        "join_domain": "nebula-validator-join-v1",
+        "chain_id": receipt.chain_id,
+        "runtime_version": receipt.runtime_version,
+        "validator_activation_root": receipt.validator_activation_root,
+        "launch_package_bundle_root": receipt.launch_package_bundle_root,
+        "launch_package_root": receipt.launch_package_root,
+        "validator_set_root": receipt.validator_set_root,
+        "joined_at_unix_ms": receipt.joined_at_unix_ms,
+        "activation_height": receipt.activation_height,
+        "entries": receipt.entries,
+    }))
+}
+
 fn genesis_manifest_root(manifest: &GenesisManifest) -> String {
     stable_root(&json!({
         "chain_id": manifest.chain_id,
@@ -5688,7 +6137,11 @@ mod public_launch {
     fn public_launch_readiness_includes_bundle_and_activation_roots() {
         let report = readiness_report();
 
-        for root_name in ["launch_package_bundle", "validator_activation"] {
+        for root_name in [
+            "launch_package_bundle",
+            "validator_activation",
+            "validator_join",
+        ] {
             let root = report.status_roots[root_name].as_str().unwrap();
             assert_eq!(root.len(), 64);
             assert!(root.chars().all(|c| c.is_ascii_hexdigit()));
@@ -7986,6 +8439,149 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error
                     == "validator activation entries do not match verified bundle and validator set"
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn validator_join_receipt_verifies_after_activation() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let activation = build_validator_activation_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let join = build_validator_join_receipt_json_pretty(
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        let report = verify_validator_join_receipt_jsons(
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+
+        assert!(report.validator_join_ready);
+        assert_eq!(report.level, "validator-join-attested");
+        assert_eq!(report.validator_join_root.len(), 64);
+        assert_eq!(report.joined_validator_count, 2);
+        assert_eq!(report.joined_operator_count, 2);
+        assert_eq!(report.activation_height, PUBLIC_TESTNET_ACTIVATION_HEIGHT);
+        assert_eq!(
+            report.min_observed_block_height,
+            PUBLIC_TESTNET_ACTIVATION_HEIGHT
+        );
+        assert_eq!(report.min_peer_count, 1);
+    }
+
+    #[test]
+    fn validator_join_receipt_rejects_pre_activation_height() {
+        let deployment = sample_deployment_attestation_json_pretty();
+        let public_status = sample_public_status_manifest_json_pretty();
+        let public_probe = sample_public_probe_json_pretty();
+        let validators = sample_validator_set_json_pretty();
+        let handoff = build_operator_handoff_json_pretty(&deployment, &validators).unwrap();
+        let acceptance =
+            build_operator_acceptance_json_pretty(&handoff, &deployment, &validators).unwrap();
+        let genesis = build_genesis_manifest_json_pretty(&deployment, &validators).unwrap();
+        let bundle = build_launch_package_bundle_json_pretty(
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let activation = build_validator_activation_json_pretty(
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        let mut join = serde_json::from_str::<Value>(
+            &build_validator_join_receipt_json_pretty(
+                &activation,
+                &bundle,
+                &deployment,
+                &public_status,
+                &public_probe,
+                &validators,
+                &handoff,
+                &acceptance,
+                &genesis,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        join["entries"][0]["observed_block_height"] = json!(0);
+
+        let error = verify_validator_join_receipt_jsons(
+            &join.to_string(),
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error == "entries[0].observed_block_height must be at least 1"
                 }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
