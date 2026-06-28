@@ -1006,11 +1006,17 @@ preflight, runbook, TLS, operator, observer, bootstrap, and rollback evidence,
 then verify the filled attestation with:
 
 ```bash
-cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-deployment-attestation --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --preflight-receipt /tmp/nebula-preflight.json --runbook-receipt /tmp/nebula-runbook.json --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms> --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms> --bootstrap-node <node_id,operator_id,region,endpoint> --bootstrap-node <node_id,operator_id,region,endpoint> --operator <operator_id,region,public_key,secret_key_hex> --operator <operator_id,region,public_key,secret_key_hex> --observer <observer_id,region,public_key,secret_key_hex> --observer <observer_id,region,public_key,secret_key_hex> --rollback-plan-sha3-256 <hex> --rollback-recovery-root <hex> > /tmp/nebula-attestation.json
+cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --build-deployment-attestation --public-status /tmp/nebula-public-status.json --public-probe /tmp/nebula-public-probe.json --preflight-receipt /tmp/nebula-preflight.json --runbook-receipt /tmp/nebula-runbook.json --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms> --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms> --bootstrap-node <node_id,operator_id,region,endpoint> --bootstrap-node <node_id,operator_id,region,endpoint> --operator <operator_id,region,public_key> --operator <operator_id,region,public_key> --operator-secret-key-file <operator_id,/secure/operator.hex> --operator-secret-key-file <operator_id,/secure/operator.hex> --observer <observer_id,region,public_key> --observer <observer_id,region,public_key> --observer-secret-key-file <observer_id,/secure/observer.hex> --observer-secret-key-file <observer_id,/secure/observer.hex> --rollback-plan-sha3-256 <hex> --rollback-recovery-root <hex> > /tmp/nebula-attestation.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-deployment-attestation /tmp/nebula-attestation.json --json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --capture-public-runtime-surface --deployment-attestation /tmp/nebula-attestation.json --endpoint-url https://testnet.nebula.example/status > /tmp/nebula-external-runtime-surface.json
 cargo run --manifest-path crates/nebula-testnet/Cargo.toml --bin nebula-testnet -- --verify-runtime-surface-evidence /tmp/nebula-external-runtime-surface.json --json
 ```
+
+Deployment signer secret files contain one 32-byte Ed25519 secret key as hex,
+with only surrounding whitespace allowed. Inline `secret_key_hex` remains
+accepted in `--operator` and `--observer` rows for local fixtures, but
+production launch operators should prefer `--operator-secret-key-file` and
+`--observer-secret-key-file` so signer secrets do not appear in argv.
 
 Sample-only deployment fixtures remain available for local rehearsal:
 

@@ -211,6 +211,170 @@ fn assert_u64_at_least(value: &Value, field: &str, minimum: u64) {
     );
 }
 
+fn value_str<'a>(value: &'a Value, field: &str) -> &'a str {
+    value[field]
+        .as_str()
+        .unwrap_or_else(|| panic!("{field} should be a string"))
+}
+
+fn sample_secret_key_hex(seed: u8) -> String {
+    format!("{seed:02x}").repeat(32)
+}
+
+#[test]
+fn deployment_attestation_cli_builds_with_file_backed_witness_signers() {
+    let dir = temp_rehearsal_dir();
+    let public_status = dir.join("public-status.json");
+    let public_probe = dir.join("public-probe.json");
+    let preflight = dir.join("preflight.json");
+    let runbook = dir.join("runbook.json");
+    let attestation_path = dir.join("file-backed-attestation.json");
+
+    write_nebula_output(&args(&["--sample-public-status"]), &public_status);
+    write_nebula_output(&args(&["--sample-public-probe"]), &public_probe);
+    write_nebula_output(&args(&["--sample-preflight-receipt"]), &preflight);
+    write_nebula_output(&args(&["--sample-runbook-receipt"]), &runbook);
+    let sample_attestation: Value =
+        serde_json::from_str(&run_nebula(&["--sample-deployment-attestation"]))
+            .expect("sample deployment attestation json");
+
+    let mut build_args = vec![
+        "--build-deployment-attestation".to_string(),
+        "--public-status".to_string(),
+        path_arg(&public_status),
+        "--public-probe".to_string(),
+        path_arg(&public_probe),
+        "--preflight-receipt".to_string(),
+        path_arg(&preflight),
+        "--runbook-receipt".to_string(),
+        path_arg(&runbook),
+    ];
+
+    for pin in sample_attestation["public_endpoint"]["tls_pins"]
+        .as_array()
+        .expect("sample tls pins")
+    {
+        build_args.push("--tls-pin".to_string());
+        build_args.push(format!(
+            "{},{},{}",
+            value_str(pin, "cert_sha256"),
+            value_str(pin, "public_key_sha256"),
+            pin["not_after_unix_ms"]
+                .as_u64()
+                .expect("tls pin expiry as u64")
+        ));
+    }
+
+    for node in sample_attestation["bootstrap_nodes"]
+        .as_array()
+        .expect("sample bootstrap nodes")
+    {
+        build_args.push("--bootstrap-node".to_string());
+        build_args.push(format!(
+            "{},{},{},{}",
+            value_str(node, "node_id"),
+            value_str(node, "operator_id"),
+            value_str(node, "region"),
+            value_str(node, "endpoint")
+        ));
+    }
+
+    for operator in sample_attestation["operators"]
+        .as_array()
+        .expect("sample operators")
+    {
+        let operator_id = value_str(operator, "operator_id");
+        let secret = match operator_id {
+            "operator-a" => sample_secret_key_hex(0xa1),
+            "operator-b" => sample_secret_key_hex(0xa2),
+            other => panic!("unexpected sample operator {other}"),
+        };
+        let secret_path = dir.join(format!("{operator_id}.hex"));
+        fs::write(&secret_path, format!("{secret}\n")).expect("write operator secret");
+        build_args.push("--operator".to_string());
+        build_args.push(format!(
+            "{},{},{}",
+            operator_id,
+            value_str(operator, "region"),
+            value_str(operator, "public_key")
+        ));
+        build_args.push("--operator-secret-key-file".to_string());
+        build_args.push(format!("{operator_id},{}", path_arg(&secret_path)));
+    }
+
+    for observer in sample_attestation["observers"]
+        .as_array()
+        .expect("sample observers")
+    {
+        let observer_id = value_str(observer, "observer_id");
+        let secret = match observer_id {
+            "observer-us-east-1" => sample_secret_key_hex(0xb1),
+            "observer-eu-west-1" => sample_secret_key_hex(0xb2),
+            other => panic!("unexpected sample observer {other}"),
+        };
+        let secret_path = dir.join(format!("{observer_id}.hex"));
+        fs::write(&secret_path, format!("{secret}\n")).expect("write observer secret");
+        build_args.push("--observer".to_string());
+        build_args.push(format!(
+            "{},{},{}",
+            observer_id,
+            value_str(observer, "region"),
+            value_str(&observer["signature"], "public_key")
+        ));
+        build_args.push("--observer-secret-key-file".to_string());
+        build_args.push(format!("{observer_id},{}", path_arg(&secret_path)));
+    }
+
+    build_args.push("--rollback-plan-sha3-256".to_string());
+    build_args.push(
+        value_str(
+            &sample_attestation["rollback_evidence"],
+            "rollback_plan_sha3_256",
+        )
+        .to_string(),
+    );
+    build_args.push("--rollback-recovery-root".to_string());
+    build_args.push(
+        value_str(
+            &sample_attestation["rollback_evidence"],
+            "recovery_point_root",
+        )
+        .to_string(),
+    );
+    build_args.push("--rollback-last-drill-unix-ms".to_string());
+    build_args.push(
+        sample_attestation["rollback_evidence"]["last_drill_unix_ms"]
+            .as_u64()
+            .expect("rollback drill time as u64")
+            .to_string(),
+    );
+
+    let attestation_output = run_nebula_strings(&build_args);
+    let attestation: Value =
+        serde_json::from_str(&attestation_output).expect("built attestation json");
+    assert!(attestation["operators"]
+        .as_array()
+        .expect("operators")
+        .iter()
+        .all(|operator| operator["verified"] == true));
+    assert!(attestation["observers"]
+        .as_array()
+        .expect("observers")
+        .iter()
+        .all(|observer| observer["signature"]["verified"] == true));
+
+    fs::write(&attestation_path, attestation_output).expect("write built attestation");
+    let verify_output = run_nebula_strings(&[
+        "--verify-deployment-attestation".to_string(),
+        path_arg(&attestation_path),
+        "--json".to_string(),
+    ]);
+    let report: Value =
+        serde_json::from_str(&verify_output).expect("deployment attestation report json");
+    assert_eq!(report["public_launch_ready"], true);
+    assert_eq!(report["level"], "public-launch-attested");
+}
+
 #[test]
 fn prove_local_public_testnet_json_reports_rehearsal_ready_but_launch_blocked() {
     let stdout = run_nebula(&["--prove-local-public-testnet", "--json"]);
