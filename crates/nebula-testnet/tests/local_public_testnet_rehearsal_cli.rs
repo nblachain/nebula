@@ -211,6 +211,14 @@ fn assert_u64_at_least(value: &Value, field: &str, minimum: u64) {
     );
 }
 
+fn write_json_value(path: &Path, value: &Value) {
+    fs::write(
+        path,
+        serde_json::to_string_pretty(value).expect("serialize JSON value"),
+    )
+    .expect("write JSON value");
+}
+
 fn value_str<'a>(value: &'a Value, field: &str) -> &'a str {
     value[field]
         .as_str()
@@ -219,6 +227,46 @@ fn value_str<'a>(value: &'a Value, field: &str) -> &'a str {
 
 fn sample_secret_key_hex(seed: u8) -> String {
     format!("{seed:02x}").repeat(32)
+}
+
+fn write_runtime_surface_capture_inputs(
+    dir: &Path,
+    runtime_surface_path: &Path,
+) -> Vec<(String, PathBuf)> {
+    let runtime_surface: Value =
+        serde_json::from_str(&fs::read_to_string(runtime_surface_path).expect("read surface"))
+            .expect("runtime surface evidence json");
+    let fields = [
+        ("--health", "health", "health.json"),
+        ("--status", "status", "status.json"),
+        ("--snapshot", "snapshot", "snapshot.json"),
+        ("--ops", "ops", "ops.json"),
+        ("--backup", "backup", "backup.json"),
+        ("--rpc-status", "rpc_status", "rpc-status.json"),
+        ("--rpc-ops-status", "rpc_ops_status", "rpc-ops-status.json"),
+        (
+            "--rpc-backup-manifest",
+            "rpc_backup_manifest",
+            "rpc-backup-manifest.json",
+        ),
+    ];
+    let mut args = Vec::new();
+    for (flag, field, file_name) in fields {
+        let path = dir.join(file_name);
+        write_json_value(&path, &runtime_surface[field]);
+        args.push((flag.to_string(), path));
+    }
+
+    let metrics_path = dir.join("metrics.txt");
+    fs::write(
+        &metrics_path,
+        runtime_surface["metrics_text"]
+            .as_str()
+            .expect("metrics_text should be a string"),
+    )
+    .expect("write metrics text");
+    args.push(("--metrics".to_string(), metrics_path));
+    args
 }
 
 #[test]
@@ -734,6 +782,239 @@ fn public_testnet_peer_manifest_cli_builds_and_verifies_launch_bound_peers() {
     assert!(
         rejected.contains("not in the verified public testnet peer manifest"),
         "{rejected}"
+    );
+
+    fs::remove_dir_all(&dir).expect("remove temp rehearsal dir");
+}
+
+#[test]
+fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
+    let dir = temp_rehearsal_dir();
+    let artifacts = build_sample_launch_artifacts(&dir);
+    let peer_manifest = dir.join("peer-manifest.json");
+    let activation = dir.join("activation.json");
+    let join = dir.join("join.json");
+    let operator_join_confirmation = dir.join("operator-join-confirmation.json");
+    let public_observer_confirmation = dir.join("public-observer-confirmation.json");
+    let live_runtime_surface = dir.join("live-rpc-devnet-runtime-surface.json");
+    let live_rehearsal = dir.join("live-rpc-devnet.json");
+    let external_runtime_surface = dir.join("external-runtime-surface.json");
+    let loopback_certificate = dir.join("loopback-launch-certificate.json");
+    let external_certificate = dir.join("external-launch-certificate.json");
+
+    let mut peer_args = vec!["--build-public-testnet-peer-manifest".to_string()];
+    peer_args.extend(launch_artifact_args(&artifacts));
+    write_nebula_output(&peer_args, &peer_manifest);
+
+    let mut activation_args = vec!["--build-validator-activation".to_string()];
+    activation_args.extend(launch_artifact_args(&artifacts));
+    write_nebula_output(&activation_args, &activation);
+
+    let mut join_args = vec![
+        "--build-validator-join".to_string(),
+        "--validator-activation".to_string(),
+        path_arg(&activation),
+    ];
+    join_args.extend(launch_artifact_args(&artifacts));
+    write_nebula_output(&join_args, &join);
+
+    let mut operator_confirmation_args = vec![
+        "--build-operator-join-confirmation".to_string(),
+        "--validator-join".to_string(),
+        path_arg(&join),
+        "--validator-activation".to_string(),
+        path_arg(&activation),
+    ];
+    operator_confirmation_args.extend(launch_artifact_args(&artifacts));
+    write_nebula_output(&operator_confirmation_args, &operator_join_confirmation);
+
+    let mut observer_confirmation_args = vec![
+        "--build-public-observer-confirmation".to_string(),
+        "--operator-join-confirmation".to_string(),
+        path_arg(&operator_join_confirmation),
+        "--validator-join".to_string(),
+        path_arg(&join),
+        "--validator-activation".to_string(),
+        path_arg(&activation),
+    ];
+    observer_confirmation_args.extend(launch_artifact_args(&artifacts));
+    write_nebula_output(&observer_confirmation_args, &public_observer_confirmation);
+
+    let mut rehearsal_args = vec![
+        "--prove-live-rpc-devnet".to_string(),
+        "--public-testnet-peer-manifest".to_string(),
+        path_arg(&peer_manifest),
+        "--live-rpc-devnet-runtime-surface-out".to_string(),
+        path_arg(&live_runtime_surface),
+        "--json".to_string(),
+    ];
+    rehearsal_args.extend(launch_artifact_args(&artifacts));
+    fs::write(&live_rehearsal, run_nebula_strings(&rehearsal_args))
+        .expect("write live RPC rehearsal");
+
+    let attestation: Value = serde_json::from_str(
+        &fs::read_to_string(&artifacts.attestation).expect("read attestation"),
+    )
+    .expect("deployment attestation json");
+    let endpoint_url = value_str(&attestation["public_endpoint"], "url");
+    let tls_pin = attestation["public_endpoint"]["tls_pins"]
+        .as_array()
+        .expect("public endpoint TLS pins")
+        .first()
+        .expect("sample attestation has a TLS pin");
+    let tls_pin_arg = format!(
+        "{},{},{}",
+        value_str(tls_pin, "cert_sha256"),
+        value_str(tls_pin, "public_key_sha256"),
+        tls_pin["not_after_unix_ms"]
+            .as_u64()
+            .expect("TLS pin expiry as u64")
+    );
+    let mut external_surface_args = vec![
+        "--build-runtime-surface-evidence".to_string(),
+        "--endpoint-url".to_string(),
+        endpoint_url.to_string(),
+        "--runtime-surface-tls-pin".to_string(),
+        tls_pin_arg,
+    ];
+    for (flag, path) in write_runtime_surface_capture_inputs(&dir, &live_runtime_surface) {
+        external_surface_args.push(flag);
+        external_surface_args.push(path_arg(&path));
+    }
+    write_nebula_output(&external_surface_args, &external_runtime_surface);
+
+    let verify_external_surface_args = vec![
+        "--verify-runtime-surface-evidence".to_string(),
+        path_arg(&external_runtime_surface),
+        "--json".to_string(),
+    ];
+    let external_surface_report: Value =
+        serde_json::from_str(&run_nebula_strings(&verify_external_surface_args))
+            .expect("external runtime surface report json");
+    assert_eq!(external_surface_report["runtime_surface_ready"], true);
+    assert_eq!(
+        external_surface_report["capture_mode"],
+        "external-public-endpoint"
+    );
+
+    let certificate_args_for = |runtime_surface: &Path| -> Vec<String> {
+        let mut args = vec![
+            "--build-public-testnet-launch-certificate".to_string(),
+            "--public-observer-confirmation".to_string(),
+            path_arg(&public_observer_confirmation),
+            "--runtime-surface-evidence".to_string(),
+            path_arg(runtime_surface),
+            "--public-testnet-peer-manifest".to_string(),
+            path_arg(&peer_manifest),
+            "--operator-join-confirmation".to_string(),
+            path_arg(&operator_join_confirmation),
+            "--validator-join".to_string(),
+            path_arg(&join),
+            "--validator-activation".to_string(),
+            path_arg(&activation),
+        ];
+        args.extend(launch_artifact_args(&artifacts));
+        args
+    };
+    write_nebula_output(
+        &certificate_args_for(&live_runtime_surface),
+        &loopback_certificate,
+    );
+    write_nebula_output(
+        &certificate_args_for(&external_runtime_surface),
+        &external_certificate,
+    );
+
+    let certificate_verifier_args_for =
+        |certificate: &Path, runtime_surface: &Path| -> Vec<String> {
+            let mut args = vec![
+                "--verify-public-testnet-launch-certificate".to_string(),
+                path_arg(certificate),
+                "--public-observer-confirmation".to_string(),
+                path_arg(&public_observer_confirmation),
+                "--runtime-surface-evidence".to_string(),
+                path_arg(runtime_surface),
+                "--public-testnet-peer-manifest".to_string(),
+                path_arg(&peer_manifest),
+                "--operator-join-confirmation".to_string(),
+                path_arg(&operator_join_confirmation),
+                "--validator-join".to_string(),
+                path_arg(&join),
+                "--validator-activation".to_string(),
+                path_arg(&activation),
+            ];
+            args.extend(launch_artifact_args(&artifacts));
+            args.push("--json".to_string());
+            args
+        };
+    let certificate_report: Value = serde_json::from_str(&run_nebula_strings(
+        &certificate_verifier_args_for(&external_certificate, &external_runtime_surface),
+    ))
+    .expect("launch certificate report json");
+    assert_eq!(
+        certificate_report["public_testnet_launch_certificate_ready"],
+        true
+    );
+    assert_hex64(
+        &certificate_report,
+        "public_testnet_launch_certificate_root",
+    );
+
+    let readiness_args_for = |certificate: &Path, runtime_surface: &Path| -> Vec<String> {
+        let mut args = vec![
+            "--verify-public-testnet-launch-readiness".to_string(),
+            path_arg(certificate),
+            "--public-observer-confirmation".to_string(),
+            path_arg(&public_observer_confirmation),
+            "--runtime-surface-evidence".to_string(),
+            path_arg(runtime_surface),
+            "--public-testnet-peer-manifest".to_string(),
+            path_arg(&peer_manifest),
+            "--live-rpc-devnet-rehearsal".to_string(),
+            path_arg(&live_rehearsal),
+            "--live-rpc-devnet-runtime-surface-evidence".to_string(),
+            path_arg(&live_runtime_surface),
+            "--operator-join-confirmation".to_string(),
+            path_arg(&operator_join_confirmation),
+            "--validator-join".to_string(),
+            path_arg(&join),
+            "--validator-activation".to_string(),
+            path_arg(&activation),
+        ];
+        args.extend(launch_artifact_args(&artifacts));
+        args.push("--json".to_string());
+        args
+    };
+
+    let loopback_rejection = run_nebula_failure_strings(&readiness_args_for(
+        &loopback_certificate,
+        &live_runtime_surface,
+    ));
+    let loopback_rejection: Value =
+        serde_json::from_str(&loopback_rejection).expect("loopback rejection json");
+    assert_eq!(loopback_rejection["public_launch_ready"], false);
+    assert!(loopback_rejection["blocking_gaps"]
+        .as_array()
+        .expect("blocking gaps")
+        .iter()
+        .any(|gap| gap
+            == "runtime_surface.capture_mode expected external-public-endpoint but got loopback-devnet"));
+
+    let readiness_report: Value = serde_json::from_str(&run_nebula_strings(&readiness_args_for(
+        &external_certificate,
+        &external_runtime_surface,
+    )))
+    .expect("launch readiness report json");
+    assert_eq!(readiness_report["public_launch_ready"], true);
+    assert_eq!(readiness_report["level"], "public-testnet-launch-ready");
+    assert_eq!(
+        readiness_report["runtime_surface_capture_mode"],
+        "external-public-endpoint"
+    );
+    assert_hex64(&readiness_report, "public_launch_readiness_root");
+    assert_eq!(
+        readiness_report["public_testnet_launch_certificate_root"],
+        certificate_report["public_testnet_launch_certificate_root"]
     );
 
     fs::remove_dir_all(&dir).expect("remove temp rehearsal dir");
