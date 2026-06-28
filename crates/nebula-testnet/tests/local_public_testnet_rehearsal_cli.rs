@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -225,6 +225,34 @@ fn value_str<'a>(value: &'a Value, field: &str) -> &'a str {
         .unwrap_or_else(|| panic!("{field} should be a string"))
 }
 
+fn rewrite_runtime_surface_peer_manifest_urls(
+    runtime_surface: &mut Value,
+    peer_manifest_path: &Path,
+) {
+    let peer_manifest: Value =
+        serde_json::from_str(&fs::read_to_string(peer_manifest_path).expect("read peer manifest"))
+            .expect("peer manifest json");
+    let validator_id = runtime_surface["snapshot"]["config"]["validator_id"]
+        .as_str()
+        .expect("runtime surface snapshot validator_id");
+    let snapshot_peer_urls = peer_manifest["peers"]
+        .as_array()
+        .expect("peer manifest peers")
+        .iter()
+        .filter(|peer| value_str(peer, "validator_id") != validator_id)
+        .map(|peer| value_str(peer, "snapshot_url").to_string())
+        .collect::<Vec<_>>();
+    runtime_surface["status"]["public_testnet_peer_manifest_snapshot_peer_urls"] =
+        json!(snapshot_peer_urls);
+
+    let status = runtime_surface["status"].clone();
+    if runtime_surface["rpc_status"].get("result").is_some() {
+        runtime_surface["rpc_status"]["result"] = status;
+    } else {
+        runtime_surface["rpc_status"] = status;
+    }
+}
+
 fn sample_secret_key_hex(seed: u8) -> String {
     format!("{seed:02x}").repeat(32)
 }
@@ -232,10 +260,15 @@ fn sample_secret_key_hex(seed: u8) -> String {
 fn write_runtime_surface_capture_inputs(
     dir: &Path,
     runtime_surface_path: &Path,
+    peer_manifest_path: Option<&Path>,
 ) -> Vec<(String, PathBuf)> {
-    let runtime_surface: Value =
+    let mut runtime_surface: Value =
         serde_json::from_str(&fs::read_to_string(runtime_surface_path).expect("read surface"))
             .expect("runtime surface evidence json");
+    if let Some(peer_manifest_path) = peer_manifest_path {
+        rewrite_runtime_surface_peer_manifest_urls(&mut runtime_surface, peer_manifest_path);
+    }
+
     let fields = [
         ("--health", "health", "health.json"),
         ("--status", "status", "status.json"),
@@ -877,7 +910,9 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
         "--runtime-surface-tls-pin".to_string(),
         tls_pin_arg,
     ];
-    for (flag, path) in write_runtime_surface_capture_inputs(&dir, &live_runtime_surface) {
+    for (flag, path) in
+        write_runtime_surface_capture_inputs(&dir, &live_runtime_surface, Some(&peer_manifest))
+    {
         external_surface_args.push(flag);
         external_surface_args.push(path_arg(&path));
     }

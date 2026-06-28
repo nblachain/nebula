@@ -12205,6 +12205,18 @@ fn verified_launch_certificate_reports(
         genesis_manifest_json,
     )?;
     let runtime_surface = verify_runtime_surface_evidence_json(runtime_surface_evidence_json)?;
+    let runtime_surface_evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(
+        runtime_surface_evidence_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let runtime_surface_snapshot = serde_json::from_value::<runtime::RuntimeSnapshot>(
+        runtime_surface_evidence.snapshot.clone(),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let peer_manifest = serde_json::from_str::<PublicTestnetPeerManifest>(
+        public_testnet_peer_manifest_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
     let genesis = verify_genesis_manifest_json(genesis_manifest_json)?;
     let deployment = verify_deployment_attestation_json(deployment_attestation_json)?;
     let public_probe = parse_public_probe_json(public_probe_json, "public_probe")?;
@@ -12319,8 +12331,63 @@ fn verified_launch_certificate_reports(
                 .to_string(),
         ),
     }
-    let expected_runtime_snapshot_peer_count =
-        public_testnet_peer_manifest.peer_count.saturating_sub(1);
+    let runtime_validator_id = runtime_surface_snapshot.config.validator_id.as_str();
+    if !peer_manifest
+        .peers
+        .iter()
+        .any(|peer| peer.validator_id.eq_ignore_ascii_case(runtime_validator_id))
+    {
+        errors.push(format!(
+            "runtime_surface.snapshot.config.validator_id {runtime_validator_id} is not in verified public testnet peer manifest"
+        ));
+    }
+    let expected_snapshot_peer_urls = peer_manifest
+        .peers
+        .iter()
+        .filter(|peer| !peer.validator_id.eq_ignore_ascii_case(runtime_validator_id))
+        .map(|peer| peer.snapshot_url.clone())
+        .collect::<Vec<_>>();
+    let observed_snapshot_peer_urls =
+        match runtime_surface_evidence
+            .status
+            .get("public_testnet_peer_manifest_snapshot_peer_urls")
+        {
+            Some(Value::Array(values)) => values
+                .iter()
+                .enumerate()
+                .filter_map(|(index, value)| match value.as_str() {
+                    Some(url) => Some(url.to_string()),
+                    None => {
+                        errors.push(format!(
+                            "runtime_surface.status.public_testnet_peer_manifest_snapshot_peer_urls[{index}] must be a string"
+                        ));
+                        None
+                    }
+                })
+                .collect::<Vec<_>>(),
+            Some(_) => {
+                errors.push(
+                    "runtime_surface.status.public_testnet_peer_manifest_snapshot_peer_urls must be an array"
+                        .to_string(),
+                );
+                Vec::new()
+            }
+            None => {
+                errors.push(
+                    "runtime_surface.status.public_testnet_peer_manifest_snapshot_peer_urls is required for launch certificate"
+                        .to_string(),
+                );
+                Vec::new()
+            }
+        };
+    if runtime_surface.capture_mode == RUNTIME_SURFACE_CAPTURE_MODE_EXTERNAL_PUBLIC_ENDPOINT
+        && observed_snapshot_peer_urls != expected_snapshot_peer_urls
+    {
+        errors.push(format!(
+            "runtime_surface.status.public_testnet_peer_manifest_snapshot_peer_urls must match verified peer manifest snapshot URLs after excluding validator_id {runtime_validator_id}"
+        ));
+    }
+    let expected_runtime_snapshot_peer_count = expected_snapshot_peer_urls.len();
     if runtime_surface.public_testnet_peer_manifest_snapshot_peer_count
         != expected_runtime_snapshot_peer_count
     {
@@ -13087,6 +13154,24 @@ mod public_launch {
             "nebula_public_testnet_peer_manifest_snapshot_peer_count",
             count as u128,
         );
+        evidence.root = runtime_surface_evidence_root(&evidence);
+        let output = serde_json::to_string_pretty(&evidence)
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+        verify_runtime_surface_evidence_json(&output)?;
+        Ok(output)
+    }
+
+    fn runtime_surface_with_peer_manifest_snapshot_peer_urls(
+        runtime_surface_json: &str,
+        urls: Vec<String>,
+    ) -> Result<String, AttestationError> {
+        let mut evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(runtime_surface_json)
+            .expect("runtime surface evidence parses");
+        evidence.status["public_testnet_peer_manifest_snapshot_peer_urls"] = json!(urls);
+        match evidence.rpc_status.get_mut("result") {
+            Some(result) => *result = evidence.status.clone(),
+            None => evidence.rpc_status = evidence.status.clone(),
+        }
         evidence.root = runtime_surface_evidence_root(&evidence);
         let output = serde_json::to_string_pretty(&evidence)
             .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
@@ -17120,6 +17205,19 @@ mod public_launch {
         let external_runtime_surface =
             external_public_runtime_surface_from(&runtime_surface, Some(matching_tls_observation))
                 .unwrap();
+        let expected_external_snapshot_peer_urls =
+            serde_json::from_str::<PublicTestnetPeerManifest>(&peer_manifest)
+                .unwrap()
+                .peers
+                .into_iter()
+                .filter(|peer| peer.validator_id != "validator-b")
+                .map(|peer| peer.snapshot_url)
+                .collect::<Vec<_>>();
+        let external_runtime_surface = runtime_surface_with_peer_manifest_snapshot_peer_urls(
+            &external_runtime_surface,
+            expected_external_snapshot_peer_urls.clone(),
+        )
+        .unwrap();
         let unexcluded_peer_runtime_surface =
             runtime_surface_with_peer_manifest_snapshot_peer_count(&external_runtime_surface, 2)
                 .unwrap();
@@ -17145,6 +17243,45 @@ mod public_launch {
             AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
                 error
                     == "runtime_surface.public_testnet_peer_manifest_snapshot_peer_count expected 1 but got 2"
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
+        let all_manifest_snapshot_peer_urls =
+            serde_json::from_str::<PublicTestnetPeerManifest>(&peer_manifest)
+                .unwrap()
+                .peers
+                .into_iter()
+                .map(|peer| peer.snapshot_url)
+                .collect::<Vec<_>>();
+        let unexcluded_peer_url_runtime_surface =
+            runtime_surface_with_peer_manifest_snapshot_peer_urls(
+                &external_runtime_surface,
+                all_manifest_snapshot_peer_urls,
+            )
+            .unwrap();
+        let unexcluded_peer_url_certificate_error =
+            build_public_testnet_launch_certificate_json_pretty(
+                &observer_confirmation,
+                &unexcluded_peer_url_runtime_surface,
+                &peer_manifest,
+                &join_confirmation,
+                &join,
+                &activation,
+                &bundle,
+                &deployment,
+                &public_status,
+                &public_probe,
+                &validators,
+                &handoff,
+                &acceptance,
+                &genesis,
+            )
+            .unwrap_err();
+        match unexcluded_peer_url_certificate_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error
+                    == "runtime_surface.status.public_testnet_peer_manifest_snapshot_peer_urls must match verified peer manifest snapshot URLs after excluding validator_id validator-b"
             })),
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
@@ -17448,6 +17585,11 @@ mod public_launch {
         let mismatched_runtime_surface = external_public_runtime_surface_from(
             &runtime_surface,
             Some(mismatched_tls_observation),
+        )
+        .unwrap();
+        let mismatched_runtime_surface = runtime_surface_with_peer_manifest_snapshot_peer_urls(
+            &mismatched_runtime_surface,
+            expected_external_snapshot_peer_urls,
         )
         .unwrap();
         let mismatched_certificate = build_public_testnet_launch_certificate_json_pretty(
