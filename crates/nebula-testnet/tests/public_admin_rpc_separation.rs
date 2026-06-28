@@ -603,6 +603,11 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
             sequencer_secret_key_hex: Some(initial_sequencer_secret_key_hex),
             data_dir: Some(sequencer_data_dir),
             auto_produce_blocks: false,
+            public_testnet_peer_manifest: Some(runtime_peer_manifest_binding(
+                &sequencer_binding,
+                vec!["https://node-a.testnet.example/snapshot".to_string()],
+                1,
+            )),
             max_requests_per_minute: 10_000,
             trusted_proxy_ips: vec!["127.0.0.1".to_string()],
             ..RuntimeNodeOptions::default()
@@ -872,12 +877,11 @@ fn launch_bound_follower_exports_verifiable_runtime_surface_evidence() {
             bootstrap_rpc_url: Some(snapshot_url.clone()),
             sync_rpc_url: Some(snapshot_url.clone()),
             sync_peer_quorum: 1,
-            public_testnet_peer_manifest: Some(RuntimePublicTestnetPeerManifestBinding {
-                public_testnet_peer_manifest_root: "a".repeat(64),
-                launch_package_bundle_root: follower_binding.launch_package_bundle_root.clone(),
-                snapshot_peer_urls: vec![snapshot_url],
-                sync_peer_quorum: 1,
-            }),
+            public_testnet_peer_manifest: Some(runtime_peer_manifest_binding(
+                &follower_binding,
+                vec![snapshot_url],
+                1,
+            )),
             max_requests_per_minute: 10_000,
             trusted_proxy_ips: vec!["127.0.0.1".to_string()],
             ..RuntimeNodeOptions::default()
@@ -1004,7 +1008,7 @@ fn launch_bound_accountability_report_blocks_public_ops_and_mutations() {
     let mut config = RuntimeConfig::public_testnet_default();
     config.block_target_ms = 999;
     config.validator_id = "validator-a".to_string();
-    config.launch_binding = Some(launch_binding);
+    config.launch_binding = Some(launch_binding.clone());
     config.faucet_nbla_nebulai = 0;
     let initial_sequencer_secret_key_hex = "3d".repeat(32);
     config.sequencer_public_key_hex = hex::encode(signing_key(0x3d).verifying_key().to_bytes());
@@ -1014,6 +1018,11 @@ fn launch_bound_accountability_report_blocks_public_ops_and_mutations() {
             admin_token: Some(ADMIN_TOKEN.to_string()),
             sequencer_secret_key_hex: Some(initial_sequencer_secret_key_hex),
             data_dir: Some(temp_data_dir("accountability")),
+            public_testnet_peer_manifest: Some(runtime_peer_manifest_binding(
+                &launch_binding,
+                vec!["https://node-a.testnet.example/snapshot".to_string()],
+                1,
+            )),
             max_requests_per_minute: 10_000,
             trusted_proxy_ips: vec!["127.0.0.1".to_string()],
             ..RuntimeNodeOptions::default()
@@ -1762,6 +1771,19 @@ fn verified_launch_bindings() -> (RuntimeLaunchBinding, RuntimeLaunchBinding) {
     .expect("validator-b is admitted in the sample validator set");
 
     (sequencer_binding, follower_binding)
+}
+
+fn runtime_peer_manifest_binding(
+    launch_binding: &RuntimeLaunchBinding,
+    snapshot_peer_urls: Vec<String>,
+    sync_peer_quorum: usize,
+) -> RuntimePublicTestnetPeerManifestBinding {
+    RuntimePublicTestnetPeerManifestBinding {
+        public_testnet_peer_manifest_root: "a".repeat(64),
+        launch_package_bundle_root: launch_binding.launch_package_bundle_root.clone(),
+        snapshot_peer_urls,
+        sync_peer_quorum,
+    }
 }
 
 fn temp_data_dir(label: &str) -> String {

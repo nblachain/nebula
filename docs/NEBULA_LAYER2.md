@@ -370,17 +370,18 @@ verified launch package artifacts: `--deployment-attestation`, `--public-status`
 `--public-probe`, `--validator-set`, `--operator-handoff`,
 `--operator-acceptance`, `--genesis-manifest`, and `--launch-package-bundle`.
 Build and verify `--build-public-testnet-peer-manifest` from that same bundle
-before starting public followers. Launch-bound followers can pass
+before starting public nodes. Launch-bound sequencers and followers must pass
 `--public-testnet-peer-manifest <path>` to `--run-rpc`; the CLI verifies the
-manifest against the launch artifacts, excludes the local `--validator-id`, and
-derives the follower `--sync-rpc`, `--bootstrap-rpc`, and `--sync-peer-quorum`
-from the manifest unless explicitly supplied values match it.
+manifest against the launch artifacts and excludes the local `--validator-id`
+from usable snapshot peers. Followers derive `--sync-rpc`, `--bootstrap-rpc`,
+and `--sync-peer-quorum` from the manifest unless explicitly supplied values
+match it.
 `--run-rpc` verifies those artifacts, confirms `--validator-id` is admitted in
 the validator set, binds the live status/ops/backup surfaces to their roots, and
 rejects imported snapshots whose embedded launch binding differs. Nodes without
 this binding can still serve local rehearsal RPC, but `/health` and `/ops`
 report `missing-launch-package-binding` and public ops readiness stays false.
-Launch-bound followers without a verified peer-manifest binding report
+Launch-bound nodes without a verified peer-manifest binding report
 `missing-public-testnet-peer-manifest-binding`, and any configured bootstrap or
 sync URL outside the verified manifest is rejected at startup.
 Launch-bound public candidates must also disable the public NBLA faucet with

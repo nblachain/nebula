@@ -1821,7 +1821,6 @@ impl RuntimeRpcState {
             blocking_gaps.push("missing-launch-package-binding".to_string());
         }
         if status.launch_binding_present
-            && status.node_role == "follower"
             && self.sync_peers.public_testnet_peer_manifest_root.is_none()
         {
             blocking_gaps.push("missing-public-testnet-peer-manifest-binding".to_string());
@@ -2815,6 +2814,13 @@ impl RuntimeSyncPeerSet {
                 return Err(
                     "public_testnet_peer_manifest.snapshot_peer_urls must not be empty".to_string(),
                 );
+            }
+            if binding.sync_peer_quorum > public_testnet_peer_manifest_snapshot_peer_urls.len() {
+                return Err(format!(
+                    "public_testnet_peer_manifest.sync_peer_quorum {} exceeds usable snapshot peer count {}",
+                    binding.sync_peer_quorum,
+                    public_testnet_peer_manifest_snapshot_peer_urls.len()
+                ));
             }
             for url in bootstrap_peer_urls.iter().chain(sync_peer_urls.iter()) {
                 if !public_testnet_peer_manifest_snapshot_peer_urls
@@ -7674,16 +7680,22 @@ mod tests {
         }
     }
 
-    fn test_manifest_bound_sync_peers(urls: Vec<String>, quorum: usize) -> RuntimeSyncPeerSet {
+    fn test_manifest_bound_public_peers(urls: Vec<String>, quorum: usize) -> RuntimeSyncPeerSet {
         RuntimeSyncPeerSet {
             bootstrap_peer_urls: Vec::new(),
-            sync_peer_urls: urls.clone(),
+            sync_peer_urls: Vec::new(),
             sync_peer_quorum: quorum,
             public_testnet_peer_manifest_root: Some("a".repeat(64)),
             public_testnet_peer_manifest_launch_package_bundle_root: Some("9".repeat(64)),
             public_testnet_peer_manifest_snapshot_peer_urls: urls,
             public_testnet_peer_manifest_sync_peer_quorum: Some(quorum),
         }
+    }
+
+    fn test_manifest_bound_sync_peers(urls: Vec<String>, quorum: usize) -> RuntimeSyncPeerSet {
+        let mut peers = test_manifest_bound_public_peers(urls.clone(), quorum);
+        peers.sync_peer_urls = urls;
+        peers
     }
 
     fn runtime_config_with_launch_binding() -> RuntimeConfig {
@@ -8592,6 +8604,19 @@ mod tests {
             .unwrap_err()
             .contains("not in the verified public testnet peer manifest"));
 
+        let undersized_manifest = RuntimePublicTestnetPeerManifestBinding {
+            snapshot_peer_urls: vec!["https://node-a.testnet.example/snapshot".to_string()],
+            ..manifest.clone()
+        };
+        let options = RuntimeNodeOptions {
+            sync_peer_quorum: 2,
+            public_testnet_peer_manifest: Some(undersized_manifest),
+            ..RuntimeNodeOptions::default()
+        };
+        assert!(RuntimeSyncPeerSet::from_options(&options)
+            .unwrap_err()
+            .contains("exceeds usable snapshot peer count"));
+
         let options = RuntimeNodeOptions {
             sync_rpc_urls: vec!["https://node-a.testnet.example/snapshot".to_string()],
             sync_peer_quorum: 1,
@@ -8820,6 +8845,10 @@ mod tests {
         state.storage = Some(storage);
         state.admin_token = Some("admin".to_string());
         state.admin_rpc_private_listener = true;
+        state.sync_peers = test_manifest_bound_public_peers(
+            vec!["https://node-a.testnet.example/snapshot".to_string()],
+            1,
+        );
 
         let ops = state.ops_status().unwrap();
         assert!(!ops.public_ops_ready);
@@ -8839,6 +8868,51 @@ mod tests {
         assert!(ops.rpc_client_identity_proxy_aware);
         assert!(!ops.rpc_trust_private_proxy_headers);
         assert_eq!(ops.rpc_trusted_proxy_count, 1);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn runtime_ops_status_launch_bound_sequencer_requires_peer_manifest_binding() {
+        let dir =
+            std::env::temp_dir().join(format!("nebula-runtime-sequencer-manifest-{}", unix_ms()));
+        let storage = RuntimeStorage::from_data_dir(&dir);
+        let mut runtime =
+            NebulaRuntime::new(runtime_config_with_launch_binding_and_disabled_nbla_faucet())
+                .unwrap();
+        rotate_runtime_off_default_dev_key(&mut runtime);
+        runtime.produce_block();
+        let snapshot = runtime.export_snapshot();
+        storage.save_snapshot(&snapshot).unwrap();
+        let mut state = test_rpc_state_with_limits(
+            runtime,
+            DEFAULT_MAX_REQUEST_BYTES,
+            DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        );
+        state.storage = Some(storage);
+        enable_private_admin_control(&mut state);
+        state
+            .client_identity
+            .trusted_proxy_ips
+            .push(IpAddr::V4(Ipv4Addr::LOCALHOST));
+
+        let ops = state.ops_status().unwrap();
+        assert!(!ops.public_ops_ready);
+        assert!(ops
+            .blocking_gaps
+            .contains(&"missing-public-testnet-peer-manifest-binding".to_string()));
+        assert!(!ops.public_testnet_peer_manifest_present);
+
+        state.sync_peers = test_manifest_bound_public_peers(
+            vec!["https://node-a.testnet.example/snapshot".to_string()],
+            1,
+        );
+        let ops = state.ops_status().unwrap();
+        assert!(ops.public_ops_ready, "{:?}", ops.blocking_gaps);
+        assert!(ops.public_testnet_peer_manifest_present);
+        assert_eq!(ops.public_testnet_peer_manifest_root, Some("a".repeat(64)));
+        assert_eq!(ops.public_testnet_peer_manifest_snapshot_peer_count, 1);
+        assert_eq!(ops.public_testnet_peer_manifest_sync_peer_quorum, Some(1));
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -9057,6 +9131,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("nebula-runtime-ops-test-{}", unix_ms()));
         let storage = RuntimeStorage::from_data_dir(&dir);
         let binding = test_launch_binding();
+        let expected_peer_manifest_root = "a".repeat(64);
         let mut runtime = NebulaRuntime::new(runtime_config_with_launch_binding()).unwrap();
         rotate_runtime_off_default_dev_key(&mut runtime);
         runtime.faucet("alice").unwrap();
@@ -9071,10 +9146,21 @@ mod tests {
         );
         state.storage = Some(storage.clone());
         enable_private_admin_control(&mut state);
+        state.sync_peers = test_manifest_bound_public_peers(
+            vec!["https://node-a.testnet.example/snapshot".to_string()],
+            1,
+        );
 
         let ops = state.ops_status().unwrap();
         assert!(ops.public_ops_ready, "{:?}", ops.blocking_gaps);
         assert!(ops.launch_binding_present);
+        assert!(ops.public_testnet_peer_manifest_present);
+        assert_eq!(
+            ops.public_testnet_peer_manifest_root.as_deref(),
+            Some(expected_peer_manifest_root.as_str())
+        );
+        assert_eq!(ops.public_testnet_peer_manifest_snapshot_peer_count, 1);
+        assert_eq!(ops.public_testnet_peer_manifest_sync_peer_quorum, Some(1));
         assert_eq!(
             ops.launch_package_bundle_root.as_deref(),
             Some(binding.launch_package_bundle_root.as_str())
@@ -9136,6 +9222,11 @@ mod tests {
 
         let manifest = state.backup_manifest().unwrap();
         assert!(manifest.launch_binding_present);
+        assert!(manifest.public_testnet_peer_manifest_present);
+        assert_eq!(
+            manifest.public_testnet_peer_manifest_root.as_deref(),
+            Some(expected_peer_manifest_root.as_str())
+        );
         assert_eq!(
             manifest.launch_package_bundle_root.as_deref(),
             Some(binding.launch_package_bundle_root.as_str())
@@ -9182,6 +9273,11 @@ mod tests {
         assert_eq!(rpc_ops["ops_root"].as_str().unwrap().len(), 64);
         assert_eq!(rpc_ops["public_ops_ready"], true);
         assert_eq!(rpc_ops["launch_binding_present"], true);
+        assert_eq!(rpc_ops["public_testnet_peer_manifest_present"], true);
+        assert_eq!(
+            rpc_ops["public_testnet_peer_manifest_root"],
+            expected_peer_manifest_root
+        );
         assert_eq!(
             rpc_ops["launch_package_bundle_root"],
             binding.launch_package_bundle_root
@@ -9264,6 +9360,10 @@ mod tests {
         );
         state.storage = Some(storage);
         enable_private_admin_control(&mut state);
+        state.sync_peers = test_manifest_bound_public_peers(
+            vec!["https://node-a.testnet.example/snapshot".to_string()],
+            1,
+        );
 
         let health = state.health_json().unwrap();
         let status = state.status_json().unwrap();
@@ -9368,6 +9468,10 @@ mod tests {
         );
         state.storage = Some(storage);
         enable_private_admin_control(&mut state);
+        state.sync_peers = test_manifest_bound_public_peers(
+            vec!["https://node-a.testnet.example/snapshot".to_string()],
+            1,
+        );
 
         let health = state.health_json().unwrap();
         let status = state.status_json().unwrap();
@@ -9647,6 +9751,10 @@ mod tests {
         );
         state.storage = Some(storage);
         enable_private_admin_control(&mut state);
+        state.sync_peers = test_manifest_bound_public_peers(
+            vec!["https://node-a.testnet.example/snapshot".to_string()],
+            1,
+        );
 
         let ops = state.ops_status().unwrap();
         assert!(!ops.public_ops_ready);

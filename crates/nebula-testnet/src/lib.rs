@@ -2430,6 +2430,12 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
     let block_millis = runtime::DEFAULT_SUBSECOND_BLOCK_MS;
     let bridge_account_seed = 0x46;
     let bridge_account = live_account_id(bridge_account_seed);
+    let peer_manifest_binding =
+        public_testnet_peer_manifest.unwrap_or_else(|| LivePeerManifestBindingInput {
+            public_testnet_peer_manifest_root: hex_64("live-peer-manifest"),
+            launch_package_bundle_root: sequencer_launch_binding.launch_package_bundle_root.clone(),
+            sync_peer_quorum: 1,
+        });
 
     let mut sequencer_config = runtime::RuntimeConfig::public_testnet_default();
     sequencer_config.block_target_ms = block_millis;
@@ -2463,6 +2469,19 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
             sequencer_secret_key_hex: Some(initial_sequencer_secret_key_hex),
             data_dir: Some(sequencer_data_dir),
             auto_produce_blocks: false,
+            public_testnet_peer_manifest: Some(runtime::RuntimePublicTestnetPeerManifestBinding {
+                public_testnet_peer_manifest_root: peer_manifest_binding
+                    .public_testnet_peer_manifest_root
+                    .clone(),
+                launch_package_bundle_root: peer_manifest_binding
+                    .launch_package_bundle_root
+                    .clone(),
+                snapshot_peer_urls: vec![format!(
+                    "{}/snapshot",
+                    endpoint_url.trim_end_matches("/status")
+                )],
+                sync_peer_quorum: peer_manifest_binding.sync_peer_quorum,
+            }),
             max_requests_per_minute: 10_000,
             trusted_proxy_ips: vec!["127.0.0.1".to_string()],
             ..runtime::RuntimeNodeOptions::default()
@@ -2743,12 +2762,6 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
     )?;
 
     let snapshot_url = format!("http://{sequencer_rpc_addr}/snapshot");
-    let peer_manifest_binding =
-        public_testnet_peer_manifest.unwrap_or_else(|| LivePeerManifestBindingInput {
-            public_testnet_peer_manifest_root: hex_64("live-peer-manifest"),
-            launch_package_bundle_root: follower_binding.launch_package_bundle_root.clone(),
-            sync_peer_quorum: 1,
-        });
     let mut follower_config = runtime::RuntimeConfig::public_testnet_default();
     follower_config.block_target_ms = block_millis;
     follower_config.validator_id = "validator-b".to_string();
