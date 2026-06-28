@@ -191,7 +191,7 @@ pub struct PublicEndpointEvidence {
     pub tls_pins: Vec<TlsEndpointPin>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct TlsEndpointPin {
     pub cert_sha256: String,
@@ -776,6 +776,8 @@ pub struct PublicTestnetLaunchCertificate {
     pub public_status_manifest_root: String,
     pub public_probe_root: String,
     pub runtime_surface_root: String,
+    pub runtime_surface_capture_mode: String,
+    pub runtime_surface_tls_observation: Option<TlsEndpointPin>,
     pub validator_set_root: String,
     pub genesis_root: String,
     pub endpoint_url: String,
@@ -806,6 +808,8 @@ pub struct PublicTestnetLaunchCertificateReport {
     pub public_status_manifest_root: String,
     pub public_probe_root: String,
     pub runtime_surface_root: String,
+    pub runtime_surface_capture_mode: String,
+    pub runtime_surface_tls_observation: Option<TlsEndpointPin>,
     pub validator_set_root: String,
     pub genesis_root: String,
     pub endpoint_url: String,
@@ -840,6 +844,7 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub public_probe_root: String,
     pub runtime_surface_root: String,
     pub runtime_surface_capture_mode: String,
+    pub runtime_surface_tls_observation: Option<TlsEndpointPin>,
     pub live_rpc_devnet_rehearsal_root: String,
     pub live_rpc_devnet_runtime_surface_root: String,
     pub validator_set_root: String,
@@ -6686,6 +6691,18 @@ pub fn verify_public_testnet_launch_certificate_jsons(
         &certificate.runtime_surface_root,
         &expected.runtime_surface_root,
     );
+    require_eq(
+        &mut errors,
+        "runtime_surface_capture_mode",
+        &certificate.runtime_surface_capture_mode,
+        &expected.runtime_surface_capture_mode,
+    );
+    if certificate.runtime_surface_tls_observation != expected.runtime_surface_tls_observation {
+        errors.push(format!(
+            "runtime_surface_tls_observation expected {:?} but got {:?}",
+            expected.runtime_surface_tls_observation, certificate.runtime_surface_tls_observation
+        ));
+    }
     require_root(
         &mut errors,
         "validator_set_root",
@@ -6764,6 +6781,8 @@ pub fn verify_public_testnet_launch_certificate_jsons(
         public_status_manifest_root: certificate.public_status_manifest_root,
         public_probe_root: certificate.public_probe_root,
         runtime_surface_root: certificate.runtime_surface_root,
+        runtime_surface_capture_mode: certificate.runtime_surface_capture_mode,
+        runtime_surface_tls_observation: certificate.runtime_surface_tls_observation,
         validator_set_root: certificate.validator_set_root,
         genesis_root: certificate.genesis_root,
         endpoint_url: certificate.endpoint_url,
@@ -7064,6 +7083,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         public_probe_root: certificate.public_probe_root,
         runtime_surface_root: certificate.runtime_surface_root,
         runtime_surface_capture_mode: runtime_surface.capture_mode,
+        runtime_surface_tls_observation: runtime_surface.tls_observation,
         live_rpc_devnet_rehearsal_root: live_rehearsal.rehearsal_root,
         live_rpc_devnet_runtime_surface_root: live_runtime_surface.runtime_surface_root,
         validator_set_root: certificate.validator_set_root,
@@ -12598,6 +12618,8 @@ fn public_testnet_launch_certificate(
             .public_probe_root
             .clone(),
         runtime_surface_root: reports.runtime_surface.runtime_surface_root.clone(),
+        runtime_surface_capture_mode: reports.runtime_surface.capture_mode.clone(),
+        runtime_surface_tls_observation: reports.runtime_surface.tls_observation.clone(),
         validator_set_root: reports.launch_package_bundle.validator_set_root.clone(),
         genesis_root: reports.genesis.genesis_root.clone(),
         endpoint_url: reports.public_observer_confirmation.endpoint_url.clone(),
@@ -12633,6 +12655,8 @@ fn public_testnet_launch_certificate_root(certificate: &PublicTestnetLaunchCerti
         "public_status_manifest_root": certificate.public_status_manifest_root,
         "public_probe_root": certificate.public_probe_root,
         "runtime_surface_root": certificate.runtime_surface_root,
+        "runtime_surface_capture_mode": certificate.runtime_surface_capture_mode,
+        "runtime_surface_tls_observation": certificate.runtime_surface_tls_observation,
         "validator_set_root": certificate.validator_set_root,
         "genesis_root": certificate.genesis_root,
         "endpoint_url": certificate.endpoint_url,
@@ -12668,6 +12692,7 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "public_probe_root": report.public_probe_root,
         "runtime_surface_root": report.runtime_surface_root,
         "runtime_surface_capture_mode": report.runtime_surface_capture_mode,
+        "runtime_surface_tls_observation": report.runtime_surface_tls_observation,
         "live_rpc_devnet_rehearsal_root": report.live_rpc_devnet_rehearsal_root,
         "live_rpc_devnet_runtime_surface_root": report.live_rpc_devnet_runtime_surface_root,
         "validator_set_root": report.validator_set_root,
@@ -17325,6 +17350,11 @@ mod public_launch {
             peer_manifest_report.peer_count
         );
         assert_eq!(report.runtime_surface_root.len(), 64);
+        assert_eq!(
+            report.runtime_surface_capture_mode,
+            RUNTIME_SURFACE_CAPTURE_MODE_LOOPBACK_DEVNET
+        );
+        assert_eq!(report.runtime_surface_tls_observation, None);
         assert_eq!(report.validator_count, 2);
         assert_eq!(report.operator_count, 2);
         assert_eq!(report.observer_count, 2);
@@ -17372,9 +17402,11 @@ mod public_launch {
         let deployment_attestation =
             serde_json::from_str::<DeploymentAttestation>(&deployment).unwrap();
         let matching_tls_observation = deployment_attestation.public_endpoint.tls_pins[0].clone();
-        let external_runtime_surface =
-            external_public_runtime_surface_from(&runtime_surface, Some(matching_tls_observation))
-                .unwrap();
+        let external_runtime_surface = external_public_runtime_surface_from(
+            &runtime_surface,
+            Some(matching_tls_observation.clone()),
+        )
+        .unwrap();
         let expected_external_snapshot_peer_urls =
             serde_json::from_str::<PublicTestnetPeerManifest>(&peer_manifest)
                 .unwrap()
@@ -17477,6 +17509,32 @@ mod public_launch {
             &genesis,
         )
         .unwrap();
+        let external_certificate_report = verify_public_testnet_launch_certificate_jsons(
+            &external_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &peer_manifest,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap();
+        assert_eq!(
+            external_certificate_report.runtime_surface_capture_mode,
+            RUNTIME_SURFACE_CAPTURE_MODE_EXTERNAL_PUBLIC_ENDPOINT
+        );
+        assert_eq!(
+            external_certificate_report.runtime_surface_tls_observation,
+            Some(matching_tls_observation.clone())
+        );
 
         let mut forged_peer_url_certificate =
             serde_json::from_str::<PublicTestnetLaunchCertificate>(&external_certificate).unwrap();
@@ -17508,6 +17566,75 @@ mod public_launch {
             AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
                 error.starts_with("public_testnet_peer_manifest_snapshot_peer_urls expected ")
             })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
+        let mut forged_capture_mode_certificate =
+            serde_json::from_str::<PublicTestnetLaunchCertificate>(&external_certificate).unwrap();
+        forged_capture_mode_certificate.runtime_surface_capture_mode =
+            RUNTIME_SURFACE_CAPTURE_MODE_LOOPBACK_DEVNET.to_string();
+        forged_capture_mode_certificate.root =
+            public_testnet_launch_certificate_root(&forged_capture_mode_certificate);
+        let forged_capture_mode_certificate =
+            serde_json::to_string_pretty(&forged_capture_mode_certificate).unwrap();
+        let forged_capture_mode_certificate_error = verify_public_testnet_launch_certificate_jsons(
+            &forged_capture_mode_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &peer_manifest,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match forged_capture_mode_certificate_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error
+                    == "runtime_surface_capture_mode expected external-public-endpoint but got loopback-devnet"
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
+        let mut forged_tls_certificate =
+            serde_json::from_str::<PublicTestnetLaunchCertificate>(&external_certificate).unwrap();
+        forged_tls_certificate
+            .runtime_surface_tls_observation
+            .as_mut()
+            .expect("external certificate carries TLS observation")
+            .cert_sha256 = "ee".repeat(32);
+        forged_tls_certificate.root =
+            public_testnet_launch_certificate_root(&forged_tls_certificate);
+        let forged_tls_certificate = serde_json::to_string_pretty(&forged_tls_certificate).unwrap();
+        let forged_tls_certificate_error = verify_public_testnet_launch_certificate_jsons(
+            &forged_tls_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &peer_manifest,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match forged_tls_certificate_error {
+            AttestationError::Invalid(errors) => assert!(errors
+                .iter()
+                .any(|error| error.starts_with("runtime_surface_tls_observation expected "))),
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
 
@@ -17544,6 +17671,10 @@ mod public_launch {
         assert_eq!(
             readiness.runtime_surface_capture_mode,
             RUNTIME_SURFACE_CAPTURE_MODE_EXTERNAL_PUBLIC_ENDPOINT
+        );
+        assert_eq!(
+            readiness.runtime_surface_tls_observation,
+            Some(matching_tls_observation.clone())
         );
         assert_eq!(readiness.public_launch_readiness_root.len(), 64);
         assert_eq!(
@@ -17582,25 +17713,7 @@ mod public_launch {
         );
         assert_eq!(
             readiness.public_testnet_launch_certificate_root,
-            verify_public_testnet_launch_certificate_jsons(
-                &external_certificate,
-                &observer_confirmation,
-                &external_runtime_surface,
-                &peer_manifest,
-                &join_confirmation,
-                &join,
-                &activation,
-                &bundle,
-                &deployment,
-                &public_status,
-                &public_probe,
-                &validators,
-                &handoff,
-                &acceptance,
-                &genesis,
-            )
-            .unwrap()
-            .public_testnet_launch_certificate_root
+            external_certificate_report.public_testnet_launch_certificate_root
         );
         assert_eq!(
             readiness.live_rpc_devnet_rehearsal_root,

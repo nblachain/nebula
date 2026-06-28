@@ -1023,6 +1023,14 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
         certificate_report["public_testnet_peer_manifest_snapshot_peer_urls"],
         external_surface_report["public_testnet_peer_manifest_snapshot_peer_urls"]
     );
+    assert_eq!(
+        certificate_report["runtime_surface_capture_mode"],
+        "external-public-endpoint"
+    );
+    assert_eq!(
+        certificate_report["runtime_surface_tls_observation"],
+        external_surface_report["tls_observation"]
+    );
 
     let readiness_args_for = |certificate: &Path, runtime_surface: &Path| -> Vec<String> {
         let mut args = vec![
@@ -1083,6 +1091,14 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
     assert_eq!(
         readiness_report["public_testnet_peer_manifest_snapshot_peer_urls"],
         certificate_report["public_testnet_peer_manifest_snapshot_peer_urls"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_capture_mode"],
+        certificate_report["runtime_surface_capture_mode"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_tls_observation"],
+        certificate_report["runtime_surface_tls_observation"]
     );
 
     fs::remove_dir_all(&dir).expect("remove temp rehearsal dir");

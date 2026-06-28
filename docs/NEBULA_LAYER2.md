@@ -286,14 +286,17 @@ evidence is absent or stale.
     certificate binds the launch-package bundle, validator activation, validator
     join, operator join confirmation, public observer confirmation, public
     status, public probe, runtime-surface evidence, public-testnet peer manifest
-    root, `public_testnet_peer_manifest_snapshot_peer_urls`, usable peer count
-    after self-exclusion, validator set, genesis, endpoint URL, and validator,
+    root, `runtime_surface_capture_mode`, `runtime_surface_tls_observation`,
+    `public_testnet_peer_manifest_snapshot_peer_urls`, usable peer count after
+    self-exclusion, validator set, genesis, endpoint URL, and validator,
     operator, observer, and region counts into one candidate root.
 21. Verify final public launch readiness with external-public runtime-surface
     evidence captured from the advertised endpoint and a launch certificate that
-    root-binds public `public_testnet_peer_manifest_snapshot_peer_urls`, plus an
-    artifact-bound live RPC devnet rehearsal report for the same launch package,
-    endpoint, peer-manifest root, and usable peer count. The verified loopback
+    root-binds `external-public-endpoint` `runtime_surface_capture_mode`,
+    the observed `runtime_surface_tls_observation`, and public
+    `public_testnet_peer_manifest_snapshot_peer_urls`, plus an artifact-bound
+    live RPC devnet rehearsal report for the same launch package, endpoint,
+    peer-manifest root, and usable peer count. The verified loopback
     runtime-surface evidence must match the rehearsal report's root, loopback
     usable peer URLs, and usable peer count.
     This is the only artifact-bound command allowed to emit
@@ -1221,9 +1224,10 @@ The public testnet launch-candidate certificate is built after public observer
 confirmation. It binds the launch-package bundle, validator activation,
 validator join, operator join confirmation, public observer confirmation,
 public status, public probe, runtime surface, public-testnet peer-manifest root,
-and runtime-reported usable peer URLs and peer count after self-exclusion,
-validator set, genesis, endpoint URL, and validator, operator, observer, and
-region counts into one final candidate root.
+runtime surface capture mode, observed TLS tuple when present, and
+runtime-reported usable peer URLs and peer count after self-exclusion, validator
+set, genesis, endpoint URL, and validator, operator, observer, and region counts
+into one final candidate root.
 
 Operators can verify the full package with:
 

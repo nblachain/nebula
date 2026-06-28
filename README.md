@@ -285,13 +285,20 @@ evidence is absent or stale.
 20. Build and verify the public testnet launch-candidate certificate. The
     certificate binds the launch-package bundle, validator activation, validator
     join, operator join confirmation, public observer confirmation, public
-    status, public probe, runtime-surface evidence, validator set, genesis,
-    endpoint URL, and validator, operator, observer, and region counts into one
-    candidate root.
+    status, public probe, runtime-surface evidence, public-testnet peer manifest
+    root, `runtime_surface_capture_mode`, `runtime_surface_tls_observation`,
+    `public_testnet_peer_manifest_snapshot_peer_urls`, usable peer count after
+    self-exclusion, validator set, genesis, endpoint URL, and validator,
+    operator, observer, and region counts into one candidate root.
 21. Verify final public launch readiness with external-public runtime-surface
-    evidence captured from the advertised endpoint, an artifact-bound live RPC
-    devnet rehearsal report for the same launch package and endpoint, and
-    verified loopback runtime-surface evidence whose root matches that report.
+    evidence captured from the advertised endpoint and a launch certificate that
+    root-binds `external-public-endpoint` `runtime_surface_capture_mode`,
+    the observed `runtime_surface_tls_observation`, and public
+    `public_testnet_peer_manifest_snapshot_peer_urls`, plus an artifact-bound
+    live RPC devnet rehearsal report for the same launch package, endpoint,
+    peer-manifest root, and usable peer count. The verified loopback
+    runtime-surface evidence must match the rehearsal report's root, loopback
+    usable peer URLs, and usable peer count.
     This is the only artifact-bound command allowed to emit
     `public_launch_ready=true`; loopback devnet runtime-surface evidence remains
     a rehearsal/certificate input and is rejected by the final readiness gate.
@@ -514,6 +521,7 @@ and keep serving from its persisted local snapshot. `/health`, `/status`, and
 `nebula_status` expose the configured `sync_peer_urls` list, per-peer
 `sync_peer_telemetry`, `sync_peer_quorum`,
 `public_testnet_peer_manifest_root`,
+`public_testnet_peer_manifest_snapshot_peer_urls`,
 `public_testnet_peer_manifest_snapshot_peer_count`,
 `public_testnet_peer_manifest_sync_peer_quorum`, `sync_quorum_met`,
 `sync_quorum_peer_count`, `sync_quorum_height`, `sync_quorum_latest_hash`,
@@ -638,9 +646,9 @@ The public launch suite covers:
 - deployment evidence root binding
 - deployment component root domain separation
 - public status manifest redaction
-- public endpoint and TLS pin evidence
-- HTTPS-only public status/probe endpoints with non-empty hosts, no userinfo,
-  and no query or fragment
+- public DNS endpoint and TLS pin evidence
+- HTTPS-only public status/probe endpoints with public DNS hosts, no userinfo,
+  no IP/localhost authority, and no query or fragment
 - public status endpoint binding to the expected public surface
 - standalone public status/probe surface exact-shape validation
 - deployment-scoped public status/probe validation for custom endpoints
@@ -708,8 +716,9 @@ The public launch suite covers:
   have no admitted validator
 - launch package bundle artifact hashes, operator acceptance root, and bundle
   root for external validator comparison
-- public testnet peer manifests that bind endpoint, validator, RPC/status,
-  snapshot, and sync-quorum evidence to the launch-package bundle
+- public testnet peer manifests that bind endpoint, validator, public-DNS
+  bootstrap/RPC/status/snapshot URLs, and sync-quorum evidence to the
+  launch-package bundle
 - validator activation receipts that bind every admitted validator to the
   verified launch-package bundle
 - validator join receipts that prove activated validators observed the chain
@@ -917,9 +926,11 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - public status/probe endpoints that do not use `https://`
 - public status/probe endpoints that do not include a host, include userinfo,
   include query/fragment components, or include a nonnumeric/zero port
+- public status/probe endpoints that do not use a public DNS host
 - public status endpoint URLs that do not match the expected public surface
-- bootstrap endpoints that include a path, omit a host, include userinfo, or
-  include query/fragment components or a nonnumeric/zero port
+- bootstrap endpoints that do not use a public DNS host, include a path, omit a
+  host, include userinfo, or include query/fragment components or a
+  nonnumeric/zero port
 - bootstrap endpoint hosts that reuse the public endpoint host
 - operator and observer witness roots that do not match the deployment surface
 - operator and observer public keys that are not 64-character hex values
@@ -953,9 +964,9 @@ Until an operator provides fresh deployment evidence that satisfies those rules,
 `public_launch_ready` must remain `false`.
 
 The deployment attestation verifier reports a deterministic bootstrap-roster
-root over the attested bootstrap node IDs, operator IDs, regions, and HTTPS
-endpoints. The genesis and launch-package gates bind that root so operators can
-compare the exact public bootstrap set before rollout.
+root over the attested bootstrap node IDs, operator IDs, regions, and public-DNS
+HTTPS endpoints. The genesis and launch-package gates bind that root so
+operators can compare the exact public bootstrap set before rollout.
 It also reports a deterministic operational-evidence root over the preflight
 receipt, runbook receipt, rollback plan, rollback drill time, and recovery-point
 root.
@@ -1212,8 +1223,11 @@ operator, validator, or observer key holder, set `verified: true`, include
 The public testnet launch-candidate certificate is built after public observer
 confirmation. It binds the launch-package bundle, validator activation,
 validator join, operator join confirmation, public observer confirmation,
-public status, public probe, validator set, genesis, endpoint URL, and validator,
-operator, observer, and region counts into one final candidate root.
+public status, public probe, runtime surface, public-testnet peer-manifest root,
+runtime surface capture mode, observed TLS tuple when present, and
+runtime-reported usable peer URLs and peer count after self-exclusion, validator
+set, genesis, endpoint URL, and validator, operator, observer, and region counts
+into one final candidate root.
 
 Operators can verify the full package with:
 
