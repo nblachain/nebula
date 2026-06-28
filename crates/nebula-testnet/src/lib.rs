@@ -272,6 +272,8 @@ pub struct OperatorAttestation {
     pub public_key: String,
     pub signed_evidence_root: String,
     pub signature_sha3_256: String,
+    pub signature_hex: String,
+    pub verified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1158,6 +1160,7 @@ pub struct OperatorBuildInput {
     pub operator_id: String,
     pub region: String,
     pub public_key: String,
+    pub secret_key_hex: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1760,11 +1763,13 @@ pub fn prove_local_public_testnet_rehearsal(
                     operator_id: "operator-a".to_string(),
                     region: "us-east".to_string(),
                     public_key: sample_ed25519_public_key_hex(0xa1),
+                    secret_key_hex: None,
                 },
                 OperatorBuildInput {
                     operator_id: "operator-b".to_string(),
                     region: "eu-west".to_string(),
                     public_key: sample_ed25519_public_key_hex(0xa2),
+                    secret_key_hex: None,
                 },
             ],
             observers: vec![
@@ -3023,6 +3028,8 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
                     public_key: sample_ed25519_public_key_hex(0xa1),
                     signed_evidence_root: witness_evidence_root.clone(),
                     signature_sha3_256: String::new(),
+                    signature_hex: String::new(),
+                    verified: false,
                 },
                 OperatorAttestation {
                     operator_id: "operator-b".to_string(),
@@ -3030,11 +3037,14 @@ pub fn sample_deployment_attestation_json_pretty() -> String {
                     public_key: sample_ed25519_public_key_hex(0xa2),
                     signed_evidence_root: witness_evidence_root.clone(),
                     signature_sha3_256: String::new(),
+                    signature_hex: String::new(),
+                    verified: false,
                 },
             ];
             for operator in &mut operators {
                 operator.signature_sha3_256 =
                     operator_signature_root(operator, &witness_evidence_root);
+                complete_sample_operator_signature(operator);
             }
             operators
         },
@@ -3206,18 +3216,37 @@ pub fn build_deployment_attestation_json_pretty(
         .operators
         .into_iter()
         .map(|operator| {
+            let operator_secret_key_hex = operator.secret_key_hex;
             let mut operator = OperatorAttestation {
                 operator_id: operator.operator_id,
                 region: operator.region,
                 public_key: operator.public_key,
                 signed_evidence_root: witness_evidence_root.clone(),
                 signature_sha3_256: String::new(),
+                signature_hex: String::new(),
+                verified: false,
             };
             operator.signature_sha3_256 =
                 operator_signature_root(&operator, &witness_evidence_root);
-            operator
+            if let Some(secret_key_hex) = operator_secret_key_hex {
+                let derived_public_key = public_key_hex_for_secret_key(&secret_key_hex)
+                    .map_err(|error| AttestationError::Invalid(vec![error]))?;
+                if !derived_public_key.eq_ignore_ascii_case(&operator.public_key) {
+                    return Err(AttestationError::Invalid(vec![format!(
+                        "operator {} secret_key_hex does not match public_key",
+                        operator.operator_id
+                    )]));
+                }
+                operator.signature_hex =
+                    sign_root_with_secret_key(&secret_key_hex, &operator.signature_sha3_256)
+                        .map_err(|error| AttestationError::Invalid(vec![error]))?;
+                operator.verified = true;
+            } else {
+                complete_sample_operator_signature(&mut operator);
+            }
+            Ok(operator)
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, AttestationError>>()?;
     let mut observers = Vec::new();
     for observer in input.observers {
         let observer_secret_key_hex = observer.secret_key_hex;
@@ -9802,6 +9831,22 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &operator.signature_sha3_256,
             &operator_signature_root(operator, &witness_evidence_root),
         );
+        require_signature_hex(
+            errors,
+            &format!("operators[{index}].signature_hex"),
+            &operator.signature_hex,
+        );
+        if !operator.verified {
+            errors.push(format!("operators[{index}].verified must be true"));
+        }
+        if let Err(error) = verify_ed25519_signature(
+            &operator.public_key,
+            &operator.signature_sha3_256,
+            &operator.signature_hex,
+            &format!("operators[{index}].signature_hex"),
+        ) {
+            errors.push(error);
+        }
     }
     if operator_ids.len() < MIN_PUBLIC_TESTNET_OPERATORS {
         errors.push(format!(
@@ -10594,6 +10639,8 @@ fn deployment_operator_approval_root(attestation: &DeploymentAttestation) -> Str
                 operator.public_key.as_str(),
                 operator.signed_evidence_root.as_str(),
                 operator.signature_sha3_256.as_str(),
+                operator.signature_hex.as_str(),
+                operator.verified,
             )
         })
         .collect::<Vec<_>>();
@@ -10601,13 +10648,23 @@ fn deployment_operator_approval_root(attestation: &DeploymentAttestation) -> Str
     let operators = operators
         .into_iter()
         .map(
-            |(operator_id, region, public_key, signed_evidence_root, signature_sha3_256)| {
+            |(
+                operator_id,
+                region,
+                public_key,
+                signed_evidence_root,
+                signature_sha3_256,
+                signature_hex,
+                verified,
+            )| {
                 json!({
                     "operator_id": operator_id,
                     "region": region,
                     "public_key": public_key,
                     "signed_evidence_root": signed_evidence_root,
                     "signature_sha3_256": signature_sha3_256,
+                    "signature_hex": signature_hex,
+                    "verified": verified,
                 })
             },
         )
@@ -12780,6 +12837,18 @@ fn complete_sample_signature(signature: &mut SignatureVerification) {
     }
 }
 
+fn complete_sample_operator_signature(operator: &mut OperatorAttestation) {
+    if let Some(signature_hex) =
+        sample_signature_for_public_key(&operator.public_key, &operator.signature_sha3_256)
+    {
+        operator.signature_hex = signature_hex;
+        operator.verified = true;
+    } else {
+        operator.signature_hex.clear();
+        operator.verified = false;
+    }
+}
+
 fn stable_root(value: &Value) -> String {
     let bytes = serde_json::to_vec(value).expect("status root input serializes");
     let digest = Sha3_256::digest(bytes);
@@ -13313,12 +13382,14 @@ mod public_launch {
                 OperatorBuildInput {
                     operator_id: "operator-a".to_string(),
                     region: "us-east".to_string(),
-                    public_key: hex_64("custom-operator-a"),
+                    public_key: sample_ed25519_public_key_hex(0xc1),
+                    secret_key_hex: Some(sample_ed25519_secret_key_hex(0xc1)),
                 },
                 OperatorBuildInput {
                     operator_id: "operator-b".to_string(),
                     region: "eu-west".to_string(),
-                    public_key: hex_64("custom-operator-b"),
+                    public_key: sample_ed25519_public_key_hex(0xc2),
+                    secret_key_hex: Some(sample_ed25519_secret_key_hex(0xc2)),
                 },
             ],
             observers: vec![
@@ -14264,6 +14335,42 @@ mod public_launch {
                 assert!(errors.iter().any(|error| {
                     error.starts_with("operators[0].signature_sha3_256 does not match")
                 }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_operator_bad_signature_hex() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["operators"][0]["signature_hex"] = json!("00".repeat(64));
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors.iter().any(|error| {
+                    error.starts_with("operators[0].signature_hex Ed25519 verification failed")
+                }));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn deployment_attestation_rejects_unverified_operator_signature() {
+        let mut value =
+            serde_json::from_str::<Value>(&sample_deployment_attestation_json_pretty()).unwrap();
+        value["operators"][0]["verified"] = json!(false);
+
+        let error = verify_deployment_attestation_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "operators[0].verified must be true"));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
@@ -18029,7 +18136,7 @@ mod public_launch {
         let mut operator = deployment["operators"][0].clone();
         operator["operator_id"] = json!("operator-c");
         operator["region"] = json!("ap-south");
-        operator["public_key"] = json!(hex_64("operator-c-key"));
+        operator["public_key"] = json!(sample_ed25519_public_key_hex(0xd1));
         deployment["operators"]
             .as_array_mut()
             .unwrap()
@@ -18224,12 +18331,13 @@ mod public_launch {
             &deployment.policy_claim,
             &deployment.public_probe,
         );
-        let operator = serde_json::from_value::<OperatorAttestation>(
+        let mut operator = serde_json::from_value::<OperatorAttestation>(
             attestation["operators"][operator_index].clone(),
         )
         .unwrap();
-        attestation["operators"][operator_index]["signature_sha3_256"] =
-            json!(operator_signature_root(&operator, &witness_evidence_root));
+        operator.signature_sha3_256 = operator_signature_root(&operator, &witness_evidence_root);
+        complete_sample_operator_signature(&mut operator);
+        attestation["operators"][operator_index] = json!(operator);
     }
 
     fn refresh_bootstrap_node_root(attestation: &mut Value, node_index: usize) {
