@@ -269,19 +269,25 @@ evidence is absent or stale.
     validator to the verified launch-package bundle, activation root, reward
     account, P2P endpoint, consensus key, network key, and operator acceptance
     root, with Ed25519 `signature_hex` verified against the consensus key.
+    Activation time must be at or after deployment attestation generation and
+    at or before deployment attestation expiry.
 17. Build and verify validator join receipts after activation. Each activated
     validator must observe the chain at or after activation height `1`, prove the
-    required peer count, and sign the observed validator join root with its
-    consensus key.
+    required peer count, sign the observed validator join root with its
+    consensus key, and report a join time at or after activation but before
+    deployment attestation expiry.
 18. Build and verify operator join confirmations after validator join. Every
     operator must confirm the validator join root, activation root,
     launch-package bundle root, operator acceptance root, and operator
-    confirmation signature root with its attested operator key.
+    confirmation signature root with its attested operator key. Confirmation
+    time must be at or after validator join and before deployment attestation
+    expiry.
 19. Build and verify public observer confirmations after operator-confirmed
     validator join. Deployment observers must re-check the live public endpoint,
     public status root, public probe root, observer region, and observer
     signature root with verified observer-key `signature_hex` and the required
-    observer and region coverage.
+    observer and region coverage. Observation time must be at or after operator
+    join confirmation and inside the deployment attestation validity window.
 20. Build and verify the public testnet launch-candidate certificate. The
     certificate binds the launch-package bundle, validator activation, validator
     join, operator join confirmation, public observer confirmation, public
@@ -1200,7 +1206,8 @@ consensus/network keys, reward account, launch-package bundle root, and
 operator acceptance root. The verifier requires one activated entry per
 admitted validator and checks validator activation signature roots plus
 `signature_hex` against the validator consensus Ed25519 key before operators
-treat the set as ready to join.
+treat the set as ready to join. The activation timestamp must be within the
+deployment attestation validity window.
 
 Validator join receipts are built after activation. Each join entry binds the
 activated validator identity, activation root, launch-package bundle root,
@@ -1208,7 +1215,8 @@ observed block height, peer count, and validator join signature root. The
 verifier requires one join entry per activated validator, verifies the join
 `signature_hex` against the validator consensus Ed25519 key, observed block
 height at or after the genesis activation height, and enough peers for the
-activated validator set.
+activated validator set. The join timestamp must be at or after activation and
+at or before deployment attestation expiry.
 
 Operator join confirmations are built after validator join receipts. Each
 confirmation entry binds the operator identity, validator identity, validator
@@ -1216,14 +1224,17 @@ join root, validator activation root, launch-package bundle root, operator
 acceptance root, and operator confirmation signature root. The verifier requires
 one operator confirmation per joined validator and verifies `signature_hex`
 against the attested operator Ed25519 key before the joined validator set is
-treated as operator-confirmed.
+treated as operator-confirmed. The confirmation timestamp must be at or after
+validator join and at or before deployment attestation expiry.
 
 Public observer confirmations are built after operator join confirmations. Each
 observer entry binds the public endpoint URL, public status root, public probe
 root, operator join confirmation root, observer region, and observer signature
 root. The verifier requires one confirmation per deployment observer, verifies
 `signature_hex` against the deployment observer Ed25519 key, and requires the
-same minimum observer and region coverage as the deployment attestation.
+same minimum observer and region coverage as the deployment attestation. The
+observation timestamp must be at or after operator join confirmation and inside
+the deployment attestation validity window.
 The build commands auto-sign only the deterministic sample keys used by local
 rehearsals; production launch-stage artifacts must be signed by the relevant
 operator, validator, or observer key holder, set `verified: true`, include

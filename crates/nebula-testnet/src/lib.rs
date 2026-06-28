@@ -5745,6 +5745,7 @@ pub fn verify_validator_activation_jsons(
         deployment_attestation_json,
         validator_set_json,
     )?;
+    let deployment = verify_deployment_attestation_json(deployment_attestation_json)?;
     let validator_set = verified_validator_set_manifest(validator_set_json)?;
     let mut expected = validator_activation_manifest(
         &bundle_report,
@@ -5770,6 +5771,16 @@ pub fn verify_validator_activation_jsons(
     }
     if manifest.activated_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
         errors.push("activated_at_unix_ms is older than 24 hours".to_string());
+    }
+    if manifest.activated_at_unix_ms < deployment.attestation_generated_at_unix_ms {
+        errors.push(
+            "activated_at_unix_ms must be at or after deployment generated_at_unix_ms".to_string(),
+        );
+    }
+    if manifest.activated_at_unix_ms > deployment.attestation_expires_at_unix_ms {
+        errors.push(
+            "activated_at_unix_ms must be at or before deployment expires_at_unix_ms".to_string(),
+        );
     }
     require_eq(&mut errors, "chain_id", &manifest.chain_id, CHAIN_ID);
     require_eq(
@@ -5941,6 +5952,7 @@ pub fn verify_validator_join_receipt_jsons(
         validator_activation_json.trim_start_matches('\u{feff}'),
     )
     .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let deployment = verify_deployment_attestation_json(deployment_attestation_json)?;
     let genesis_report = verify_genesis_manifest_json(genesis_manifest_json)?;
     let now = unix_ms();
     let mut errors = Vec::new();
@@ -5950,6 +5962,14 @@ pub fn verify_validator_join_receipt_jsons(
     }
     if receipt.joined_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
         errors.push("joined_at_unix_ms is older than 24 hours".to_string());
+    }
+    if receipt.joined_at_unix_ms < activation_report.activated_at_unix_ms {
+        errors.push("joined_at_unix_ms must be at or after activated_at_unix_ms".to_string());
+    }
+    if receipt.joined_at_unix_ms > deployment.attestation_expires_at_unix_ms {
+        errors.push(
+            "joined_at_unix_ms must be at or before deployment expires_at_unix_ms".to_string(),
+        );
     }
     require_eq(&mut errors, "chain_id", &receipt.chain_id, CHAIN_ID);
     require_eq(
@@ -6141,6 +6161,7 @@ pub fn verify_operator_join_confirmation_jsons(
     .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
     let deployment_attestation =
         verified_deployment_attestation_manifest(deployment_attestation_json)?;
+    let deployment_report = verify_deployment_attestation_json(deployment_attestation_json)?;
     let now = unix_ms();
     let mut expected = operator_join_confirmation_manifest(
         &receipt,
@@ -6167,6 +6188,14 @@ pub fn verify_operator_join_confirmation_jsons(
     }
     if manifest.confirmed_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
         errors.push("confirmed_at_unix_ms is older than 24 hours".to_string());
+    }
+    if manifest.confirmed_at_unix_ms < join_report.joined_at_unix_ms {
+        errors.push("confirmed_at_unix_ms must be at or after joined_at_unix_ms".to_string());
+    }
+    if manifest.confirmed_at_unix_ms > deployment_report.attestation_expires_at_unix_ms {
+        errors.push(
+            "confirmed_at_unix_ms must be at or before deployment expires_at_unix_ms".to_string(),
+        );
     }
     require_eq(
         &mut errors,
@@ -6396,6 +6425,9 @@ pub fn verify_public_observer_confirmation_jsons(
     }
     if manifest.observed_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
         errors.push("observed_at_unix_ms is older than 24 hours".to_string());
+    }
+    if manifest.observed_at_unix_ms < join_confirmation_report.confirmed_at_unix_ms {
+        errors.push("observed_at_unix_ms must be at or after confirmed_at_unix_ms".to_string());
     }
     if manifest.observed_at_unix_ms < deployment_attestation.generated_at_unix_ms {
         errors.push(
@@ -17375,6 +17407,187 @@ mod public_launch {
     }
 
     #[test]
+    fn launch_stage_artifacts_reject_out_of_order_timestamps() {
+        let chain = sample_launch_chain();
+        let deployment_report = verify_deployment_attestation_json(&chain.deployment).unwrap();
+        let deployment_manifest =
+            verified_deployment_attestation_manifest(&chain.deployment).unwrap();
+        let validator_set = verified_validator_set_manifest(&chain.validators).unwrap();
+        let bundle_report = verify_launch_package_bundle_jsons(
+            &chain.bundle,
+            &chain.deployment,
+            &chain.public_status,
+            &chain.public_probe,
+            &chain.validators,
+            &chain.handoff,
+            &chain.acceptance,
+            &chain.genesis,
+        )
+        .unwrap();
+        let acceptance_manifest =
+            serde_json::from_str::<OperatorAcceptanceManifest>(&chain.acceptance).unwrap();
+        let acceptance_report = verify_operator_acceptance_jsons(
+            &chain.acceptance,
+            &chain.handoff,
+            &chain.deployment,
+            &chain.validators,
+        )
+        .unwrap();
+        let activation_report = verify_validator_activation_jsons(
+            &chain.activation,
+            &chain.bundle,
+            &chain.deployment,
+            &chain.public_status,
+            &chain.public_probe,
+            &chain.validators,
+            &chain.handoff,
+            &chain.acceptance,
+            &chain.genesis,
+        )
+        .unwrap();
+        let activation_manifest =
+            serde_json::from_str::<ValidatorActivationManifest>(&chain.activation).unwrap();
+        let join_report = verify_validator_join_receipt_jsons(
+            &chain.join,
+            &chain.activation,
+            &chain.bundle,
+            &chain.deployment,
+            &chain.public_status,
+            &chain.public_probe,
+            &chain.validators,
+            &chain.handoff,
+            &chain.acceptance,
+            &chain.genesis,
+        )
+        .unwrap();
+        let join_receipt = serde_json::from_str::<ValidatorJoinReceipt>(&chain.join).unwrap();
+        let join_confirmation_report = verify_operator_join_confirmation_jsons(
+            &chain.join_confirmation,
+            &chain.join,
+            &chain.activation,
+            &chain.bundle,
+            &chain.deployment,
+            &chain.public_status,
+            &chain.public_probe,
+            &chain.validators,
+            &chain.handoff,
+            &chain.acceptance,
+            &chain.genesis,
+        )
+        .unwrap();
+        let (public_status_report, public_probe_report) =
+            verify_public_surface_jsons_for_deployment(
+                &chain.public_status,
+                &chain.public_probe,
+                &deployment_manifest,
+            )
+            .unwrap();
+
+        let mut activation = validator_activation_manifest(
+            &bundle_report,
+            &acceptance_report,
+            &validator_set,
+            deployment_report
+                .attestation_generated_at_unix_ms
+                .saturating_sub(1),
+        );
+        activation.root = validator_activation_manifest_root(&activation);
+        let activation_json = serde_json::to_string(&activation).unwrap();
+        assert_invalid_contains(
+            verify_validator_activation_jsons(
+                &activation_json,
+                &chain.bundle,
+                &chain.deployment,
+                &chain.public_status,
+                &chain.public_probe,
+                &chain.validators,
+                &chain.handoff,
+                &chain.acceptance,
+                &chain.genesis,
+            ),
+            "activated_at_unix_ms must be at or after deployment generated_at_unix_ms",
+        );
+
+        let mut join = validator_join_receipt(
+            &activation_manifest,
+            &activation_report,
+            PUBLIC_TESTNET_ACTIVATION_HEIGHT,
+            activation_report.activated_at_unix_ms.saturating_sub(1),
+        );
+        join.root = validator_join_receipt_root(&join);
+        let join_json = serde_json::to_string(&join).unwrap();
+        assert_invalid_contains(
+            verify_validator_join_receipt_jsons(
+                &join_json,
+                &chain.activation,
+                &chain.bundle,
+                &chain.deployment,
+                &chain.public_status,
+                &chain.public_probe,
+                &chain.validators,
+                &chain.handoff,
+                &chain.acceptance,
+                &chain.genesis,
+            ),
+            "joined_at_unix_ms must be at or after activated_at_unix_ms",
+        );
+
+        let confirmation = operator_join_confirmation_manifest(
+            &join_receipt,
+            &join_report,
+            &acceptance_manifest,
+            &acceptance_report,
+            &deployment_manifest,
+            join_report.joined_at_unix_ms.saturating_sub(1),
+        );
+        let confirmation_json = serde_json::to_string(&confirmation).unwrap();
+        assert_invalid_contains(
+            verify_operator_join_confirmation_jsons(
+                &confirmation_json,
+                &chain.join,
+                &chain.activation,
+                &chain.bundle,
+                &chain.deployment,
+                &chain.public_status,
+                &chain.public_probe,
+                &chain.validators,
+                &chain.handoff,
+                &chain.acceptance,
+                &chain.genesis,
+            ),
+            "confirmed_at_unix_ms must be at or after joined_at_unix_ms",
+        );
+
+        let observer = public_observer_confirmation_manifest(
+            &deployment_manifest,
+            &join_confirmation_report,
+            &public_status_report,
+            &public_probe_report,
+            join_confirmation_report
+                .confirmed_at_unix_ms
+                .saturating_sub(1),
+        );
+        let observer_json = serde_json::to_string(&observer).unwrap();
+        assert_invalid_contains(
+            verify_public_observer_confirmation_jsons(
+                &observer_json,
+                &chain.join_confirmation,
+                &chain.join,
+                &chain.activation,
+                &chain.bundle,
+                &chain.deployment,
+                &chain.public_status,
+                &chain.public_probe,
+                &chain.validators,
+                &chain.handoff,
+                &chain.acceptance,
+                &chain.genesis,
+            ),
+            "observed_at_unix_ms must be at or after confirmed_at_unix_ms",
+        );
+    }
+
+    #[test]
     fn public_testnet_launch_certificate_verifies_full_candidate_chain() {
         let deployment = sample_deployment_attestation_json_pretty();
         let public_status = sample_public_status_manifest_json_pretty();
@@ -19540,6 +19753,21 @@ mod public_launch {
             join,
             join_confirmation,
             observer_confirmation,
+        }
+    }
+
+    fn assert_invalid_contains<T: std::fmt::Debug>(
+        result: Result<T, AttestationError>,
+        expected: &str,
+    ) {
+        match result.unwrap_err() {
+            AttestationError::Invalid(errors) => {
+                assert!(
+                    errors.iter().any(|error| error == expected),
+                    "expected error {expected:?}, got {errors:?}",
+                );
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
     }
 
