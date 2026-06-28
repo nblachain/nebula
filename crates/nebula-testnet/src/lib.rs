@@ -857,6 +857,20 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub runtime_surface_capture_mode: String,
     pub runtime_surface_captured_at_unix_ms: u128,
     pub runtime_surface_tls_observation: Option<TlsEndpointPin>,
+    pub runtime_surface_latest_height: u64,
+    pub runtime_surface_latest_hash: String,
+    pub runtime_surface_snapshot_root: String,
+    pub runtime_surface_state_root: String,
+    pub runtime_surface_included_nbla_receipt_count: u64,
+    pub runtime_surface_included_nxmr_receipt_count: u64,
+    pub runtime_surface_total_nxmr_fees_units: u128,
+    pub runtime_surface_buyback_pool_nebulai: u128,
+    pub runtime_surface_validator_reward_nebulai: u128,
+    pub runtime_surface_nxmr_validator_reward_nebulai: u128,
+    pub runtime_surface_ops_root: String,
+    pub runtime_surface_backup_root: String,
+    pub runtime_surface_public_ops_ready: bool,
+    pub runtime_surface_blocking_gaps: Vec<String>,
     pub public_observer_observed_at_unix_ms: u128,
     pub deployment_generated_at_unix_ms: u128,
     pub deployment_expires_at_unix_ms: u128,
@@ -7248,9 +7262,24 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         public_status_manifest_root: certificate.public_status_manifest_root,
         public_probe_root: certificate.public_probe_root,
         runtime_surface_root: certificate.runtime_surface_root,
-        runtime_surface_capture_mode: runtime_surface.capture_mode,
+        runtime_surface_capture_mode: runtime_surface.capture_mode.clone(),
         runtime_surface_captured_at_unix_ms: runtime_surface.captured_at_unix_ms,
-        runtime_surface_tls_observation: runtime_surface.tls_observation,
+        runtime_surface_tls_observation: runtime_surface.tls_observation.clone(),
+        runtime_surface_latest_height: runtime_surface.latest_height,
+        runtime_surface_latest_hash: runtime_surface.latest_hash.clone(),
+        runtime_surface_snapshot_root: runtime_surface.snapshot_root.clone(),
+        runtime_surface_state_root: runtime_surface.state_root.clone(),
+        runtime_surface_included_nbla_receipt_count: runtime_surface.included_nbla_receipt_count,
+        runtime_surface_included_nxmr_receipt_count: runtime_surface.included_nxmr_receipt_count,
+        runtime_surface_total_nxmr_fees_units: runtime_surface.total_nxmr_fees_units,
+        runtime_surface_buyback_pool_nebulai: runtime_surface.buyback_pool_nebulai,
+        runtime_surface_validator_reward_nebulai: runtime_surface.validator_reward_nebulai,
+        runtime_surface_nxmr_validator_reward_nebulai: runtime_surface
+            .nxmr_validator_reward_nebulai,
+        runtime_surface_ops_root: runtime_surface.ops_root.clone(),
+        runtime_surface_backup_root: runtime_surface.backup_root.clone(),
+        runtime_surface_public_ops_ready: runtime_surface.public_ops_ready,
+        runtime_surface_blocking_gaps: runtime_surface.blocking_gaps.clone(),
         public_observer_observed_at_unix_ms: public_observer_confirmation.observed_at_unix_ms,
         deployment_generated_at_unix_ms: deployment_attestation.generated_at_unix_ms,
         deployment_expires_at_unix_ms: deployment_attestation.expires_at_unix_ms,
@@ -12925,6 +12954,20 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "runtime_surface_capture_mode": report.runtime_surface_capture_mode,
         "runtime_surface_captured_at_unix_ms": report.runtime_surface_captured_at_unix_ms,
         "runtime_surface_tls_observation": report.runtime_surface_tls_observation,
+        "runtime_surface_latest_height": report.runtime_surface_latest_height,
+        "runtime_surface_latest_hash": report.runtime_surface_latest_hash,
+        "runtime_surface_snapshot_root": report.runtime_surface_snapshot_root,
+        "runtime_surface_state_root": report.runtime_surface_state_root,
+        "runtime_surface_included_nbla_receipt_count": report.runtime_surface_included_nbla_receipt_count,
+        "runtime_surface_included_nxmr_receipt_count": report.runtime_surface_included_nxmr_receipt_count,
+        "runtime_surface_total_nxmr_fees_units": report.runtime_surface_total_nxmr_fees_units,
+        "runtime_surface_buyback_pool_nebulai": report.runtime_surface_buyback_pool_nebulai,
+        "runtime_surface_validator_reward_nebulai": report.runtime_surface_validator_reward_nebulai,
+        "runtime_surface_nxmr_validator_reward_nebulai": report.runtime_surface_nxmr_validator_reward_nebulai,
+        "runtime_surface_ops_root": report.runtime_surface_ops_root,
+        "runtime_surface_backup_root": report.runtime_surface_backup_root,
+        "runtime_surface_public_ops_ready": report.runtime_surface_public_ops_ready,
+        "runtime_surface_blocking_gaps": report.runtime_surface_blocking_gaps,
         "public_observer_observed_at_unix_ms": report.public_observer_observed_at_unix_ms,
         "deployment_generated_at_unix_ms": report.deployment_generated_at_unix_ms,
         "deployment_expires_at_unix_ms": report.deployment_expires_at_unix_ms,
@@ -18313,6 +18356,62 @@ mod public_launch {
         assert_eq!(
             readiness.runtime_surface_captured_at_unix_ms,
             external_runtime_surface_report.captured_at_unix_ms
+        );
+        assert_eq!(
+            readiness.runtime_surface_latest_height,
+            external_runtime_surface_report.latest_height
+        );
+        assert_eq!(
+            readiness.runtime_surface_latest_hash,
+            external_runtime_surface_report.latest_hash
+        );
+        assert_eq!(
+            readiness.runtime_surface_snapshot_root,
+            external_runtime_surface_report.snapshot_root
+        );
+        assert_eq!(
+            readiness.runtime_surface_state_root,
+            external_runtime_surface_report.state_root
+        );
+        assert_eq!(
+            readiness.runtime_surface_included_nbla_receipt_count,
+            external_runtime_surface_report.included_nbla_receipt_count
+        );
+        assert_eq!(
+            readiness.runtime_surface_included_nxmr_receipt_count,
+            external_runtime_surface_report.included_nxmr_receipt_count
+        );
+        assert_eq!(
+            readiness.runtime_surface_total_nxmr_fees_units,
+            external_runtime_surface_report.total_nxmr_fees_units
+        );
+        assert_eq!(
+            readiness.runtime_surface_buyback_pool_nebulai,
+            external_runtime_surface_report.buyback_pool_nebulai
+        );
+        assert_eq!(
+            readiness.runtime_surface_validator_reward_nebulai,
+            external_runtime_surface_report.validator_reward_nebulai
+        );
+        assert_eq!(
+            readiness.runtime_surface_nxmr_validator_reward_nebulai,
+            external_runtime_surface_report.nxmr_validator_reward_nebulai
+        );
+        assert_eq!(
+            readiness.runtime_surface_ops_root,
+            external_runtime_surface_report.ops_root
+        );
+        assert_eq!(
+            readiness.runtime_surface_backup_root,
+            external_runtime_surface_report.backup_root
+        );
+        assert_eq!(
+            readiness.runtime_surface_public_ops_ready,
+            external_runtime_surface_report.public_ops_ready
+        );
+        assert_eq!(
+            readiness.runtime_surface_blocking_gaps,
+            external_runtime_surface_report.blocking_gaps
         );
         assert_eq!(
             readiness.public_observer_observed_at_unix_ms,

@@ -302,7 +302,10 @@ evidence is absent or stale.
     evidence captured from the advertised endpoint and a launch certificate that
     root-binds `external-public-endpoint` `runtime_surface_capture_mode`,
     the observed `runtime_surface_tls_observation`, and public
-    `public_testnet_peer_manifest_snapshot_peer_urls`, plus an artifact-bound
+    `public_testnet_peer_manifest_snapshot_peer_urls`. The final readiness root
+    carries the external runtime latest height/hash, snapshot and state roots,
+    ops/backup roots, public ops readiness, receipt counts, and economics
+    counters, plus an artifact-bound
     live RPC devnet rehearsal report for the same launch package, endpoint,
     sequencer/follower loopback RPC addresses, peer-manifest root, sync quorum,
     latest height, economics counters, and usable peer count. The verified
@@ -1256,11 +1259,13 @@ root.
 
 Final public launch readiness replays that certificate against external-public
 runtime-surface evidence and the live RPC devnet rehearsal. Its readiness root
-also carries the live loopback runtime-surface capture mode, runtime-surface
-root, usable peer URLs, usable peer count, sync quorum/import counters, latest
-height, sub-second block timing, bridge custody/withdrawal counters,
+also carries the external runtime latest height/hash, snapshot/state roots,
+ops/backup roots, receipt counts, public ops readiness, and economics counters,
+plus the live loopback runtime-surface capture mode, runtime-surface root,
+usable peer URLs, usable peer count, sync quorum/import counters, latest height,
+sub-second block timing, bridge custody/withdrawal counters,
 sequencer-rotation count, `total_nxmr_fees_units`, `buyback_pool_nebulai`, and
-`validator_reward_nebulai`, plus deployment generation/expiry, public observer
+`validator_reward_nebulai`, deployment generation/expiry, public observer
 observation time, external runtime capture time, and live rehearsal runtime
 capture time, so the emitted public-ready artifact shows what was advertised
 publicly, what was proven in rehearsal, and when the evidence was captured. The

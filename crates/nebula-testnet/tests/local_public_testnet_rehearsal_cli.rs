@@ -1142,6 +1142,62 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
         certificate_report["runtime_surface_captured_at_unix_ms"]
     );
     assert_eq!(
+        readiness_report["runtime_surface_latest_height"],
+        external_surface_report["latest_height"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_latest_hash"],
+        external_surface_report["latest_hash"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_snapshot_root"],
+        external_surface_report["snapshot_root"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_state_root"],
+        external_surface_report["state_root"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_included_nbla_receipt_count"],
+        external_surface_report["included_nbla_receipt_count"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_included_nxmr_receipt_count"],
+        external_surface_report["included_nxmr_receipt_count"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_total_nxmr_fees_units"],
+        external_surface_report["total_nxmr_fees_units"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_buyback_pool_nebulai"],
+        external_surface_report["buyback_pool_nebulai"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_validator_reward_nebulai"],
+        external_surface_report["validator_reward_nebulai"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_nxmr_validator_reward_nebulai"],
+        external_surface_report["nxmr_validator_reward_nebulai"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_ops_root"],
+        external_surface_report["ops_root"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_backup_root"],
+        external_surface_report["backup_root"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_public_ops_ready"],
+        external_surface_report["public_ops_ready"]
+    );
+    assert_eq!(
+        readiness_report["runtime_surface_blocking_gaps"],
+        external_surface_report["blocking_gaps"]
+    );
+    assert_eq!(
         readiness_report["public_observer_observed_at_unix_ms"],
         certificate_report["public_observer_observed_at_unix_ms"]
     );
