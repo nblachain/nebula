@@ -918,9 +918,11 @@ Public launch requires a filled deployment attestation. The verifier rejects:
 - public status/probe endpoints that do not use `https://`
 - public status/probe endpoints that do not include a host, include userinfo,
   include query/fragment components, or include a nonnumeric/zero port
+- public status/probe endpoints that do not use a public DNS host
 - public status endpoint URLs that do not match the expected public surface
-- bootstrap endpoints that include a path, omit a host, include userinfo, or
-  include query/fragment components or a nonnumeric/zero port
+- bootstrap endpoints that do not use a public DNS host, include a path, omit a
+  host, include userinfo, or include query/fragment components or a
+  nonnumeric/zero port
 - bootstrap endpoint hosts that reuse the public endpoint host
 - operator and observer witness roots that do not match the deployment surface
 - operator and observer public keys that are not 64-character hex values
@@ -954,9 +956,9 @@ Until an operator provides fresh deployment evidence that satisfies those rules,
 `public_launch_ready` must remain `false`.
 
 The deployment attestation verifier reports a deterministic bootstrap-roster
-root over the attested bootstrap node IDs, operator IDs, regions, and HTTPS
-endpoints. The genesis and launch-package gates bind that root so operators can
-compare the exact public bootstrap set before rollout.
+root over the attested bootstrap node IDs, operator IDs, regions, and public-DNS
+HTTPS endpoints. The genesis and launch-package gates bind that root so
+operators can compare the exact public bootstrap set before rollout.
 It also reports a deterministic operational-evidence root over the preflight
 receipt, runbook receipt, rollback plan, rollback drill time, and recovery-point
 root.
