@@ -927,6 +927,7 @@ pub struct LocalPublicTestnetRehearsalReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LiveRpcDevnetRehearsalReport {
     pub live_rpc_devnet_rehearsed: bool,
     pub level: String,
@@ -8373,6 +8374,8 @@ fn live_rpc_devnet_rehearsal_root(report: &LiveRpcDevnetRehearsalReport) -> Stri
         "public_launch_ready": report.public_launch_ready,
         "public_launch_blocker": report.public_launch_blocker,
         "endpoint_url": report.endpoint_url,
+        "sequencer_rpc_addr": report.sequencer_rpc_addr,
+        "follower_rpc_addr": report.follower_rpc_addr,
         "block_millis": report.block_millis,
         "sub_second_blocks": report.sub_second_blocks,
         "produced_block_count": report.produced_block_count,
@@ -17588,6 +17591,41 @@ mod public_launch {
     }
 
     #[test]
+    fn live_rpc_devnet_rehearsal_binds_rpc_addresses_and_rejects_unknown_fields() {
+        let report = sample_live_rpc_devnet_rehearsal_report();
+        let report_json = serde_json::to_string(&report).unwrap();
+
+        verify_live_rpc_devnet_rehearsal_json(&report_json).unwrap();
+
+        let mut rewritten = report.clone();
+        rewritten.sequencer_rpc_addr = "127.0.0.1:65535".to_string();
+        let rewritten_json = serde_json::to_string(&rewritten).unwrap();
+        let rewrite_error = verify_live_rpc_devnet_rehearsal_json(&rewritten_json).unwrap_err();
+        match rewrite_error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error
+                        .starts_with("live_rpc_devnet_rehearsal.rehearsal_root expected ")))
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
+        let mut with_unknown_field = serde_json::to_value(&report).unwrap();
+        with_unknown_field["unverified_public_launch_claim"] = json!(true);
+        let unknown_field_error =
+            verify_live_rpc_devnet_rehearsal_json(&with_unknown_field.to_string()).unwrap_err();
+        match unknown_field_error {
+            AttestationError::MalformedJson(error) => {
+                assert!(error.contains("unknown field"), "{error}");
+            }
+            AttestationError::Invalid(errors) => {
+                panic!("unexpected invalid rehearsal errors: {errors:?}");
+            }
+        }
+    }
+
+    #[test]
     fn public_testnet_launch_certificate_verifies_full_candidate_chain() {
         let deployment = sample_deployment_attestation_json_pretty();
         let public_status = sample_public_status_manifest_json_pretty();
@@ -19769,6 +19807,56 @@ mod public_launch {
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
+    }
+
+    fn sample_live_rpc_devnet_rehearsal_report() -> LiveRpcDevnetRehearsalReport {
+        let mut report = LiveRpcDevnetRehearsalReport {
+            live_rpc_devnet_rehearsed: true,
+            level: "live-rpc-devnet-rehearsal-ready".to_string(),
+            chain_id: CHAIN_ID.to_string(),
+            runtime_version: VERSION.to_string(),
+            public_launch_ready: false,
+            public_launch_blocker: PUBLIC_LAUNCH_BLOCKER.to_string(),
+            endpoint_url: "https://testnet.nebula.example/status".to_string(),
+            sequencer_rpc_addr: "127.0.0.1:18081".to_string(),
+            follower_rpc_addr: "127.0.0.1:18082".to_string(),
+            block_millis: 250,
+            sub_second_blocks: true,
+            produced_block_count: 2,
+            runtime_surface_ready: true,
+            runtime_surface_root: hex_64("sample-live-rpc-devnet-runtime-surface-root"),
+            latest_height: 2,
+            sync_quorum_met: true,
+            sync_successful_peer_count: 1,
+            sync_import_count: 1,
+            sync_last_import_height: 2,
+            sync_quorum_height: 2,
+            bridge_deposit_count: 1,
+            withdrawal_request_count: 1,
+            finalized_withdrawal_count: 1,
+            bridge_replay_cache_count: 1,
+            bridge_deposited_nxmr_units: 2_000,
+            account_nxmr_units: 900,
+            withdrawal_reserved_nxmr_units: 100,
+            total_nxmr_fees_units: 1_000,
+            buyback_pool_nebulai: 1_000,
+            validator_reward_nebulai: 1_010,
+            bridge_custody_reconciled: true,
+            nxmr_custody_deficit_units: 0,
+            sequencer_key_rotation_count: 1,
+            launch_package_bundle_root: hex_64("sample-live-rpc-devnet-launch-package-bundle"),
+            public_testnet_peer_manifest_root: hex_64(
+                "sample-live-rpc-devnet-public-peer-manifest",
+            ),
+            public_testnet_peer_manifest_snapshot_peer_urls: vec![
+                "https://validator-b.nebula.example/snapshot".to_string(),
+            ],
+            public_testnet_peer_manifest_snapshot_peer_count: 1,
+            peer_manifest_sync_peer_quorum: 1,
+            rehearsal_root: String::new(),
+        };
+        report.rehearsal_root = live_rpc_devnet_rehearsal_root(&report);
+        report
     }
 
     fn refresh_validator_manifest_root(manifest: &mut Value, validator_index: usize) {

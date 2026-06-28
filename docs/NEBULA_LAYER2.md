@@ -304,12 +304,13 @@ evidence is absent or stale.
     the observed `runtime_surface_tls_observation`, and public
     `public_testnet_peer_manifest_snapshot_peer_urls`, plus an artifact-bound
     live RPC devnet rehearsal report for the same launch package, endpoint,
-    peer-manifest root, sync quorum, latest height, economics counters, and
-    usable peer count. The verified loopback runtime-surface evidence must match
-    the rehearsal report's root, loopback capture mode, usable peer URLs, usable
-    peer count, sync quorum, latest height, and economics counters, and the final
-    readiness root carries those live rehearsal details beside the external
-    public endpoint details. External and live runtime-surface captures must fall
+    sequencer/follower loopback RPC addresses, peer-manifest root, sync quorum,
+    latest height, economics counters, and usable peer count. The verified
+    loopback runtime-surface evidence must match the rehearsal report's root,
+    loopback capture mode, usable peer URLs, usable peer count, sync quorum,
+    latest height, and economics counters, and the final readiness root carries
+    those live rehearsal details beside the external public endpoint details.
+    External and live runtime-surface captures must fall
     inside the deployment attestation validity window, public observer
     confirmations must be observed inside that same window, and the launch
     certificate timestamp must be at or after the observer confirmation and
@@ -1259,7 +1260,10 @@ root, usable peer URLs, usable peer count, sync quorum, latest height,
 `validator_reward_nebulai`, plus deployment generation/expiry, public observer
 observation time, external runtime capture time, and live rehearsal runtime
 capture time, so the emitted public-ready artifact shows what was advertised
-publicly, what was proven in rehearsal, and when the evidence was captured.
+publicly, what was proven in rehearsal, and when the evidence was captured. The
+live rehearsal root also commits to the sequencer/follower loopback RPC
+addresses and rejects unrecognized report fields so later public-ready evidence
+cannot carry unrooted rehearsal claims.
 
 Operators can verify the full package with:
 
