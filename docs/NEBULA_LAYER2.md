@@ -440,9 +440,12 @@ balances, fee accounting, and current state root across restarts. Followers use
 the same snapshot format for persisted local state and reject blocks whose
 signature does not verify against the expected sequencer public key.
 
-Public spend flows require Ed25519 account signatures. For
-`nebula_sendTransaction`, `tx.from` is the 32-byte account public key hex and
-`tx.signature` signs `RuntimeTransaction::signing_root()`. For
+Account generation uses `--generate-account` and emits an Ed25519 testnet
+account id that starts with `nbla`, plus the matching public key and local
+signing secret. Public spend flows require Ed25519 account signatures. For
+`nebula_sendTransaction`, `tx.from` is the `nbla`-prefixed account id or legacy
+32-byte account public key hex, and `tx.signature` signs
+`RuntimeTransaction::signing_root()`. For
 `nebula_requestWithdrawal`, the request includes `nonce` and `signature` over
 `withdrawal_authorization_root(account, monero_address, amount_nxmr_units,
 nonce)`, and accepted withdrawals consume the account nonce before burning

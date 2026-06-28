@@ -36,6 +36,7 @@ pub const MIN_WITHDRAWAL_OPERATOR_QUORUM: usize = 2;
 pub const MIN_SEQUENCER_ROTATION_OPERATOR_QUORUM: usize = 2;
 pub const PUBLIC_LAUNCH_SIGNED_EVIDENCE_MAX_AGE_MS: u128 = 86_400_000;
 pub const PUBLIC_LAUNCH_SIGNED_EVIDENCE_FUTURE_SKEW_MS: u128 = 300_000;
+pub const NBLA_ACCOUNT_PREFIX: &str = "nbla";
 pub const BRIDGE_CUSTODY_POLICY_ID: &str = "nebula-monero-bridge-custody-testnet-v1";
 pub const VALIDATOR_REWARD_ACCOUNT_PREFIX: &str = "validator:";
 pub const RUNTIME_SNAPSHOT_FILE: &str = "nebula-runtime-snapshot.json";
@@ -5427,7 +5428,6 @@ fn parse_proxy_client_ip(input: &str) -> Result<IpAddr, String> {
 fn validate_transaction_shape(tx: &RuntimeTransaction) -> Result<(), String> {
     validate_account_id(&tx.from)?;
     validate_account_id(&tx.to)?;
-    validate_fixed_hex(&tx.from, "from", 64)?;
     verify_account_signature(&tx.from, &tx.signing_root(), &tx.signature, "tx_signature")?;
     if tx.from == tx.to {
         return Err("from and to accounts must differ".to_string());
@@ -5446,13 +5446,14 @@ fn validate_transaction_shape(tx: &RuntimeTransaction) -> Result<(), String> {
 }
 
 fn verify_account_signature(
-    account_public_key_hex: &str,
+    account: &str,
     signing_root: &str,
     signature_hex: &str,
     signature_name: &str,
 ) -> Result<(), String> {
+    let account_public_key_hex = account_public_key_hex(account)?;
     verify_ed25519_signature(
-        account_public_key_hex,
+        &account_public_key_hex,
         "account_public_key_hex",
         signing_root,
         signature_hex,
@@ -6943,6 +6944,20 @@ fn verifying_key_from_hex_named(public_key_hex: &str, name: &str) -> Result<Veri
 pub fn public_key_hex_for_secret(secret_key_hex: &str) -> Result<String, String> {
     let signing_key = signing_key_from_hex_named(secret_key_hex, "secret_key_hex")?;
     Ok(hex::encode(signing_key.verifying_key().to_bytes()))
+}
+
+pub fn account_id_for_public_key(public_key_hex: &str) -> Result<String, String> {
+    Ok(format!(
+        "{NBLA_ACCOUNT_PREFIX}{}",
+        normalize_fixed_hex(public_key_hex, "public_key_hex", 64)?
+    ))
+}
+
+fn account_public_key_hex(account: &str) -> Result<String, String> {
+    if let Some(public_key_hex) = account.strip_prefix(NBLA_ACCOUNT_PREFIX) {
+        return normalize_fixed_hex(public_key_hex, "account public key", 64);
+    }
+    normalize_fixed_hex(account, "account", 64)
 }
 
 pub fn sign_runtime_root(secret_key_hex: &str, root: &str) -> Result<String, String> {
@@ -10570,6 +10585,49 @@ mod tests {
             .account(&runtime.config().validator_reward_account())
             .unwrap();
         assert_eq!(reward_account.nbla_nebulai, 10);
+    }
+
+    #[test]
+    fn nbla_prefixed_account_id_can_spend_and_request_withdrawal() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let public_key_hex = test_account_id();
+        let account = account_id_for_public_key(&public_key_hex).unwrap();
+        assert!(account.starts_with(NBLA_ACCOUNT_PREFIX));
+        assert_eq!(account.len(), NBLA_ACCOUNT_PREFIX.len() + 64);
+
+        runtime.faucet(&account).unwrap();
+        let tx = sign_test_transaction(RuntimeTransaction {
+            from: account.clone(),
+            to: "bob".to_string(),
+            amount_nebulai: 10,
+            gas_units: 5,
+            gas_price_nebulai: 2,
+            fee_asset: NBLA_SYMBOL.to_string(),
+            nonce: 0,
+            signature: String::new(),
+            memo: None,
+        });
+        runtime.submit_transaction(tx).unwrap();
+        runtime.produce_block();
+        assert_eq!(runtime.account("bob").unwrap().nbla_nebulai, 10);
+
+        let mut deposit = test_bridge_deposit('c', 'd');
+        deposit.account = account.clone();
+        runtime.observe_bridge_deposit(deposit).unwrap();
+        let monero_address = "9xTestnetMoneroAddressForNebulaWithdrawals";
+        let withdrawal_signature = sign_test_root(&withdrawal_authorization_root(
+            &account,
+            monero_address,
+            1_000,
+            1,
+        ));
+        let withdrawal = runtime
+            .request_withdrawal(&account, monero_address, 1_000, 1, &withdrawal_signature)
+            .unwrap()
+            .withdrawal;
+
+        assert_eq!(withdrawal.account, account);
+        assert_eq!(withdrawal.status, "operator_pending");
     }
 
     #[test]

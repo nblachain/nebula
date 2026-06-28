@@ -95,9 +95,12 @@ fn main() {
     let wants_sample_public_probe = args.iter().any(|arg| arg == "--sample-public-probe");
     let wants_sample_preflight_receipt = args.iter().any(|arg| arg == "--sample-preflight-receipt");
     let wants_sample_runbook_receipt = args.iter().any(|arg| arg == "--sample-runbook-receipt");
+    let wants_generate_account = args.iter().any(|arg| arg == "--generate-account");
     let wants_run_rpc = args.iter().any(|arg| arg == "--run-rpc");
 
-    if wants_run_rpc {
+    if wants_generate_account {
+        generate_account(wants_json);
+    } else if wants_run_rpc {
         run_rpc_node(&args, wants_json);
     } else if wants_prove_local_public_testnet {
         prove_local_public_testnet(wants_json);
@@ -276,6 +279,52 @@ fn parse_u32_arg(args: &[String], name: &str, default: u32) -> u32 {
             process::exit(1);
         }),
         None => default,
+    }
+}
+
+fn generate_account(wants_json: bool) {
+    let mut secret_key = [0_u8; 32];
+    if let Err(error) = getrandom::getrandom(&mut secret_key) {
+        eprintln!("failed to generate account secret key from OS randomness: {error}");
+        process::exit(1);
+    }
+    let secret_key_hex = hex::encode(secret_key);
+    let public_key_hex = match nebula_testnet::runtime::public_key_hex_for_secret(&secret_key_hex) {
+        Ok(public_key_hex) => public_key_hex,
+        Err(error) => {
+            eprintln!("generated account public key derivation failed: {error}");
+            process::exit(1);
+        }
+    };
+    let account = match nebula_testnet::runtime::account_id_for_public_key(&public_key_hex) {
+        Ok(account) => account,
+        Err(error) => {
+            eprintln!("generated account id derivation failed: {error}");
+            process::exit(1);
+        }
+    };
+
+    if wants_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "account": account,
+                "address_prefix": nebula_testnet::runtime::NBLA_ACCOUNT_PREFIX,
+                "key_scheme": "ed25519",
+                "public_key_hex": public_key_hex,
+                "secret_key_hex": secret_key_hex,
+            }))
+            .expect("generated account JSON serializes")
+        );
+    } else {
+        println!("account: {account}");
+        println!(
+            "address_prefix: {}",
+            nebula_testnet::runtime::NBLA_ACCOUNT_PREFIX
+        );
+        println!("key_scheme: ed25519");
+        println!("public_key_hex: {public_key_hex}");
+        println!("secret_key_hex: {secret_key_hex}");
     }
 }
 
@@ -4674,7 +4723,7 @@ fn print_help() {
 }
 
 fn help_text() -> &'static str {
-    "nebula-testnet\n\nUSAGE:\n    nebula-testnet [--mainnet-readiness] [--json]\n    nebula-testnet --prove-local-public-testnet [--json]\n    nebula-testnet --prove-live-rpc-devnet [--launch-package-bundle <path> --public-testnet-peer-manifest <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>] [--live-rpc-devnet-runtime-surface-out <path>] [--json]\n    nebula-testnet --run-rpc [--sequencer|--follower] [--rpc-bind <addr:port>] [--admin-rpc-bind <addr:port>] [--block-ms <ms>] [--validator-id <id>] [--sequencer-public-key <hex>] [--sequencer-secret-key <hex>|--sequencer-secret-key-file <path>] [--admin-token <token>|--admin-token-file <path>] [--data-dir <path>] [--bootstrap-rpc <url>] [--sync-rpc <url>]... [--sync-peer-quorum <count>] [--public-testnet-peer-manifest <path>] [--disable-nbla-faucet] [--max-mempool-transactions <count>] [--max-request-bytes <bytes>] [--max-snapshot-response-bytes <bytes>] [--max-requests-per-minute <count>] [--max-active-connections <count>] [--admin-max-active-connections <count>] [--trusted-proxy-ip <ip>]... [--trust-private-proxy-headers]\n    nebula-testnet --build-public-status --endpoint-url <url> [--artifact-sha3-256 <hex>] [--cargo-lock-sha3-256 <hex>]\n    nebula-testnet --build-public-probe --endpoint-url <url> [--artifact-sha3-256 <hex>] [--cargo-lock-sha3-256 <hex>]\n    nebula-testnet --build-runtime-surface-evidence --endpoint-url <url> --health <path> --status <path> --snapshot <path> --ops <path> --backup <path> --rpc-status <path> --rpc-ops-status <path> --rpc-backup-manifest <path> --metrics <path> [--runtime-surface-tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms>] [--captured-at-unix-ms <ms>]\n    nebula-testnet --capture-public-runtime-surface --deployment-attestation <path> [--endpoint-url <url>] [--timeout-ms <ms>]\n    nebula-testnet --verify-runtime-surface-evidence <path> [--json]\n    nebula-testnet --build-deployment-attestation --public-status <path> --public-probe <path> --preflight-receipt <path> --runbook-receipt <path> --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms>... --bootstrap-node <node_id,operator_id,region,endpoint>... --operator <operator_id,region,public_key[,secret_key_hex]>... [--operator-secret-key-file <operator_id,path>]... --observer <observer_id,region,public_key[,secret_key_hex]>... [--observer-secret-key-file <observer_id,path>]... --rollback-plan-sha3-256 <hex> --rollback-recovery-root <hex> [--rollback-last-drill-unix-ms <ms>] [--generated-at-unix-ms <ms>] [--expires-at-unix-ms <ms>] [--artifact-sha3-256 <hex>] [--cargo-lock-sha3-256 <hex>]\n    nebula-testnet --sample-public-status\n    nebula-testnet --verify-public-status <path> [--json]\n    nebula-testnet --sample-public-probe\n    nebula-testnet --verify-public-probe <path> [--json]\n    nebula-testnet --sample-preflight-receipt\n    nebula-testnet --verify-preflight-receipt <path> [--json]\n    nebula-testnet --sample-runbook-receipt\n    nebula-testnet --verify-runbook-receipt <path> [--json]\n    nebula-testnet --sample-deployment-attestation\n    nebula-testnet --verify-deployment-attestation <path> [--json]\n    nebula-testnet --sample-validator-set\n    nebula-testnet --verify-validator-set <path> [--json]\n    nebula-testnet --sample-operator-handoff\n    nebula-testnet --build-operator-handoff --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-operator-handoff <path> --deployment-attestation <path> --validator-set <path> [--json]\n    nebula-testnet --sample-operator-acceptance\n    nebula-testnet --build-operator-acceptance --operator-handoff <path> --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-operator-acceptance <path> --operator-handoff <path> --deployment-attestation <path> --validator-set <path> [--json]\n    nebula-testnet --sample-genesis-manifest\n    nebula-testnet --build-genesis-manifest --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-genesis-manifest <path> [--json]\n    nebula-testnet --verify-launch-package --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n    nebula-testnet --build-launch-package-bundle --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>\n    nebula-testnet --verify-launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n    nebula-testnet --build-validator-activation --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>\n    nebula-testnet --verify-validator-activation <path> --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]
+    "nebula-testnet\n\nUSAGE:\n    nebula-testnet [--mainnet-readiness] [--json]\n    nebula-testnet --generate-account [--json]\n    nebula-testnet --prove-local-public-testnet [--json]\n    nebula-testnet --prove-live-rpc-devnet [--launch-package-bundle <path> --public-testnet-peer-manifest <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>] [--live-rpc-devnet-runtime-surface-out <path>] [--json]\n    nebula-testnet --run-rpc [--sequencer|--follower] [--rpc-bind <addr:port>] [--admin-rpc-bind <addr:port>] [--block-ms <ms>] [--validator-id <id>] [--sequencer-public-key <hex>] [--sequencer-secret-key <hex>|--sequencer-secret-key-file <path>] [--admin-token <token>|--admin-token-file <path>] [--data-dir <path>] [--bootstrap-rpc <url>] [--sync-rpc <url>]... [--sync-peer-quorum <count>] [--public-testnet-peer-manifest <path>] [--disable-nbla-faucet] [--max-mempool-transactions <count>] [--max-request-bytes <bytes>] [--max-snapshot-response-bytes <bytes>] [--max-requests-per-minute <count>] [--max-active-connections <count>] [--admin-max-active-connections <count>] [--trusted-proxy-ip <ip>]... [--trust-private-proxy-headers]\n    nebula-testnet --build-public-status --endpoint-url <url> [--artifact-sha3-256 <hex>] [--cargo-lock-sha3-256 <hex>]\n    nebula-testnet --build-public-probe --endpoint-url <url> [--artifact-sha3-256 <hex>] [--cargo-lock-sha3-256 <hex>]\n    nebula-testnet --build-runtime-surface-evidence --endpoint-url <url> --health <path> --status <path> --snapshot <path> --ops <path> --backup <path> --rpc-status <path> --rpc-ops-status <path> --rpc-backup-manifest <path> --metrics <path> [--runtime-surface-tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms>] [--captured-at-unix-ms <ms>]\n    nebula-testnet --capture-public-runtime-surface --deployment-attestation <path> [--endpoint-url <url>] [--timeout-ms <ms>]\n    nebula-testnet --verify-runtime-surface-evidence <path> [--json]\n    nebula-testnet --build-deployment-attestation --public-status <path> --public-probe <path> --preflight-receipt <path> --runbook-receipt <path> --tls-pin <cert_sha256,public_key_sha256,not_after_unix_ms>... --bootstrap-node <node_id,operator_id,region,endpoint>... --operator <operator_id,region,public_key[,secret_key_hex]>... [--operator-secret-key-file <operator_id,path>]... --observer <observer_id,region,public_key[,secret_key_hex]>... [--observer-secret-key-file <observer_id,path>]... --rollback-plan-sha3-256 <hex> --rollback-recovery-root <hex> [--rollback-last-drill-unix-ms <ms>] [--generated-at-unix-ms <ms>] [--expires-at-unix-ms <ms>] [--artifact-sha3-256 <hex>] [--cargo-lock-sha3-256 <hex>]\n    nebula-testnet --sample-public-status\n    nebula-testnet --verify-public-status <path> [--json]\n    nebula-testnet --sample-public-probe\n    nebula-testnet --verify-public-probe <path> [--json]\n    nebula-testnet --sample-preflight-receipt\n    nebula-testnet --verify-preflight-receipt <path> [--json]\n    nebula-testnet --sample-runbook-receipt\n    nebula-testnet --verify-runbook-receipt <path> [--json]\n    nebula-testnet --sample-deployment-attestation\n    nebula-testnet --verify-deployment-attestation <path> [--json]\n    nebula-testnet --sample-validator-set\n    nebula-testnet --verify-validator-set <path> [--json]\n    nebula-testnet --sample-operator-handoff\n    nebula-testnet --build-operator-handoff --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-operator-handoff <path> --deployment-attestation <path> --validator-set <path> [--json]\n    nebula-testnet --sample-operator-acceptance\n    nebula-testnet --build-operator-acceptance --operator-handoff <path> --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-operator-acceptance <path> --operator-handoff <path> --deployment-attestation <path> --validator-set <path> [--json]\n    nebula-testnet --sample-genesis-manifest\n    nebula-testnet --build-genesis-manifest --deployment-attestation <path> --validator-set <path>\n    nebula-testnet --verify-genesis-manifest <path> [--json]\n    nebula-testnet --verify-launch-package --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n    nebula-testnet --build-launch-package-bundle --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>\n    nebula-testnet --verify-launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]\n    nebula-testnet --build-validator-activation --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>\n    nebula-testnet --verify-validator-activation <path> --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]
     nebula-testnet --build-public-testnet-peer-manifest --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>
     nebula-testnet --verify-public-testnet-peer-manifest <path> --launch-package-bundle <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path> [--json]
     nebula-testnet --build-live-rpc-devnet-runtime-surface --launch-package-bundle <path> --public-testnet-peer-manifest <path> --deployment-attestation <path> --public-status <path> --public-probe <path> --validator-set <path> --operator-handoff <path> --operator-acceptance <path> --genesis-manifest <path>
@@ -4718,10 +4767,17 @@ LOCAL PUBLIC TESTNET REHEARSAL:
     endpoint, launch-package bundle, and peer-manifest root for final public
     launch readiness.
 
+ACCOUNT GENERATION:
+    --generate-account creates an Ed25519 testnet account whose account id
+    starts with nbla. JSON output includes account, public_key_hex, and
+    secret_key_hex for local signing. Existing bare public-key-hex accounts
+    remain accepted for legacy fixtures.
+
 RPC USER SPEND SIGNATURES:
     Public spend calls require Ed25519 account ownership. For
-    nebula_sendTransaction, tx.from is the 32-byte account public key hex and
-    tx.signature signs RuntimeTransaction::signing_root(). For
+    nebula_sendTransaction, tx.from is the nbla-prefixed account id or legacy
+    32-byte account public key hex and tx.signature signs
+    RuntimeTransaction::signing_root(). For
     nebula_requestWithdrawal, nonce and signature bind
     withdrawal_authorization_root(account, monero_address, amount_nxmr_units,
     nonce) before nXMR is burned into operator_pending.
@@ -4841,10 +4897,12 @@ mod tests {
             "--max-snapshot-response-bytes <bytes>",
             "--trusted-proxy-ip <ip>",
             "--trust-private-proxy-headers",
+            "--generate-account",
             "--build-public-testnet-peer-manifest",
             "--verify-public-testnet-peer-manifest",
             "--build-live-rpc-devnet-runtime-surface",
             "--verify-public-testnet-launch-readiness <path>",
+            "ACCOUNT GENERATION",
             "FINAL PUBLIC LAUNCH READINESS",
         ] {
             assert!(help.contains(needle), "help text missing {needle}");
