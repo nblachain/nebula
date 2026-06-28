@@ -956,6 +956,19 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
         external_surface_report["capture_mode"],
         "external-public-endpoint"
     );
+    let verify_live_surface_args = vec![
+        "--verify-runtime-surface-evidence".to_string(),
+        path_arg(&live_runtime_surface),
+        "--json".to_string(),
+    ];
+    let live_surface_report: Value =
+        serde_json::from_str(&run_nebula_strings(&verify_live_surface_args))
+            .expect("live runtime surface report json");
+    assert_eq!(live_surface_report["runtime_surface_ready"], true);
+    assert_eq!(live_surface_report["capture_mode"], "loopback-devnet");
+    let live_rehearsal_report: Value =
+        serde_json::from_str(&fs::read_to_string(&live_rehearsal).expect("read live rehearsal"))
+            .expect("live rehearsal json");
 
     let certificate_args_for = |runtime_surface: &Path| -> Vec<String> {
         let mut args = vec![
@@ -1099,6 +1112,42 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
     assert_eq!(
         readiness_report["runtime_surface_tls_observation"],
         certificate_report["runtime_surface_tls_observation"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_runtime_surface_root"],
+        live_surface_report["runtime_surface_root"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_runtime_surface_capture_mode"],
+        live_surface_report["capture_mode"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_peer_manifest_snapshot_peer_urls"],
+        live_surface_report["public_testnet_peer_manifest_snapshot_peer_urls"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_peer_manifest_snapshot_peer_count"],
+        live_surface_report["public_testnet_peer_manifest_snapshot_peer_count"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_peer_manifest_sync_peer_quorum"],
+        live_surface_report["public_testnet_peer_manifest_sync_peer_quorum"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_latest_height"],
+        live_rehearsal_report["latest_height"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_total_nxmr_fees_units"],
+        live_surface_report["total_nxmr_fees_units"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_buyback_pool_nebulai"],
+        live_surface_report["buyback_pool_nebulai"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_validator_reward_nebulai"],
+        live_surface_report["validator_reward_nebulai"]
     );
 
     fs::remove_dir_all(&dir).expect("remove temp rehearsal dir");

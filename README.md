@@ -296,9 +296,12 @@ evidence is absent or stale.
     the observed `runtime_surface_tls_observation`, and public
     `public_testnet_peer_manifest_snapshot_peer_urls`, plus an artifact-bound
     live RPC devnet rehearsal report for the same launch package, endpoint,
-    peer-manifest root, and usable peer count. The verified loopback
-    runtime-surface evidence must match the rehearsal report's root, loopback
-    usable peer URLs, and usable peer count.
+    peer-manifest root, sync quorum, latest height, economics counters, and
+    usable peer count. The verified loopback runtime-surface evidence must match
+    the rehearsal report's root, loopback capture mode, usable peer URLs, usable
+    peer count, sync quorum, latest height, and economics counters, and the final
+    readiness root carries those live rehearsal details beside the external
+    public endpoint details.
     This is the only artifact-bound command allowed to emit
     `public_launch_ready=true`; loopback devnet runtime-surface evidence remains
     a rehearsal/certificate input and is rejected by the final readiness gate.
@@ -1228,6 +1231,14 @@ runtime surface capture mode, observed TLS tuple when present, and
 runtime-reported usable peer URLs and peer count after self-exclusion, validator
 set, genesis, endpoint URL, and validator, operator, observer, and region counts
 into one final candidate root.
+
+Final public launch readiness replays that certificate against external-public
+runtime-surface evidence and the live RPC devnet rehearsal. Its readiness root
+also carries the live loopback runtime-surface capture mode, runtime-surface
+root, usable peer URLs, usable peer count, sync quorum, latest height,
+`total_nxmr_fees_units`, `buyback_pool_nebulai`, and
+`validator_reward_nebulai`, so the emitted public-ready artifact shows what was
+advertised publicly and what was proven in rehearsal.
 
 Operators can verify the full package with:
 

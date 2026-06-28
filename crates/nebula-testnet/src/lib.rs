@@ -847,6 +847,14 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub runtime_surface_tls_observation: Option<TlsEndpointPin>,
     pub live_rpc_devnet_rehearsal_root: String,
     pub live_rpc_devnet_runtime_surface_root: String,
+    pub live_rpc_devnet_runtime_surface_capture_mode: String,
+    pub live_rpc_devnet_peer_manifest_snapshot_peer_urls: Vec<String>,
+    pub live_rpc_devnet_peer_manifest_snapshot_peer_count: usize,
+    pub live_rpc_devnet_peer_manifest_sync_peer_quorum: usize,
+    pub live_rpc_devnet_latest_height: u64,
+    pub live_rpc_devnet_total_nxmr_fees_units: u128,
+    pub live_rpc_devnet_buyback_pool_nebulai: u128,
+    pub live_rpc_devnet_validator_reward_nebulai: u128,
     pub validator_set_root: String,
     pub genesis_root: String,
     pub endpoint_url: String,
@@ -7086,6 +7094,18 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         runtime_surface_tls_observation: runtime_surface.tls_observation,
         live_rpc_devnet_rehearsal_root: live_rehearsal.rehearsal_root,
         live_rpc_devnet_runtime_surface_root: live_runtime_surface.runtime_surface_root,
+        live_rpc_devnet_runtime_surface_capture_mode: live_runtime_surface.capture_mode,
+        live_rpc_devnet_peer_manifest_snapshot_peer_urls: live_runtime_surface
+            .public_testnet_peer_manifest_snapshot_peer_urls,
+        live_rpc_devnet_peer_manifest_snapshot_peer_count: live_runtime_surface
+            .public_testnet_peer_manifest_snapshot_peer_count,
+        live_rpc_devnet_peer_manifest_sync_peer_quorum: live_runtime_surface
+            .public_testnet_peer_manifest_sync_peer_quorum
+            .expect("final readiness requires live runtime surface peer quorum"),
+        live_rpc_devnet_latest_height: live_runtime_surface.latest_height,
+        live_rpc_devnet_total_nxmr_fees_units: live_runtime_surface.total_nxmr_fees_units,
+        live_rpc_devnet_buyback_pool_nebulai: live_runtime_surface.buyback_pool_nebulai,
+        live_rpc_devnet_validator_reward_nebulai: live_runtime_surface.validator_reward_nebulai,
         validator_set_root: certificate.validator_set_root,
         genesis_root: certificate.genesis_root,
         endpoint_url: certificate.endpoint_url,
@@ -12695,6 +12715,14 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "runtime_surface_tls_observation": report.runtime_surface_tls_observation,
         "live_rpc_devnet_rehearsal_root": report.live_rpc_devnet_rehearsal_root,
         "live_rpc_devnet_runtime_surface_root": report.live_rpc_devnet_runtime_surface_root,
+        "live_rpc_devnet_runtime_surface_capture_mode": report.live_rpc_devnet_runtime_surface_capture_mode,
+        "live_rpc_devnet_peer_manifest_snapshot_peer_urls": report.live_rpc_devnet_peer_manifest_snapshot_peer_urls,
+        "live_rpc_devnet_peer_manifest_snapshot_peer_count": report.live_rpc_devnet_peer_manifest_snapshot_peer_count,
+        "live_rpc_devnet_peer_manifest_sync_peer_quorum": report.live_rpc_devnet_peer_manifest_sync_peer_quorum,
+        "live_rpc_devnet_latest_height": report.live_rpc_devnet_latest_height,
+        "live_rpc_devnet_total_nxmr_fees_units": report.live_rpc_devnet_total_nxmr_fees_units,
+        "live_rpc_devnet_buyback_pool_nebulai": report.live_rpc_devnet_buyback_pool_nebulai,
+        "live_rpc_devnet_validator_reward_nebulai": report.live_rpc_devnet_validator_reward_nebulai,
         "validator_set_root": report.validator_set_root,
         "genesis_root": report.genesis_root,
         "endpoint_url": report.endpoint_url,
@@ -17722,6 +17750,38 @@ mod public_launch {
         assert_eq!(
             readiness.live_rpc_devnet_runtime_surface_root,
             live_runtime_surface_report.runtime_surface_root
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_runtime_surface_capture_mode,
+            RUNTIME_SURFACE_CAPTURE_MODE_LOOPBACK_DEVNET
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_peer_manifest_snapshot_peer_urls,
+            live_runtime_surface_report.public_testnet_peer_manifest_snapshot_peer_urls
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_peer_manifest_snapshot_peer_count,
+            expected_live_snapshot_peer_count
+        );
+        assert_eq!(
+            Some(readiness.live_rpc_devnet_peer_manifest_sync_peer_quorum),
+            live_runtime_surface_report.public_testnet_peer_manifest_sync_peer_quorum
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_latest_height,
+            live_rehearsal_report.latest_height
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_total_nxmr_fees_units,
+            live_runtime_surface_report.total_nxmr_fees_units
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_buyback_pool_nebulai,
+            live_runtime_surface_report.buyback_pool_nebulai
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_validator_reward_nebulai,
+            live_runtime_surface_report.validator_reward_nebulai
         );
 
         let mut tampered_peer_manifest =
