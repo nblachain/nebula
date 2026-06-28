@@ -301,7 +301,11 @@ evidence is absent or stale.
     the rehearsal report's root, loopback capture mode, usable peer URLs, usable
     peer count, sync quorum, latest height, and economics counters, and the final
     readiness root carries those live rehearsal details beside the external
-    public endpoint details.
+    public endpoint details. External and live runtime-surface captures must fall
+    inside the deployment attestation validity window, public observer
+    confirmations must be observed inside that same window, and the launch
+    certificate timestamp must be at or after the observer confirmation and
+    external runtime-surface capture while still before deployment expiry.
     This is the only artifact-bound command allowed to emit
     `public_launch_ready=true`; loopback devnet runtime-surface evidence remains
     a rehearsal/certificate input and is rejected by the final readiness gate.
@@ -1237,8 +1241,10 @@ runtime-surface evidence and the live RPC devnet rehearsal. Its readiness root
 also carries the live loopback runtime-surface capture mode, runtime-surface
 root, usable peer URLs, usable peer count, sync quorum, latest height,
 `total_nxmr_fees_units`, `buyback_pool_nebulai`, and
-`validator_reward_nebulai`, so the emitted public-ready artifact shows what was
-advertised publicly and what was proven in rehearsal.
+`validator_reward_nebulai`, plus deployment generation/expiry, public observer
+observation time, external runtime capture time, and live rehearsal runtime
+capture time, so the emitted public-ready artifact shows what was advertised
+publicly, what was proven in rehearsal, and when the evidence was captured.
 
 Operators can verify the full package with:
 

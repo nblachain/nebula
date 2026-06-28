@@ -319,6 +319,7 @@ pub struct DeploymentAttestationReport {
     pub deployment_quorum_root: String,
     pub bootstrap_roster_root: String,
     pub operational_evidence_root: String,
+    pub attestation_generated_at_unix_ms: u128,
     pub attestation_expires_at_unix_ms: u128,
     pub verified_operator_count: usize,
     pub verified_observer_count: usize,
@@ -844,10 +845,15 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub public_probe_root: String,
     pub runtime_surface_root: String,
     pub runtime_surface_capture_mode: String,
+    pub runtime_surface_captured_at_unix_ms: u128,
     pub runtime_surface_tls_observation: Option<TlsEndpointPin>,
+    pub public_observer_observed_at_unix_ms: u128,
+    pub deployment_generated_at_unix_ms: u128,
+    pub deployment_expires_at_unix_ms: u128,
     pub live_rpc_devnet_rehearsal_root: String,
     pub live_rpc_devnet_runtime_surface_root: String,
     pub live_rpc_devnet_runtime_surface_capture_mode: String,
+    pub live_rpc_devnet_runtime_surface_captured_at_unix_ms: u128,
     pub live_rpc_devnet_peer_manifest_snapshot_peer_urls: Vec<String>,
     pub live_rpc_devnet_peer_manifest_snapshot_peer_count: usize,
     pub live_rpc_devnet_peer_manifest_sync_peer_quorum: usize,
@@ -1099,6 +1105,7 @@ pub struct RuntimeSurfaceEvidenceReport {
     pub runtime_surface_root: String,
     pub endpoint_url: String,
     pub capture_mode: String,
+    pub captured_at_unix_ms: u128,
     pub tls_observation: Option<TlsEndpointPin>,
     pub chain_id: String,
     pub runtime_version: String,
@@ -3778,6 +3785,7 @@ fn verify_runtime_surface_evidence(
         runtime_surface_root: evidence.root.clone(),
         endpoint_url: evidence.endpoint_url.clone(),
         capture_mode: evidence.capture_mode.clone(),
+        captured_at_unix_ms: evidence.captured_at_unix_ms,
         tls_observation: evidence.tls_observation.clone(),
         chain_id: evidence.chain_id.clone(),
         runtime_version: evidence.runtime_version.clone(),
@@ -6379,6 +6387,16 @@ pub fn verify_public_observer_confirmation_jsons(
     if manifest.observed_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
         errors.push("observed_at_unix_ms is older than 24 hours".to_string());
     }
+    if manifest.observed_at_unix_ms < deployment_attestation.generated_at_unix_ms {
+        errors.push(
+            "observed_at_unix_ms must be at or after deployment generated_at_unix_ms".to_string(),
+        );
+    }
+    if manifest.observed_at_unix_ms > deployment_attestation.expires_at_unix_ms {
+        errors.push(
+            "observed_at_unix_ms must be at or before deployment expires_at_unix_ms".to_string(),
+        );
+    }
     require_eq(
         &mut errors,
         "chain_id",
@@ -6599,6 +6617,28 @@ pub fn verify_public_testnet_launch_certificate_jsons(
     }
     if certificate.certified_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
         errors.push("certified_at_unix_ms is older than 24 hours".to_string());
+    }
+    if certificate.certified_at_unix_ms < reports.public_observer_confirmation.observed_at_unix_ms {
+        errors.push(
+            "certified_at_unix_ms must be at or after public_observer_confirmation.observed_at_unix_ms"
+                .to_string(),
+        );
+    }
+    if certificate.certified_at_unix_ms < reports.runtime_surface.captured_at_unix_ms {
+        errors.push(
+            "certified_at_unix_ms must be at or after runtime_surface.captured_at_unix_ms"
+                .to_string(),
+        );
+    }
+    if certificate.certified_at_unix_ms < reports.deployment.attestation_generated_at_unix_ms {
+        errors.push(
+            "certified_at_unix_ms must be at or after deployment generated_at_unix_ms".to_string(),
+        );
+    }
+    if certificate.certified_at_unix_ms > reports.deployment.attestation_expires_at_unix_ms {
+        errors.push(
+            "certified_at_unix_ms must be at or before deployment expires_at_unix_ms".to_string(),
+        );
     }
     require_eq(
         &mut errors,
@@ -6852,6 +6892,10 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         deployment_attestation_json.trim_start_matches('\u{feff}'),
     )
     .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+    let public_observer_confirmation = serde_json::from_str::<PublicObserverConfirmationManifest>(
+        public_observer_confirmation_json.trim_start_matches('\u{feff}'),
+    )
+    .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
     let mut errors = Vec::new();
 
     if !certificate.public_testnet_launch_certificate_ready {
@@ -6972,6 +7016,18 @@ pub fn verify_public_testnet_launch_readiness_jsons(
                 .to_string(),
         ),
     }
+    if live_runtime_surface.captured_at_unix_ms < deployment_attestation.generated_at_unix_ms {
+        errors.push(
+            "live_rpc_devnet_runtime_surface.captured_at_unix_ms must be at or after deployment generated_at_unix_ms"
+                .to_string(),
+        );
+    }
+    if live_runtime_surface.captured_at_unix_ms > deployment_attestation.expires_at_unix_ms {
+        errors.push(
+            "live_rpc_devnet_runtime_surface.captured_at_unix_ms must be at or before deployment expires_at_unix_ms"
+                .to_string(),
+        );
+    }
     if live_runtime_surface.public_testnet_peer_manifest_snapshot_peer_count
         != live_rehearsal.public_testnet_peer_manifest_snapshot_peer_count
     {
@@ -7091,10 +7147,16 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         public_probe_root: certificate.public_probe_root,
         runtime_surface_root: certificate.runtime_surface_root,
         runtime_surface_capture_mode: runtime_surface.capture_mode,
+        runtime_surface_captured_at_unix_ms: runtime_surface.captured_at_unix_ms,
         runtime_surface_tls_observation: runtime_surface.tls_observation,
+        public_observer_observed_at_unix_ms: public_observer_confirmation.observed_at_unix_ms,
+        deployment_generated_at_unix_ms: deployment_attestation.generated_at_unix_ms,
+        deployment_expires_at_unix_ms: deployment_attestation.expires_at_unix_ms,
         live_rpc_devnet_rehearsal_root: live_rehearsal.rehearsal_root,
         live_rpc_devnet_runtime_surface_root: live_runtime_surface.runtime_surface_root,
         live_rpc_devnet_runtime_surface_capture_mode: live_runtime_surface.capture_mode,
+        live_rpc_devnet_runtime_surface_captured_at_unix_ms: live_runtime_surface
+            .captured_at_unix_ms,
         live_rpc_devnet_peer_manifest_snapshot_peer_urls: live_runtime_surface
             .public_testnet_peer_manifest_snapshot_peer_urls,
         live_rpc_devnet_peer_manifest_snapshot_peer_count: live_runtime_surface
@@ -7605,6 +7667,7 @@ pub fn verify_deployment_attestation_json(
         deployment_quorum_root: deployment_quorum_root(&attestation),
         bootstrap_roster_root: deployment_bootstrap_roster_root(&attestation),
         operational_evidence_root: deployment_operational_evidence_root(&attestation),
+        attestation_generated_at_unix_ms: attestation.generated_at_unix_ms,
         attestation_expires_at_unix_ms: attestation.expires_at_unix_ms,
         verified_operator_count: attestation.operators.len(),
         verified_observer_count: attestation.observers.len(),
@@ -12400,6 +12463,18 @@ fn verified_launch_certificate_reports(
     let deployment = verify_deployment_attestation_json(deployment_attestation_json)?;
     let public_probe = parse_public_probe_json(public_probe_json, "public_probe")?;
     let mut errors = Vec::new();
+    if runtime_surface.captured_at_unix_ms < deployment.attestation_generated_at_unix_ms {
+        errors.push(
+            "runtime_surface.captured_at_unix_ms must be at or after deployment generated_at_unix_ms"
+                .to_string(),
+        );
+    }
+    if runtime_surface.captured_at_unix_ms > deployment.attestation_expires_at_unix_ms {
+        errors.push(
+            "runtime_surface.captured_at_unix_ms must be at or before deployment expires_at_unix_ms"
+                .to_string(),
+        );
+    }
     require_eq(
         &mut errors,
         "runtime_surface.endpoint_url",
@@ -12712,10 +12787,15 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "public_probe_root": report.public_probe_root,
         "runtime_surface_root": report.runtime_surface_root,
         "runtime_surface_capture_mode": report.runtime_surface_capture_mode,
+        "runtime_surface_captured_at_unix_ms": report.runtime_surface_captured_at_unix_ms,
         "runtime_surface_tls_observation": report.runtime_surface_tls_observation,
+        "public_observer_observed_at_unix_ms": report.public_observer_observed_at_unix_ms,
+        "deployment_generated_at_unix_ms": report.deployment_generated_at_unix_ms,
+        "deployment_expires_at_unix_ms": report.deployment_expires_at_unix_ms,
         "live_rpc_devnet_rehearsal_root": report.live_rpc_devnet_rehearsal_root,
         "live_rpc_devnet_runtime_surface_root": report.live_rpc_devnet_runtime_surface_root,
         "live_rpc_devnet_runtime_surface_capture_mode": report.live_rpc_devnet_runtime_surface_capture_mode,
+        "live_rpc_devnet_runtime_surface_captured_at_unix_ms": report.live_rpc_devnet_runtime_surface_captured_at_unix_ms,
         "live_rpc_devnet_peer_manifest_snapshot_peer_urls": report.live_rpc_devnet_peer_manifest_snapshot_peer_urls,
         "live_rpc_devnet_peer_manifest_snapshot_peer_count": report.live_rpc_devnet_peer_manifest_snapshot_peer_count,
         "live_rpc_devnet_peer_manifest_sync_peer_quorum": report.live_rpc_devnet_peer_manifest_sync_peer_quorum,
@@ -13246,6 +13326,20 @@ mod public_launch {
             rpc_backup_manifest_json: evidence.rpc_backup_manifest.to_string(),
             metrics_text: evidence.metrics_text,
         })
+    }
+
+    fn runtime_surface_with_captured_at(
+        runtime_surface_json: &str,
+        captured_at_unix_ms: u128,
+    ) -> Result<String, AttestationError> {
+        let mut evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(runtime_surface_json)
+            .expect("runtime surface evidence parses");
+        evidence.captured_at_unix_ms = captured_at_unix_ms;
+        evidence.root = runtime_surface_evidence_root(&evidence);
+        let output = serde_json::to_string_pretty(&evidence)
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+        verify_runtime_surface_evidence_json(&output)?;
+        Ok(output)
     }
 
     fn runtime_surface_with_endpoint_url(
@@ -17520,6 +17614,38 @@ mod public_launch {
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
 
+        let pre_deployment_external_runtime_surface = runtime_surface_with_captured_at(
+            &external_runtime_surface,
+            deployment_attestation
+                .generated_at_unix_ms
+                .saturating_sub(1),
+        )
+        .unwrap();
+        let pre_deployment_certificate_error = build_public_testnet_launch_certificate_json_pretty(
+            &observer_confirmation,
+            &pre_deployment_external_runtime_surface,
+            &peer_manifest,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match pre_deployment_certificate_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error
+                    == "runtime_surface.captured_at_unix_ms must be at or after deployment generated_at_unix_ms"
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
         let external_certificate = build_public_testnet_launch_certificate_json_pretty(
             &observer_confirmation,
             &external_runtime_surface,
@@ -17537,6 +17663,9 @@ mod public_launch {
             &genesis,
         )
         .unwrap();
+        let external_runtime_surface_report =
+            verify_runtime_surface_evidence_json(&external_runtime_surface)
+                .expect("external runtime surface verifies");
         let external_certificate_report = verify_public_testnet_launch_certificate_jsons(
             &external_certificate,
             &observer_confirmation,
@@ -17563,6 +17692,39 @@ mod public_launch {
             external_certificate_report.runtime_surface_tls_observation,
             Some(matching_tls_observation.clone())
         );
+
+        let mut backdated_certificate =
+            serde_json::from_str::<PublicTestnetLaunchCertificate>(&external_certificate).unwrap();
+        backdated_certificate.certified_at_unix_ms = external_runtime_surface_report
+            .captured_at_unix_ms
+            .saturating_sub(1);
+        backdated_certificate.root = public_testnet_launch_certificate_root(&backdated_certificate);
+        let backdated_certificate = serde_json::to_string_pretty(&backdated_certificate).unwrap();
+        let backdated_certificate_error = verify_public_testnet_launch_certificate_jsons(
+            &backdated_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &peer_manifest,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match backdated_certificate_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error
+                    == "certified_at_unix_ms must be at or after runtime_surface.captured_at_unix_ms"
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
 
         let mut forged_peer_url_certificate =
             serde_json::from_str::<PublicTestnetLaunchCertificate>(&external_certificate).unwrap();
@@ -17691,6 +17853,9 @@ mod public_launch {
             serde_json::from_str::<LiveRpcDevnetRehearsalReport>(&live_rehearsal).unwrap();
         let live_runtime_surface_report = verify_runtime_surface_evidence_json(&runtime_surface)
             .expect("live runtime surface verifies");
+        let public_observer_confirmation =
+            serde_json::from_str::<PublicObserverConfirmationManifest>(&observer_confirmation)
+                .unwrap();
         let expected_live_snapshot_peer_count = peer_manifest_report.peer_count.saturating_sub(1);
 
         assert!(readiness.public_launch_ready);
@@ -17720,6 +17885,22 @@ mod public_launch {
         assert_eq!(
             readiness.public_testnet_peer_manifest_snapshot_peer_urls,
             expected_external_snapshot_peer_urls
+        );
+        assert_eq!(
+            readiness.runtime_surface_captured_at_unix_ms,
+            external_runtime_surface_report.captured_at_unix_ms
+        );
+        assert_eq!(
+            readiness.public_observer_observed_at_unix_ms,
+            public_observer_confirmation.observed_at_unix_ms
+        );
+        assert_eq!(
+            readiness.deployment_generated_at_unix_ms,
+            deployment_attestation.generated_at_unix_ms
+        );
+        assert_eq!(
+            readiness.deployment_expires_at_unix_ms,
+            deployment_attestation.expires_at_unix_ms
         );
         assert_eq!(
             live_rehearsal_report.public_testnet_peer_manifest_snapshot_peer_count,
@@ -17756,6 +17937,10 @@ mod public_launch {
             RUNTIME_SURFACE_CAPTURE_MODE_LOOPBACK_DEVNET
         );
         assert_eq!(
+            readiness.live_rpc_devnet_runtime_surface_captured_at_unix_ms,
+            live_runtime_surface_report.captured_at_unix_ms
+        );
+        assert_eq!(
             readiness.live_rpc_devnet_peer_manifest_snapshot_peer_urls,
             live_runtime_surface_report.public_testnet_peer_manifest_snapshot_peer_urls
         );
@@ -17783,6 +17968,41 @@ mod public_launch {
             readiness.live_rpc_devnet_validator_reward_nebulai,
             live_runtime_surface_report.validator_reward_nebulai
         );
+
+        let pre_deployment_live_runtime_surface = runtime_surface_with_captured_at(
+            &runtime_surface,
+            deployment_attestation
+                .generated_at_unix_ms
+                .saturating_sub(1),
+        )
+        .unwrap();
+        let pre_deployment_live_ready_error = verify_public_testnet_launch_readiness_jsons(
+            &external_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &peer_manifest,
+            &live_rehearsal,
+            &pre_deployment_live_runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match pre_deployment_live_ready_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error
+                    == "live_rpc_devnet_runtime_surface.captured_at_unix_ms must be at or after deployment generated_at_unix_ms"
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
 
         let mut tampered_peer_manifest =
             serde_json::from_str::<PublicTestnetPeerManifest>(&peer_manifest).unwrap();

@@ -969,6 +969,10 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
     let live_rehearsal_report: Value =
         serde_json::from_str(&fs::read_to_string(&live_rehearsal).expect("read live rehearsal"))
             .expect("live rehearsal json");
+    let observer_confirmation: Value = serde_json::from_str(
+        &fs::read_to_string(&public_observer_confirmation).expect("read observer confirmation"),
+    )
+    .expect("observer confirmation json");
 
     let certificate_args_for = |runtime_surface: &Path| -> Vec<String> {
         let mut args = vec![
@@ -1114,12 +1118,32 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
         certificate_report["runtime_surface_tls_observation"]
     );
     assert_eq!(
+        readiness_report["runtime_surface_captured_at_unix_ms"],
+        external_surface_report["captured_at_unix_ms"]
+    );
+    assert_eq!(
+        readiness_report["public_observer_observed_at_unix_ms"],
+        observer_confirmation["observed_at_unix_ms"]
+    );
+    assert_eq!(
+        readiness_report["deployment_generated_at_unix_ms"],
+        attestation["generated_at_unix_ms"]
+    );
+    assert_eq!(
+        readiness_report["deployment_expires_at_unix_ms"],
+        attestation["expires_at_unix_ms"]
+    );
+    assert_eq!(
         readiness_report["live_rpc_devnet_runtime_surface_root"],
         live_surface_report["runtime_surface_root"]
     );
     assert_eq!(
         readiness_report["live_rpc_devnet_runtime_surface_capture_mode"],
         live_surface_report["capture_mode"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_runtime_surface_captured_at_unix_ms"],
+        live_surface_report["captured_at_unix_ms"]
     );
     assert_eq!(
         readiness_report["live_rpc_devnet_peer_manifest_snapshot_peer_urls"],
