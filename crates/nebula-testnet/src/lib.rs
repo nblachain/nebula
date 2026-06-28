@@ -875,6 +875,7 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub deployment_generated_at_unix_ms: u128,
     pub deployment_expires_at_unix_ms: u128,
     pub live_rpc_devnet_rehearsal_root: String,
+    pub live_rpc_devnet_rehearsal_generated_at_unix_ms: u128,
     pub live_rpc_devnet_runtime_surface_root: String,
     pub live_rpc_devnet_runtime_surface_capture_mode: String,
     pub live_rpc_devnet_runtime_surface_captured_at_unix_ms: u128,
@@ -999,6 +1000,7 @@ pub struct LiveRpcDevnetRehearsalReport {
     pub public_testnet_peer_manifest_snapshot_peer_urls: Vec<String>,
     pub public_testnet_peer_manifest_snapshot_peer_count: usize,
     pub peer_manifest_sync_peer_quorum: usize,
+    pub generated_at_unix_ms: u128,
     pub rehearsal_root: String,
 }
 
@@ -2974,6 +2976,7 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
         public_testnet_peer_manifest_snapshot_peer_count: runtime_surface_report
             .public_testnet_peer_manifest_snapshot_peer_count,
         peer_manifest_sync_peer_quorum: reported_peer_manifest_quorum,
+        generated_at_unix_ms: unix_ms(),
         rehearsal_root: String::new(),
     };
     if report.produced_block_count < 2 {
@@ -7144,6 +7147,24 @@ pub fn verify_public_testnet_launch_readiness_jsons(
                 .to_string(),
         );
     }
+    if live_rehearsal.generated_at_unix_ms < deployment_attestation.generated_at_unix_ms {
+        errors.push(
+            "live_rpc_devnet_rehearsal.generated_at_unix_ms must be at or after deployment generated_at_unix_ms"
+                .to_string(),
+        );
+    }
+    if live_rehearsal.generated_at_unix_ms > deployment_attestation.expires_at_unix_ms {
+        errors.push(
+            "live_rpc_devnet_rehearsal.generated_at_unix_ms must be at or before deployment expires_at_unix_ms"
+                .to_string(),
+        );
+    }
+    if live_rehearsal.generated_at_unix_ms < live_runtime_surface.captured_at_unix_ms {
+        errors.push(
+            "live_rpc_devnet_rehearsal.generated_at_unix_ms must be at or after live_rpc_devnet_runtime_surface.captured_at_unix_ms"
+                .to_string(),
+        );
+    }
     if live_runtime_surface.public_testnet_peer_manifest_snapshot_peer_count
         != live_rehearsal.public_testnet_peer_manifest_snapshot_peer_count
     {
@@ -7284,6 +7305,7 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         deployment_generated_at_unix_ms: deployment_attestation.generated_at_unix_ms,
         deployment_expires_at_unix_ms: deployment_attestation.expires_at_unix_ms,
         live_rpc_devnet_rehearsal_root: live_rehearsal.rehearsal_root,
+        live_rpc_devnet_rehearsal_generated_at_unix_ms: live_rehearsal.generated_at_unix_ms,
         live_rpc_devnet_runtime_surface_root: live_runtime_surface.runtime_surface_root,
         live_rpc_devnet_runtime_surface_capture_mode: live_runtime_surface.capture_mode,
         live_rpc_devnet_runtime_surface_captured_at_unix_ms: live_runtime_surface
@@ -7364,6 +7386,7 @@ pub fn verify_live_rpc_devnet_rehearsal_json(
         serde_json::from_str::<LiveRpcDevnetRehearsalReport>(input.trim_start_matches('\u{feff}'))
             .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
     let mut errors = Vec::new();
+    let now = unix_ms();
     let expected_root = live_rpc_devnet_rehearsal_root(&report);
 
     if !report.live_rpc_devnet_rehearsed {
@@ -7389,6 +7412,17 @@ pub fn verify_live_rpc_devnet_rehearsal_json(
     );
     if report.public_launch_ready {
         errors.push("live_rpc_devnet_rehearsal.public_launch_ready must be false".to_string());
+    }
+    if report.generated_at_unix_ms > now + FUTURE_CLOCK_SKEW_MS {
+        errors.push(
+            "live_rpc_devnet_rehearsal.generated_at_unix_ms is more than five minutes in the future"
+                .to_string(),
+        );
+    }
+    if report.generated_at_unix_ms < now.saturating_sub(PUBLIC_ATTESTATION_MAX_AGE_MS) {
+        errors.push(
+            "live_rpc_devnet_rehearsal.generated_at_unix_ms is older than 24 hours".to_string(),
+        );
     }
     require_eq(
         &mut errors,
@@ -8433,7 +8467,7 @@ fn live_temp_data_dir(label: &str) -> String {
 
 fn live_rpc_devnet_rehearsal_root(report: &LiveRpcDevnetRehearsalReport) -> String {
     stable_root(&json!({
-        "live_rpc_devnet_rehearsal_domain": "nebula-live-rpc-devnet-rehearsal-v1",
+        "live_rpc_devnet_rehearsal_domain": "nebula-live-rpc-devnet-rehearsal-v2",
         "chain_id": report.chain_id,
         "runtime_version": report.runtime_version,
         "level": report.level,
@@ -8472,6 +8506,7 @@ fn live_rpc_devnet_rehearsal_root(report: &LiveRpcDevnetRehearsalReport) -> Stri
         "public_testnet_peer_manifest_snapshot_peer_urls": report.public_testnet_peer_manifest_snapshot_peer_urls,
         "public_testnet_peer_manifest_snapshot_peer_count": report.public_testnet_peer_manifest_snapshot_peer_count,
         "peer_manifest_sync_peer_quorum": report.peer_manifest_sync_peer_quorum,
+        "generated_at_unix_ms": report.generated_at_unix_ms,
     }))
 }
 
@@ -12972,6 +13007,7 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "deployment_generated_at_unix_ms": report.deployment_generated_at_unix_ms,
         "deployment_expires_at_unix_ms": report.deployment_expires_at_unix_ms,
         "live_rpc_devnet_rehearsal_root": report.live_rpc_devnet_rehearsal_root,
+        "live_rpc_devnet_rehearsal_generated_at_unix_ms": report.live_rpc_devnet_rehearsal_generated_at_unix_ms,
         "live_rpc_devnet_runtime_surface_root": report.live_rpc_devnet_runtime_surface_root,
         "live_rpc_devnet_runtime_surface_capture_mode": report.live_rpc_devnet_runtime_surface_capture_mode,
         "live_rpc_devnet_runtime_surface_captured_at_unix_ms": report.live_rpc_devnet_runtime_surface_captured_at_unix_ms,
@@ -17696,6 +17732,21 @@ mod public_launch {
 
         verify_live_rpc_devnet_rehearsal_json(&report_json).unwrap();
 
+        let mut future_generated = report.clone();
+        future_generated.generated_at_unix_ms = unix_ms() + FUTURE_CLOCK_SKEW_MS + 60_000;
+        future_generated.rehearsal_root = live_rpc_devnet_rehearsal_root(&future_generated);
+        let future_error = verify_live_rpc_devnet_rehearsal_json(
+            &serde_json::to_string(&future_generated).unwrap(),
+        )
+        .unwrap_err();
+        match future_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error
+                    == "live_rpc_devnet_rehearsal.generated_at_unix_ms is more than five minutes in the future"
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
         let mut rewritten = report.clone();
         rewritten.sequencer_rpc_addr = "127.0.0.1:65535".to_string();
         let rewritten_json = serde_json::to_string(&rewritten).unwrap();
@@ -18452,6 +18503,10 @@ mod public_launch {
             live_rehearsal_report.rehearsal_root
         );
         assert_eq!(
+            readiness.live_rpc_devnet_rehearsal_generated_at_unix_ms,
+            live_rehearsal_report.generated_at_unix_ms
+        );
+        assert_eq!(
             readiness.live_rpc_devnet_runtime_surface_root,
             live_runtime_surface_report.runtime_surface_root
         );
@@ -18595,6 +18650,42 @@ mod public_launch {
             AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
                 error
                     == "live_rpc_devnet_runtime_surface.captured_at_unix_ms must be at or after deployment generated_at_unix_ms"
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
+        let mut pre_deployment_live_rehearsal = live_rehearsal_report.clone();
+        pre_deployment_live_rehearsal.generated_at_unix_ms = deployment_attestation
+            .generated_at_unix_ms
+            .saturating_sub(1);
+        pre_deployment_live_rehearsal.rehearsal_root =
+            live_rpc_devnet_rehearsal_root(&pre_deployment_live_rehearsal);
+        let pre_deployment_live_rehearsal =
+            serde_json::to_string_pretty(&pre_deployment_live_rehearsal).unwrap();
+        let pre_deployment_rehearsal_ready_error = verify_public_testnet_launch_readiness_jsons(
+            &external_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &peer_manifest,
+            &pre_deployment_live_rehearsal,
+            &runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match pre_deployment_rehearsal_ready_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error
+                    == "live_rpc_devnet_rehearsal.generated_at_unix_ms must be at or after deployment generated_at_unix_ms"
             })),
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
@@ -20080,6 +20171,7 @@ mod public_launch {
             ],
             public_testnet_peer_manifest_snapshot_peer_count: 1,
             peer_manifest_sync_peer_quorum: 1,
+            generated_at_unix_ms: unix_ms(),
             rehearsal_root: String::new(),
         };
         report.rehearsal_root = live_rpc_devnet_rehearsal_root(&report);

@@ -1214,6 +1214,10 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
         live_surface_report["runtime_surface_root"]
     );
     assert_eq!(
+        readiness_report["live_rpc_devnet_rehearsal_generated_at_unix_ms"],
+        live_rehearsal_report["generated_at_unix_ms"]
+    );
+    assert_eq!(
         readiness_report["live_rpc_devnet_runtime_surface_capture_mode"],
         live_surface_report["capture_mode"]
     );

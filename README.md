@@ -308,16 +308,18 @@ evidence is absent or stale.
     counters, plus an artifact-bound
     live RPC devnet rehearsal report for the same launch package, endpoint,
     sequencer/follower loopback RPC addresses, peer-manifest root, sync quorum,
-    latest height, economics counters, and usable peer count. The verified
+    latest height, economics counters, usable peer count, and generated
+    rehearsal time. The verified
     loopback runtime-surface evidence must match the rehearsal report's root,
     loopback capture mode, usable peer URLs, usable peer count, block timing,
     sync quorum/import counters, latest height, bridge custody/withdrawal
     counters, sequencer-rotation count, and economics counters, and the final
     readiness root carries those live rehearsal details beside the external
     public endpoint details.
-    External and live runtime-surface captures must fall
-    inside the deployment attestation validity window, public observer
-    confirmations must be observed inside that same window, and the launch
+    External and live runtime-surface captures plus the live rehearsal
+    generation time must fall inside the deployment attestation validity
+    window, public observer confirmations must be observed inside that same
+    window, and the launch
     certificate timestamp must be at or after the observer confirmation and
     external runtime-surface capture while still before deployment expiry.
     This is the only artifact-bound command allowed to emit
@@ -1262,16 +1264,18 @@ runtime-surface evidence and the live RPC devnet rehearsal. Its readiness root
 also carries the external runtime latest height/hash, snapshot/state roots,
 ops/backup roots, receipt counts, public ops readiness, and economics counters,
 plus the live loopback runtime-surface capture mode, runtime-surface root,
-usable peer URLs, usable peer count, sync quorum/import counters, latest height,
-sub-second block timing, bridge custody/withdrawal counters,
+live rehearsal generation time, usable peer URLs, usable peer count, sync
+quorum/import counters, latest height, sub-second block timing,
+bridge custody/withdrawal counters,
 sequencer-rotation count, `total_nxmr_fees_units`, `buyback_pool_nebulai`, and
 `validator_reward_nebulai`, deployment generation/expiry, public observer
 observation time, external runtime capture time, and live rehearsal runtime
 capture time, so the emitted public-ready artifact shows what was advertised
 publicly, what was proven in rehearsal, and when the evidence was captured. The
-live rehearsal root also commits to the sequencer/follower loopback RPC
-addresses and rejects unrecognized report fields so later public-ready evidence
-cannot carry unrooted rehearsal claims.
+live rehearsal root also commits to its generation time and the
+sequencer/follower loopback RPC addresses, rejects unrecognized report fields,
+and must be generated inside the deployment attestation validity window so later
+public-ready evidence cannot carry unrooted or stale rehearsal claims.
 
 Operators can verify the full package with:
 
