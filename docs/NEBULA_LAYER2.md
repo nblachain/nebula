@@ -292,8 +292,9 @@ evidence is absent or stale.
 21. Verify final public launch readiness with external-public runtime-surface
     evidence captured from the advertised endpoint, an artifact-bound live RPC
     devnet rehearsal report for the same launch package, endpoint, peer-manifest
-    root, and usable peer count, and verified loopback runtime-surface evidence
-    whose root and usable peer count match that report.
+    root, and usable peer URLs and count, and verified loopback runtime-surface
+    evidence whose root, usable peer URLs, and usable peer count match that
+    report.
     This is the only artifact-bound command allowed to emit
     `public_launch_ready=true`; loopback devnet runtime-surface evidence remains
     a rehearsal/certificate input and is rejected by the final readiness gate.
@@ -516,6 +517,7 @@ and keep serving from its persisted local snapshot. `/health`, `/status`, and
 `nebula_status` expose the configured `sync_peer_urls` list, per-peer
 `sync_peer_telemetry`, `sync_peer_quorum`,
 `public_testnet_peer_manifest_root`,
+`public_testnet_peer_manifest_snapshot_peer_urls`,
 `public_testnet_peer_manifest_snapshot_peer_count`,
 `public_testnet_peer_manifest_sync_peer_quorum`, `sync_quorum_met`,
 `sync_quorum_peer_count`, `sync_quorum_height`, `sync_quorum_latest_hash`,

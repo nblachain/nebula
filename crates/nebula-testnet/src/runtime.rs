@@ -9531,7 +9531,61 @@ mod tests {
         assert_eq!(report.backup_root.len(), 64);
         assert_eq!(report.fee_policy_root, crate::fee_policy_root());
         assert_eq!(report.gas_price_nebulai, DEFAULT_GAS_PRICE_NEBULAI);
+        assert_eq!(
+            report.public_testnet_peer_manifest_snapshot_peer_urls,
+            vec!["https://node-a.testnet.example/snapshot".to_string()]
+        );
         assert!(report.blocking_gaps.is_empty());
+
+        let mut mismatched_rpc_status = status.clone();
+        mismatched_rpc_status["public_testnet_peer_manifest_snapshot_peer_urls"] =
+            json!(["https://wrong-node.testnet.example/snapshot"]);
+        let mismatched_rpc_status_error = crate::build_runtime_surface_evidence_json_pretty(
+            crate::RuntimeSurfaceEvidenceBuildInput {
+                endpoint_url: "https://public.testnet.nebula.example/status".to_string(),
+                capture_mode: crate::RUNTIME_SURFACE_CAPTURE_MODE_EXTERNAL_PUBLIC_ENDPOINT
+                    .to_string(),
+                tls_observation: Some(crate::TlsEndpointPin {
+                    cert_sha256: "aa".repeat(32),
+                    public_key_sha256: "bb".repeat(32),
+                    not_after_unix_ms: unix_ms() + 2_592_000_000,
+                }),
+                captured_at_unix_ms: unix_ms(),
+                health_json: health.to_string(),
+                status_json: status.to_string(),
+                snapshot_json: serde_json::to_string(&snapshot).unwrap(),
+                ops_json: serde_json::to_string(&ops).unwrap(),
+                backup_json: serde_json::to_string(&backup).unwrap(),
+                rpc_status_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_status",
+                    "result": mismatched_rpc_status,
+                })
+                .to_string(),
+                rpc_ops_status_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_opsStatus",
+                    "result": state.ops_status().unwrap(),
+                })
+                .to_string(),
+                rpc_backup_manifest_json: json!({
+                    "jsonrpc": "2.0",
+                    "id": "nebula_backupManifest",
+                    "result": state.backup_manifest().unwrap(),
+                })
+                .to_string(),
+                metrics_text: state.metrics_text().unwrap(),
+            },
+        )
+        .unwrap_err();
+        match mismatched_rpc_status_error {
+            crate::AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error.contains("public_testnet_peer_manifest_snapshot_peer_urls")
+            })),
+            crate::AttestationError::MalformedJson(error) => {
+                panic!("unexpected malformed JSON: {error}")
+            }
+        }
 
         let _ = fs::remove_dir_all(dir);
     }

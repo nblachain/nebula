@@ -931,6 +931,7 @@ pub struct LiveRpcDevnetRehearsalReport {
     pub sequencer_key_rotation_count: u64,
     pub launch_package_bundle_root: String,
     pub public_testnet_peer_manifest_root: String,
+    pub public_testnet_peer_manifest_snapshot_peer_urls: Vec<String>,
     pub public_testnet_peer_manifest_snapshot_peer_count: usize,
     pub peer_manifest_sync_peer_quorum: usize,
     pub rehearsal_root: String,
@@ -1094,6 +1095,7 @@ pub struct RuntimeSurfaceEvidenceReport {
     pub public_testnet_peer_manifest_present: bool,
     pub public_testnet_peer_manifest_root: Option<String>,
     pub public_testnet_peer_manifest_launch_package_bundle_root: Option<String>,
+    pub public_testnet_peer_manifest_snapshot_peer_urls: Vec<String>,
     pub public_testnet_peer_manifest_snapshot_peer_count: usize,
     pub public_testnet_peer_manifest_sync_peer_quorum: Option<usize>,
     pub latest_height: u64,
@@ -2899,6 +2901,9 @@ fn prove_live_rpc_devnet_rehearsal_with_bindings(
         sequencer_key_rotation_count: live_value_u64(status, "sequencer_key_rotation_count")?,
         launch_package_bundle_root: follower_binding.launch_package_bundle_root,
         public_testnet_peer_manifest_root: reported_peer_manifest_root,
+        public_testnet_peer_manifest_snapshot_peer_urls: runtime_surface_report
+            .public_testnet_peer_manifest_snapshot_peer_urls
+            .clone(),
         public_testnet_peer_manifest_snapshot_peer_count: runtime_surface_report
             .public_testnet_peer_manifest_snapshot_peer_count,
         peer_manifest_sync_peer_quorum: reported_peer_manifest_quorum,
@@ -3597,6 +3602,32 @@ fn verify_runtime_surface_evidence(
         .get("public_testnet_peer_manifest_launch_package_bundle_root")
         .and_then(Value::as_str)
         .map(str::to_string);
+    let public_testnet_peer_manifest_snapshot_peer_urls = match evidence
+        .status
+        .get("public_testnet_peer_manifest_snapshot_peer_urls")
+    {
+        Some(Value::Array(values)) => values
+            .iter()
+            .enumerate()
+            .filter_map(|(index, value)| match value.as_str() {
+                Some(url) => Some(url.to_string()),
+                None => {
+                    errors.push(format!(
+                        "status.public_testnet_peer_manifest_snapshot_peer_urls[{index}] must be a string"
+                    ));
+                    None
+                }
+            })
+            .collect::<Vec<_>>(),
+        Some(_) => {
+            errors.push(
+                "status.public_testnet_peer_manifest_snapshot_peer_urls must be an array"
+                    .to_string(),
+            );
+            Vec::new()
+        }
+        None => Vec::new(),
+    };
     let public_testnet_peer_manifest_snapshot_peer_count = evidence
         .status
         .get("public_testnet_peer_manifest_snapshot_peer_count")
@@ -3669,11 +3700,34 @@ fn verify_runtime_surface_evidence(
                     .to_string(),
             );
         }
+        if public_testnet_peer_manifest_snapshot_peer_urls.is_empty() {
+            errors.push(
+                "status.public_testnet_peer_manifest_snapshot_peer_urls must be non-empty when manifest is present"
+                    .to_string(),
+            );
+        }
+        if public_testnet_peer_manifest_snapshot_peer_count
+            != public_testnet_peer_manifest_snapshot_peer_urls.len()
+        {
+            errors.push(format!(
+                "status.public_testnet_peer_manifest_snapshot_peer_count expected {} from snapshot peer URLs but got {}",
+                public_testnet_peer_manifest_snapshot_peer_urls.len(),
+                public_testnet_peer_manifest_snapshot_peer_count
+            ));
+        }
         if public_testnet_peer_manifest_sync_peer_quorum.is_none() {
             errors.push(
                 "status.public_testnet_peer_manifest_sync_peer_quorum must be a number when manifest is present"
                     .to_string(),
             );
+        }
+        if let Some(quorum) = public_testnet_peer_manifest_sync_peer_quorum {
+            if quorum > public_testnet_peer_manifest_snapshot_peer_urls.len() {
+                errors.push(format!(
+                    "status.public_testnet_peer_manifest_sync_peer_quorum {quorum} exceeds usable snapshot peer count {}",
+                    public_testnet_peer_manifest_snapshot_peer_urls.len()
+                ));
+            }
         }
     }
 
@@ -3724,6 +3778,7 @@ fn verify_runtime_surface_evidence(
         public_testnet_peer_manifest_present,
         public_testnet_peer_manifest_root,
         public_testnet_peer_manifest_launch_package_bundle_root,
+        public_testnet_peer_manifest_snapshot_peer_urls,
         public_testnet_peer_manifest_snapshot_peer_count,
         public_testnet_peer_manifest_sync_peer_quorum,
         latest_height: latest.height,
@@ -6884,6 +6939,15 @@ pub fn verify_public_testnet_launch_readiness_jsons(
             live_runtime_surface.public_testnet_peer_manifest_snapshot_peer_count
         ));
     }
+    if live_runtime_surface.public_testnet_peer_manifest_snapshot_peer_urls
+        != live_rehearsal.public_testnet_peer_manifest_snapshot_peer_urls
+    {
+        errors.push(format!(
+            "live_rpc_devnet_runtime_surface.public_testnet_peer_manifest_snapshot_peer_urls expected {:?} but got {:?}",
+            live_rehearsal.public_testnet_peer_manifest_snapshot_peer_urls,
+            live_runtime_surface.public_testnet_peer_manifest_snapshot_peer_urls
+        ));
+    }
     if live_runtime_surface.latest_height != live_rehearsal.latest_height {
         errors.push(format!(
             "live_rpc_devnet_runtime_surface.latest_height expected {} but got {}",
@@ -7100,13 +7164,31 @@ pub fn verify_live_rpc_devnet_rehearsal_json(
                 .to_string(),
         );
     }
+    if report
+        .public_testnet_peer_manifest_snapshot_peer_urls
+        .is_empty()
+    {
+        errors.push(
+            "live_rpc_devnet_rehearsal.public_testnet_peer_manifest_snapshot_peer_urls must be non-empty"
+                .to_string(),
+        );
+    }
+    if report.public_testnet_peer_manifest_snapshot_peer_count
+        != report.public_testnet_peer_manifest_snapshot_peer_urls.len()
+    {
+        errors.push(format!(
+            "live_rpc_devnet_rehearsal.public_testnet_peer_manifest_snapshot_peer_count expected {} from snapshot peer URLs but got {}",
+            report.public_testnet_peer_manifest_snapshot_peer_urls.len(),
+            report.public_testnet_peer_manifest_snapshot_peer_count
+        ));
+    }
     if report.peer_manifest_sync_peer_quorum
-        > report.public_testnet_peer_manifest_snapshot_peer_count
+        > report.public_testnet_peer_manifest_snapshot_peer_urls.len()
     {
         errors.push(format!(
             "live_rpc_devnet_rehearsal.peer_manifest_sync_peer_quorum {} exceeds usable snapshot peer count {}",
             report.peer_manifest_sync_peer_quorum,
-            report.public_testnet_peer_manifest_snapshot_peer_count
+            report.public_testnet_peer_manifest_snapshot_peer_urls.len()
         ));
     }
     if !report.sync_quorum_met {
@@ -8114,6 +8196,7 @@ fn live_rpc_devnet_rehearsal_root(report: &LiveRpcDevnetRehearsalReport) -> Stri
         "sequencer_key_rotation_count": report.sequencer_key_rotation_count,
         "launch_package_bundle_root": report.launch_package_bundle_root,
         "public_testnet_peer_manifest_root": report.public_testnet_peer_manifest_root,
+        "public_testnet_peer_manifest_snapshot_peer_urls": report.public_testnet_peer_manifest_snapshot_peer_urls,
         "public_testnet_peer_manifest_snapshot_peer_count": report.public_testnet_peer_manifest_snapshot_peer_count,
         "peer_manifest_sync_peer_quorum": report.peer_manifest_sync_peer_quorum,
     }))
@@ -8287,6 +8370,7 @@ const RUNTIME_STATUS_DURABLE_FIELDS: &[&str] = &[
     "public_testnet_peer_manifest_present",
     "public_testnet_peer_manifest_root",
     "public_testnet_peer_manifest_launch_package_bundle_root",
+    "public_testnet_peer_manifest_snapshot_peer_urls",
     "public_testnet_peer_manifest_snapshot_peer_count",
     "public_testnet_peer_manifest_sync_peer_quorum",
     "sync_quorum_met",
@@ -13154,6 +13238,53 @@ mod public_launch {
     ) -> Result<String, AttestationError> {
         let mut evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(runtime_surface_json)
             .expect("runtime surface evidence parses");
+        let mut urls = evidence
+            .status
+            .get("public_testnet_peer_manifest_snapshot_peer_urls")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        while urls.len() < count {
+            urls.push(format!(
+                "https://extra-peer-{}.testnet.nebula.example/snapshot",
+                urls.len()
+            ));
+        }
+        urls.truncate(count);
+        set_runtime_surface_peer_manifest_snapshot_peers(&mut evidence, urls)?;
+        evidence.root = runtime_surface_evidence_root(&evidence);
+        let output = serde_json::to_string_pretty(&evidence)
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+        verify_runtime_surface_evidence_json(&output)?;
+        Ok(output)
+    }
+
+    fn runtime_surface_with_peer_manifest_snapshot_peer_urls(
+        runtime_surface_json: &str,
+        urls: Vec<String>,
+    ) -> Result<String, AttestationError> {
+        let mut evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(runtime_surface_json)
+            .expect("runtime surface evidence parses");
+        set_runtime_surface_peer_manifest_snapshot_peers(&mut evidence, urls)?;
+        evidence.root = runtime_surface_evidence_root(&evidence);
+        let output = serde_json::to_string_pretty(&evidence)
+            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
+        verify_runtime_surface_evidence_json(&output)?;
+        Ok(output)
+    }
+
+    fn set_runtime_surface_peer_manifest_snapshot_peers(
+        evidence: &mut RuntimeSurfaceEvidence,
+        urls: Vec<String>,
+    ) -> Result<(), AttestationError> {
+        let count = urls.len();
+        evidence.status["public_testnet_peer_manifest_snapshot_peer_urls"] = json!(urls);
         evidence.status["public_testnet_peer_manifest_snapshot_peer_count"] = json!(count);
         evidence.health["public_testnet_peer_manifest_snapshot_peer_count"] = json!(count);
 
@@ -13192,29 +13323,7 @@ mod public_launch {
             "nebula_public_testnet_peer_manifest_snapshot_peer_count",
             count as u128,
         );
-        evidence.root = runtime_surface_evidence_root(&evidence);
-        let output = serde_json::to_string_pretty(&evidence)
-            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
-        verify_runtime_surface_evidence_json(&output)?;
-        Ok(output)
-    }
-
-    fn runtime_surface_with_peer_manifest_snapshot_peer_urls(
-        runtime_surface_json: &str,
-        urls: Vec<String>,
-    ) -> Result<String, AttestationError> {
-        let mut evidence = serde_json::from_str::<RuntimeSurfaceEvidence>(runtime_surface_json)
-            .expect("runtime surface evidence parses");
-        evidence.status["public_testnet_peer_manifest_snapshot_peer_urls"] = json!(urls);
-        match evidence.rpc_status.get_mut("result") {
-            Some(result) => *result = evidence.status.clone(),
-            None => evidence.rpc_status = evidence.status.clone(),
-        }
-        evidence.root = runtime_surface_evidence_root(&evidence);
-        let output = serde_json::to_string_pretty(&evidence)
-            .map_err(|error| AttestationError::MalformedJson(error.to_string()))?;
-        verify_runtime_surface_evidence_json(&output)?;
-        Ok(output)
+        Ok(())
     }
 
     fn runtime_surface_with_economics_counters(
@@ -17393,8 +17502,18 @@ mod public_launch {
             expected_live_snapshot_peer_count
         );
         assert_eq!(
+            live_rehearsal_report
+                .public_testnet_peer_manifest_snapshot_peer_urls
+                .len(),
+            expected_live_snapshot_peer_count
+        );
+        assert_eq!(
             live_runtime_surface_report.public_testnet_peer_manifest_snapshot_peer_count,
             expected_live_snapshot_peer_count
+        );
+        assert_eq!(
+            live_runtime_surface_report.public_testnet_peer_manifest_snapshot_peer_urls,
+            live_rehearsal_report.public_testnet_peer_manifest_snapshot_peer_urls
         );
         assert_eq!(
             readiness.public_testnet_launch_certificate_root,
@@ -17522,6 +17641,42 @@ mod public_launch {
             AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
                 error.starts_with(
                     "live_rpc_devnet_rehearsal.public_testnet_peer_manifest_snapshot_peer_count expected ",
+                )
+            })),
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+
+        let mut wrong_peer_url_rehearsal = live_rehearsal_report.clone();
+        wrong_peer_url_rehearsal.public_testnet_peer_manifest_snapshot_peer_urls[0]
+            .push_str("?forged=1");
+        wrong_peer_url_rehearsal.rehearsal_root =
+            live_rpc_devnet_rehearsal_root(&wrong_peer_url_rehearsal);
+        let wrong_peer_url_rehearsal =
+            serde_json::to_string_pretty(&wrong_peer_url_rehearsal).unwrap();
+        let wrong_peer_url_ready_error = verify_public_testnet_launch_readiness_jsons(
+            &external_certificate,
+            &observer_confirmation,
+            &external_runtime_surface,
+            &peer_manifest,
+            &wrong_peer_url_rehearsal,
+            &runtime_surface,
+            &join_confirmation,
+            &join,
+            &activation,
+            &bundle,
+            &deployment,
+            &public_status,
+            &public_probe,
+            &validators,
+            &handoff,
+            &acceptance,
+            &genesis,
+        )
+        .unwrap_err();
+        match wrong_peer_url_ready_error {
+            AttestationError::Invalid(errors) => assert!(errors.iter().any(|error| {
+                error.starts_with(
+                    "live_rpc_devnet_runtime_surface.public_testnet_peer_manifest_snapshot_peer_urls expected ",
                 )
             })),
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),

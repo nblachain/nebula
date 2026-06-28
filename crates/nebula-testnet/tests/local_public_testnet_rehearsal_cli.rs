@@ -703,6 +703,17 @@ fn prove_live_rpc_devnet_with_launch_artifacts_binds_rehearsal_to_bundle() {
         report["public_testnet_peer_manifest_snapshot_peer_count"].as_u64(),
         Some(expected_snapshot_peer_count)
     );
+    assert_eq!(
+        report["public_testnet_peer_manifest_snapshot_peer_urls"],
+        runtime_surface_evidence["status"]["public_testnet_peer_manifest_snapshot_peer_urls"]
+    );
+    assert_eq!(
+        report["public_testnet_peer_manifest_snapshot_peer_urls"]
+            .as_array()
+            .expect("rehearsal peer URLs")
+            .len(),
+        expected_snapshot_peer_count as usize
+    );
     assert_eq!(runtime_surface_evidence["capture_mode"], "loopback-devnet");
     assert_eq!(
         runtime_surface_evidence["root"],
