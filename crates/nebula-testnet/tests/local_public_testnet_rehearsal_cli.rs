@@ -1178,8 +1178,68 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
         live_surface_report["public_testnet_peer_manifest_sync_peer_quorum"]
     );
     assert_eq!(
+        readiness_report["live_rpc_devnet_block_millis"],
+        live_rehearsal_report["block_millis"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_sub_second_blocks"],
+        live_rehearsal_report["sub_second_blocks"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_produced_block_count"],
+        live_rehearsal_report["produced_block_count"]
+    );
+    assert_eq!(
         readiness_report["live_rpc_devnet_latest_height"],
         live_rehearsal_report["latest_height"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_sync_quorum_met"],
+        live_rehearsal_report["sync_quorum_met"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_sync_successful_peer_count"],
+        live_rehearsal_report["sync_successful_peer_count"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_sync_import_count"],
+        live_rehearsal_report["sync_import_count"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_sync_last_import_height"],
+        live_rehearsal_report["sync_last_import_height"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_sync_quorum_height"],
+        live_rehearsal_report["sync_quorum_height"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_bridge_deposit_count"],
+        live_rehearsal_report["bridge_deposit_count"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_withdrawal_request_count"],
+        live_rehearsal_report["withdrawal_request_count"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_finalized_withdrawal_count"],
+        live_rehearsal_report["finalized_withdrawal_count"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_bridge_replay_cache_count"],
+        live_rehearsal_report["bridge_replay_cache_count"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_bridge_deposited_nxmr_units"],
+        live_rehearsal_report["bridge_deposited_nxmr_units"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_account_nxmr_units"],
+        live_rehearsal_report["account_nxmr_units"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_withdrawal_reserved_nxmr_units"],
+        live_rehearsal_report["withdrawal_reserved_nxmr_units"]
     );
     assert_eq!(
         readiness_report["live_rpc_devnet_total_nxmr_fees_units"],
@@ -1192,6 +1252,18 @@ fn public_testnet_launch_readiness_cli_verifies_external_runtime_surface() {
     assert_eq!(
         readiness_report["live_rpc_devnet_validator_reward_nebulai"],
         live_surface_report["validator_reward_nebulai"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_bridge_custody_reconciled"],
+        live_rehearsal_report["bridge_custody_reconciled"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_nxmr_custody_deficit_units"],
+        live_rehearsal_report["nxmr_custody_deficit_units"]
+    );
+    assert_eq!(
+        readiness_report["live_rpc_devnet_sequencer_key_rotation_count"],
+        live_rehearsal_report["sequencer_key_rotation_count"]
     );
 
     fs::remove_dir_all(&dir).expect("remove temp rehearsal dir");

@@ -307,9 +307,11 @@ evidence is absent or stale.
     sequencer/follower loopback RPC addresses, peer-manifest root, sync quorum,
     latest height, economics counters, and usable peer count. The verified
     loopback runtime-surface evidence must match the rehearsal report's root,
-    loopback capture mode, usable peer URLs, usable peer count, sync quorum,
-    latest height, and economics counters, and the final readiness root carries
-    those live rehearsal details beside the external public endpoint details.
+    loopback capture mode, usable peer URLs, usable peer count, block timing,
+    sync quorum/import counters, latest height, bridge custody/withdrawal
+    counters, sequencer-rotation count, and economics counters, and the final
+    readiness root carries those live rehearsal details beside the external
+    public endpoint details.
     External and live runtime-surface captures must fall
     inside the deployment attestation validity window, public observer
     confirmations must be observed inside that same window, and the launch
@@ -1255,8 +1257,9 @@ root.
 Final public launch readiness replays that certificate against external-public
 runtime-surface evidence and the live RPC devnet rehearsal. Its readiness root
 also carries the live loopback runtime-surface capture mode, runtime-surface
-root, usable peer URLs, usable peer count, sync quorum, latest height,
-`total_nxmr_fees_units`, `buyback_pool_nebulai`, and
+root, usable peer URLs, usable peer count, sync quorum/import counters, latest
+height, sub-second block timing, bridge custody/withdrawal counters,
+sequencer-rotation count, `total_nxmr_fees_units`, `buyback_pool_nebulai`, and
 `validator_reward_nebulai`, plus deployment generation/expiry, public observer
 observation time, external runtime capture time, and live rehearsal runtime
 capture time, so the emitted public-ready artifact shows what was advertised

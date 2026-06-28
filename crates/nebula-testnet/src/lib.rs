@@ -867,10 +867,28 @@ pub struct PublicTestnetLaunchReadinessReport {
     pub live_rpc_devnet_peer_manifest_snapshot_peer_urls: Vec<String>,
     pub live_rpc_devnet_peer_manifest_snapshot_peer_count: usize,
     pub live_rpc_devnet_peer_manifest_sync_peer_quorum: usize,
+    pub live_rpc_devnet_block_millis: u64,
+    pub live_rpc_devnet_sub_second_blocks: bool,
+    pub live_rpc_devnet_produced_block_count: u64,
     pub live_rpc_devnet_latest_height: u64,
+    pub live_rpc_devnet_sync_quorum_met: bool,
+    pub live_rpc_devnet_sync_successful_peer_count: u64,
+    pub live_rpc_devnet_sync_import_count: u64,
+    pub live_rpc_devnet_sync_last_import_height: u64,
+    pub live_rpc_devnet_sync_quorum_height: u64,
+    pub live_rpc_devnet_bridge_deposit_count: u64,
+    pub live_rpc_devnet_withdrawal_request_count: u64,
+    pub live_rpc_devnet_finalized_withdrawal_count: u64,
+    pub live_rpc_devnet_bridge_replay_cache_count: u64,
+    pub live_rpc_devnet_bridge_deposited_nxmr_units: u128,
+    pub live_rpc_devnet_account_nxmr_units: u128,
+    pub live_rpc_devnet_withdrawal_reserved_nxmr_units: u128,
     pub live_rpc_devnet_total_nxmr_fees_units: u128,
     pub live_rpc_devnet_buyback_pool_nebulai: u128,
     pub live_rpc_devnet_validator_reward_nebulai: u128,
+    pub live_rpc_devnet_bridge_custody_reconciled: bool,
+    pub live_rpc_devnet_nxmr_custody_deficit_units: u128,
+    pub live_rpc_devnet_sequencer_key_rotation_count: u64,
     pub validator_set_root: String,
     pub genesis_root: String,
     pub endpoint_url: String,
@@ -7248,10 +7266,30 @@ pub fn verify_public_testnet_launch_readiness_jsons(
         live_rpc_devnet_peer_manifest_sync_peer_quorum: live_runtime_surface
             .public_testnet_peer_manifest_sync_peer_quorum
             .expect("final readiness requires live runtime surface peer quorum"),
+        live_rpc_devnet_block_millis: live_rehearsal.block_millis,
+        live_rpc_devnet_sub_second_blocks: live_rehearsal.sub_second_blocks,
+        live_rpc_devnet_produced_block_count: live_rehearsal.produced_block_count,
         live_rpc_devnet_latest_height: live_runtime_surface.latest_height,
+        live_rpc_devnet_sync_quorum_met: live_rehearsal.sync_quorum_met,
+        live_rpc_devnet_sync_successful_peer_count: live_rehearsal.sync_successful_peer_count,
+        live_rpc_devnet_sync_import_count: live_rehearsal.sync_import_count,
+        live_rpc_devnet_sync_last_import_height: live_rehearsal.sync_last_import_height,
+        live_rpc_devnet_sync_quorum_height: live_rehearsal.sync_quorum_height,
+        live_rpc_devnet_bridge_deposit_count: live_rehearsal.bridge_deposit_count,
+        live_rpc_devnet_withdrawal_request_count: live_rehearsal.withdrawal_request_count,
+        live_rpc_devnet_finalized_withdrawal_count: live_rehearsal.finalized_withdrawal_count,
+        live_rpc_devnet_bridge_replay_cache_count: live_rehearsal.bridge_replay_cache_count,
+        live_rpc_devnet_bridge_deposited_nxmr_units: live_rehearsal.bridge_deposited_nxmr_units,
+        live_rpc_devnet_account_nxmr_units: live_rehearsal.account_nxmr_units,
+        live_rpc_devnet_withdrawal_reserved_nxmr_units: live_rehearsal
+            .withdrawal_reserved_nxmr_units,
         live_rpc_devnet_total_nxmr_fees_units: live_runtime_surface.total_nxmr_fees_units,
         live_rpc_devnet_buyback_pool_nebulai: live_runtime_surface.buyback_pool_nebulai,
         live_rpc_devnet_validator_reward_nebulai: live_runtime_surface.validator_reward_nebulai,
+        live_rpc_devnet_bridge_custody_reconciled: live_rehearsal.bridge_custody_reconciled,
+        live_rpc_devnet_nxmr_custody_deficit_units: live_rehearsal.nxmr_custody_deficit_units,
+        live_rpc_devnet_sequencer_key_rotation_count: live_rehearsal
+            .sequencer_key_rotation_count,
         validator_set_root: certificate.validator_set_root,
         genesis_root: certificate.genesis_root,
         endpoint_url: certificate.endpoint_url,
@@ -12897,10 +12935,28 @@ fn public_testnet_launch_readiness_root(report: &PublicTestnetLaunchReadinessRep
         "live_rpc_devnet_peer_manifest_snapshot_peer_urls": report.live_rpc_devnet_peer_manifest_snapshot_peer_urls,
         "live_rpc_devnet_peer_manifest_snapshot_peer_count": report.live_rpc_devnet_peer_manifest_snapshot_peer_count,
         "live_rpc_devnet_peer_manifest_sync_peer_quorum": report.live_rpc_devnet_peer_manifest_sync_peer_quorum,
+        "live_rpc_devnet_block_millis": report.live_rpc_devnet_block_millis,
+        "live_rpc_devnet_sub_second_blocks": report.live_rpc_devnet_sub_second_blocks,
+        "live_rpc_devnet_produced_block_count": report.live_rpc_devnet_produced_block_count,
         "live_rpc_devnet_latest_height": report.live_rpc_devnet_latest_height,
+        "live_rpc_devnet_sync_quorum_met": report.live_rpc_devnet_sync_quorum_met,
+        "live_rpc_devnet_sync_successful_peer_count": report.live_rpc_devnet_sync_successful_peer_count,
+        "live_rpc_devnet_sync_import_count": report.live_rpc_devnet_sync_import_count,
+        "live_rpc_devnet_sync_last_import_height": report.live_rpc_devnet_sync_last_import_height,
+        "live_rpc_devnet_sync_quorum_height": report.live_rpc_devnet_sync_quorum_height,
+        "live_rpc_devnet_bridge_deposit_count": report.live_rpc_devnet_bridge_deposit_count,
+        "live_rpc_devnet_withdrawal_request_count": report.live_rpc_devnet_withdrawal_request_count,
+        "live_rpc_devnet_finalized_withdrawal_count": report.live_rpc_devnet_finalized_withdrawal_count,
+        "live_rpc_devnet_bridge_replay_cache_count": report.live_rpc_devnet_bridge_replay_cache_count,
+        "live_rpc_devnet_bridge_deposited_nxmr_units": report.live_rpc_devnet_bridge_deposited_nxmr_units,
+        "live_rpc_devnet_account_nxmr_units": report.live_rpc_devnet_account_nxmr_units,
+        "live_rpc_devnet_withdrawal_reserved_nxmr_units": report.live_rpc_devnet_withdrawal_reserved_nxmr_units,
         "live_rpc_devnet_total_nxmr_fees_units": report.live_rpc_devnet_total_nxmr_fees_units,
         "live_rpc_devnet_buyback_pool_nebulai": report.live_rpc_devnet_buyback_pool_nebulai,
         "live_rpc_devnet_validator_reward_nebulai": report.live_rpc_devnet_validator_reward_nebulai,
+        "live_rpc_devnet_bridge_custody_reconciled": report.live_rpc_devnet_bridge_custody_reconciled,
+        "live_rpc_devnet_nxmr_custody_deficit_units": report.live_rpc_devnet_nxmr_custody_deficit_units,
+        "live_rpc_devnet_sequencer_key_rotation_count": report.live_rpc_devnet_sequencer_key_rotation_count,
         "validator_set_root": report.validator_set_root,
         "genesis_root": report.genesis_root,
         "endpoint_url": report.endpoint_url,
@@ -18321,8 +18377,68 @@ mod public_launch {
             live_runtime_surface_report.public_testnet_peer_manifest_sync_peer_quorum
         );
         assert_eq!(
+            readiness.live_rpc_devnet_block_millis,
+            live_rehearsal_report.block_millis
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_sub_second_blocks,
+            live_rehearsal_report.sub_second_blocks
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_produced_block_count,
+            live_rehearsal_report.produced_block_count
+        );
+        assert_eq!(
             readiness.live_rpc_devnet_latest_height,
             live_rehearsal_report.latest_height
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_sync_quorum_met,
+            live_rehearsal_report.sync_quorum_met
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_sync_successful_peer_count,
+            live_rehearsal_report.sync_successful_peer_count
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_sync_import_count,
+            live_rehearsal_report.sync_import_count
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_sync_last_import_height,
+            live_rehearsal_report.sync_last_import_height
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_sync_quorum_height,
+            live_rehearsal_report.sync_quorum_height
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_bridge_deposit_count,
+            live_rehearsal_report.bridge_deposit_count
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_withdrawal_request_count,
+            live_rehearsal_report.withdrawal_request_count
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_finalized_withdrawal_count,
+            live_rehearsal_report.finalized_withdrawal_count
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_bridge_replay_cache_count,
+            live_rehearsal_report.bridge_replay_cache_count
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_bridge_deposited_nxmr_units,
+            live_rehearsal_report.bridge_deposited_nxmr_units
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_account_nxmr_units,
+            live_rehearsal_report.account_nxmr_units
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_withdrawal_reserved_nxmr_units,
+            live_rehearsal_report.withdrawal_reserved_nxmr_units
         );
         assert_eq!(
             readiness.live_rpc_devnet_total_nxmr_fees_units,
@@ -18335,6 +18451,18 @@ mod public_launch {
         assert_eq!(
             readiness.live_rpc_devnet_validator_reward_nebulai,
             live_runtime_surface_report.validator_reward_nebulai
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_bridge_custody_reconciled,
+            live_rehearsal_report.bridge_custody_reconciled
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_nxmr_custody_deficit_units,
+            live_rehearsal_report.nxmr_custody_deficit_units
+        );
+        assert_eq!(
+            readiness.live_rpc_devnet_sequencer_key_rotation_count,
+            live_rehearsal_report.sequencer_key_rotation_count
         );
 
         let pre_deployment_live_runtime_surface = runtime_surface_with_captured_at(
