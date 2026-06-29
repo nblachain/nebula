@@ -1,6 +1,6 @@
 # <img src="https://raw.githubusercontent.com/pompompur1nn/nebula/master/docs/assets/nebula-logo.svg" alt="" align="left" width="40" height="40"> Nebula
 
-Nebula is a privacy-preserving Monero Layer 2 testnet runtime for fast private execution, deterministic public launch gates, and operator-owned deployment evidence.
+Nebula is a privacy-preserving Monero Layer 2.
 
 
 ## Documentation
