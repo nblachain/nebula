@@ -9,9 +9,7 @@ Nebula is a privacy-preserving Monero Layer 2.
 
 ## What is Nebula?
 
-Nebula keeps Monero as the external settlement and privacy asset while adding a validator-operated execution layer with sub-second local block production. The runtime is written in Rust and focuses on a public-testnet path where every launch claim is backed by reproducible artifacts: public status, public probes, deployment attestations, validator manifests, launch packages, observer confirmations, runtime-surface evidence, and launch certificates.
-
-The local tooling can prove the full launch mechanics without pretending that a public network is already live. A clean local rehearsal reports `local_testnet_ready: true` while keeping `public_launch_ready: false` until real public deployment evidence is supplied.
+to do
 
 ## Why Nebula?
 
