@@ -15,17 +15,8 @@ The local tooling can prove the full launch mechanics without pretending that a 
 
 ## Why Nebula?
 
-- **Private Monero-native settlement:** Bridge policy centers on Monero custody evidence, `nXMR` accounting, replay protection, observer quorum, and withdrawal finalization.
-
-- **Fast local execution:** The Base-style devnet path runs a sequencer with deterministic sub-second blocks while followers import verified Ed25519-signed snapshots.
-
-- **Evidence-first public launch:** Public status, probe, deployment, validator, handoff, acceptance, genesis, launch-package, observer, runtime-surface, and certificate roots must agree before a launch can be called ready.
-
-- **Operator-safe RPC surfaces:** Public RPC, private admin RPC, rate limits, request-size limits, bounded mempool admission, backup status, metrics, and runtime health are separated and verified.
-
 - **Hybrid gas trial:** `NBLA` is the native gas and validator-accounting token, while bridged Monero appears as `nXMR` for gas paths that exercise buyback and reward accounting.
-
-- **Launch-blocked by default:** Missing live deployment attestation is treated as a correct blocker, not a warning to wave away.
+- adding more
 
 ## Quick Start
 
