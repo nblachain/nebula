@@ -9,12 +9,17 @@ Nebula is a privacy-preserving Monero Layer 2.
 
 ## What is Nebula?
 
-to do
+Nebula is a Monero layer 2 (L2) chain that adds accounting features, and other features that do not exist on the Monero chain whilst maintaining privacy. 
 
 ## Why Nebula?
 
 - **Hybrid gas trial:** `NBLA` is the native gas and validator-accounting token, while bridged Monero appears as `nXMR` for gas paths that exercise buyback and reward accounting.
-- adding more
+
+- **Speed**: Unlike other chains, NBLA is built to be fast, and private by default.
+
+- **Quantum-resistant design**: In the future, NBLA will achieve full postquantum security avoiding a "Q-day" where unbridged funds are lost or burnt. Unlike chains such as Ethereum, Bitcoin, and Solana, we are designing Nebula to be futureproof to such attacks.
+
+- **Privacy**: By inheriting Monero's privacy infrastructure, Nebula will be private by default. Privacy onchain shouldnt be opt-in.
 
 ## Quick Start
 
@@ -41,21 +46,6 @@ Run the test suite:
 ```bash
 cargo test --manifest-path crates/nebula-testnet/Cargo.toml -- --test-threads=1
 ```
-
-## Public Testnet Status
-
-The expected local readiness shape is:
-
-```json
-{
-  "local_testnet_ready": true,
-  "public_launch_ready": false,
-  "public_launch_level": "public-launch-blocked",
-  "blocking_gaps": ["public-launch-deployment-attestation"]
-}
-```
-
-That state is intentional for an operator workspace that has not supplied live public deployment evidence. See the [runtime guide](https://github.com/pompompur1nn/nebula/blob/master/crates/nebula-testnet/README.md) for the full public-testnet architecture and launch sequence.
 
 ## License
 
