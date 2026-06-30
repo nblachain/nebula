@@ -5,7 +5,7 @@ Nebula is a privacy-preserving Monero Layer 2.
 
 ## Documentation
 
-**[Read the testnet runtime guide](https://github.com/pompompur1nn/nebula/blob/master/crates/nebula-testnet/README.md)**, review the [public testnet readiness runbook](https://github.com/pompompur1nn/nebula/blob/master/docs/PUBLIC_TESTNET_READINESS_RUNBOOK.md), or inspect the [Nebula CI checks](https://github.com/pompompur1nn/nebula/actions/workflows/nebula.yml).
+Soon to be added to https://nebulacha.in.
 
 ## What is Nebula?
 
