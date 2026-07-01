@@ -1,0 +1,48 @@
+services:
+  sequencer:
+    build: .
+    command:
+      - --sequencer
+      - --sequencer-secret-key-file
+      - /run/secrets/sequencer_key
+      - --admin-rpc-bind
+      - 127.0.0.1:9945
+      - --admin-token-file
+      - /run/secrets/admin_token
+    ports:
+      - "9944:9944"
+    volumes:
+      - sequencer-data:/data
+    secrets:
+      - sequencer_key
+      - admin_token
+    restart: unless-stopped
+
+  follower:
+    build: .
+    command:
+      - --follower
+      - --bootstrap-rpc
+      - http://sequencer:9944
+      - --sync-rpc
+      - http://sequencer:9944
+      - --sync-peer-quorum
+      - "1"
+    ports:
+      - "9954:9944"
+    volumes:
+      - follower-data:/data
+    depends_on:
+      sequencer:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  sequencer-data:
+  follower-data:
+
+secrets:
+  sequencer_key:
+    file: ./secrets/sequencer_key
+  admin_token:
+    file: ./secrets/admin_token
