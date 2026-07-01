@@ -1,13 +1,3 @@
-//! A minimal HTTP/HTTPS JSON-RPC client for `monerod` and `monero-wallet-rpc`, implementing the
-//! [`MoneroRpc`](crate::verify::MoneroRpc) transport an observer uses to verify deposits.
-//!
-//! It parses the two responses Nebula's bridge needs: `check_tx_key` (a view-key amount proof) and
-//! `get_transactions` (to recover a transaction's `tx_extra`). Both plain `http://` (for a trusted
-//! loopback link) and `https://` are supported; for `https://` the server certificate is validated
-//! against the webpki root store, and — when the client is configured with certificate pins — the
-//! leaf certificate's SHA-256 must additionally match one of the pins, giving MITM-resistant
-//! transport ("TLS pins") to a remote wallet-rpc / daemon.
-
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
@@ -26,24 +16,16 @@ use sha2::{Digest, Sha256};
 use crate::verify::{MoneroRpc, WalletTxProof};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
-/// Cap on a Monero RPC response body so a hostile/broken endpoint cannot exhaust memory.
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
-/// An HTTP/HTTPS client for a monerod daemon and a monero-wallet-rpc instance.
 #[derive(Debug, Clone)]
 pub struct HttpMoneroRpc {
-    /// Base URL of the wallet-rpc instance, e.g. `http://127.0.0.1:18083` or `https://host:18083`.
     pub wallet_rpc_url: String,
-    /// Base URL of the monerod daemon, e.g. `http://127.0.0.1:18081`.
     pub daemon_rpc_url: String,
-    /// Optional SHA-256 pins of the leaf TLS certificate(s). When non-empty, an `https://` endpoint
-    /// must present a leaf certificate whose SHA-256 matches one of these, on top of normal webpki
-    /// chain validation.
     cert_pins: Vec<[u8; 32]>,
 }
 
 impl HttpMoneroRpc {
-    /// Construct a client from a wallet-rpc and a daemon base URL (trailing slashes are trimmed).
     pub fn new(wallet_rpc_url: impl Into<String>, daemon_rpc_url: impl Into<String>) -> Self {
         let trim = |url: String| url.trim_end_matches('/').to_string();
         HttpMoneroRpc {
@@ -53,14 +35,11 @@ impl HttpMoneroRpc {
         }
     }
 
-    /// Pin the leaf TLS certificate(s) by SHA-256. Any `https://` request must then present a leaf
-    /// certificate whose SHA-256 is in this set. Ignored for plain `http://`.
     pub fn with_cert_pins(mut self, pins: Vec<[u8; 32]>) -> Self {
         self.cert_pins = pins;
         self
     }
 
-    /// Convenience: parse hex-encoded SHA-256 certificate pins.
     pub fn with_cert_pins_hex(self, pins_hex: &[String]) -> Result<Self, String> {
         let mut pins = Vec::with_capacity(pins_hex.len());
         for pin in pins_hex {
@@ -241,7 +220,6 @@ impl MoneroRpc for HttpMoneroRpc {
     }
 }
 
-/// A parsed monero RPC URL.
 struct ParsedUrl {
     https: bool,
     host: String,
@@ -250,7 +228,6 @@ struct ParsedUrl {
     path: String,
 }
 
-/// Parse `http[s]://host[:port]/maybe/path`.
 fn parse_url(url: &str) -> Result<ParsedUrl, String> {
     let (https, rest) = if let Some(rest) = url.strip_prefix("https://") {
         (true, rest)
@@ -285,7 +262,6 @@ fn parse_url(url: &str) -> Result<ParsedUrl, String> {
     })
 }
 
-/// POST over plain HTTP/1.1.
 fn plain_request(parsed: &ParsedUrl, request: &str) -> Result<String, String> {
     let mut stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
         .map_err(|error| format!("connect to monero rpc {}: {error}", parsed.authority))?;
@@ -297,7 +273,6 @@ fn plain_request(parsed: &ParsedUrl, request: &str) -> Result<String, String> {
     read_response_limited(&mut stream)
 }
 
-/// Read an HTTP response, bounded by [`MAX_RESPONSE_BYTES`].
 fn read_response_limited(reader: &mut impl Read) -> Result<String, String> {
     let mut buffer = Vec::new();
     reader
@@ -310,8 +285,6 @@ fn read_response_limited(reader: &mut impl Read) -> Result<String, String> {
     String::from_utf8(buffer).map_err(|error| format!("monero rpc response is not UTF-8: {error}"))
 }
 
-/// A server-certificate verifier that performs standard webpki chain validation and, when pins are
-/// configured, additionally requires the leaf certificate's SHA-256 to match one of them.
 #[derive(Debug)]
 struct PinnedServerCertVerifier {
     inner: Arc<WebPkiServerVerifier>,
@@ -375,7 +348,6 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
 
-    /// Spin up a one-shot localhost HTTP server that replies to a single request with `body`.
     fn stub_server(body: &'static str) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub server");
         let addr = listener.local_addr().expect("stub server addr");
@@ -416,7 +388,6 @@ mod tests {
 
     #[test]
     fn parses_tx_extra_from_get_transactions() {
-        // monerod nests the decoded transaction (including `extra`) as a stringified JSON field.
         let inner = r#"{\"version\":2,\"extra\":[1,2,3,4]}"#;
         let body: &'static str = Box::leak(
             format!(r#"{{"status":"OK","txs":[{{"as_json":"{inner}"}}]}}"#).into_boxed_str(),
@@ -435,7 +406,6 @@ mod tests {
         assert_eq!(http.port, 18081);
         assert_eq!(http.path, "/get_transactions");
 
-        // https is now accepted and defaults to port 443 when unspecified.
         let https = parse_url("https://wallet.example/json_rpc").unwrap();
         assert!(https.https);
         assert_eq!(https.host, "wallet.example");
@@ -446,7 +416,6 @@ mod tests {
         assert_eq!(https_port.port, 18083);
         assert_eq!(https_port.path, "/");
 
-        // An unsupported scheme is rejected.
         assert!(parse_url("ftp://example.com").is_err());
     }
 
@@ -458,7 +427,6 @@ mod tests {
             .unwrap();
         assert_eq!(rpc.cert_pins.len(), 1);
         assert_eq!(rpc.cert_pins[0], [0xabu8; 32]);
-        // A malformed pin is rejected.
         assert!(HttpMoneroRpc::new("https://a", "https://b")
             .with_cert_pins_hex(&["nothex".to_string()])
             .is_err());

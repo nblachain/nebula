@@ -1,57 +1,31 @@
-//! Deposit verification logic for Nebula's partially-trusted bridge.
-//!
-//! A bridge observer must not credit `nXMR` on the say-so of a signed JSON root; it must confirm
-//! the Monero deposit actually happened. This module holds the pure decision function
-//! [`verify_deposit`] — given a wallet-rpc payment proof and the transaction's `tx_extra`, it
-//! decides whether a claimed deposit is real — plus the [`MoneroRpc`] transport trait the runtime
-//! injects (a real monerod/wallet-rpc client, or a stub in tests). The decision logic is fully
-//! testable without a live Monero node.
-
 use core::fmt;
 
 use crate::tx_extra::{nebula_account_binding, parse_tx_extra};
 use crate::{parse_address, MoneroAddressInfo};
 
-/// A monero-wallet-rpc `check_tx_key` result: proof that a transaction paid a given address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletTxProof {
-    /// Atomic units (piconero) the checked address received in this transaction.
     pub received_atomic: u128,
-    /// Number of confirmations the transaction has (0 while in the mempool).
     pub confirmations: u64,
-    /// Whether the transaction is still unconfirmed in the mempool.
     pub in_pool: bool,
 }
 
-/// What an observer claims about a deposit, to be checked against Monero.
 #[derive(Debug, Clone)]
 pub struct DepositClaim<'a> {
-    /// The atomic amount (piconero) the deposit claims to have paid the bridge.
     pub expected_atomic: u128,
-    /// The minimum confirmations required before the deposit may be credited.
     pub min_confirmations: u64,
-    /// The Monero address the deposit must have paid (the bridge custody address).
     pub bridge_address: &'a str,
-    /// If set, the deposit's `tx_extra` must bind exactly this Nebula account id.
     pub required_account_binding: Option<&'a str>,
 }
 
-/// Why a claimed deposit failed verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DepositRejection {
-    /// The configured bridge address is not a valid Monero address.
     InvalidBridgeAddress(String),
-    /// The transaction is still in the mempool (unconfirmed).
     StillInPool,
-    /// The transaction does not yet have enough confirmations.
     InsufficientConfirmations { have: u64, need: u64 },
-    /// The amount paid does not equal the claimed amount.
     AmountMismatch { received: u128, expected: u128 },
-    /// The `tx_extra` blob could not be parsed.
     TxExtra(String),
-    /// An account binding was required but the `tx_extra` carried none.
     MissingAccountBinding { expected: String },
-    /// The `tx_extra` bound a different Nebula account than claimed.
     AccountBindingMismatch { found: String, expected: String },
 }
 
@@ -92,8 +66,6 @@ impl fmt::Display for DepositRejection {
 
 impl std::error::Error for DepositRejection {}
 
-/// Decide whether a claimed deposit is real, given the wallet-rpc payment proof and the
-/// transaction's `tx_extra`. Returns the validated bridge-address classification on success.
 pub fn verify_deposit(
     claim: &DepositClaim,
     proof: &WalletTxProof,
@@ -141,12 +113,7 @@ pub fn verify_deposit(
     Ok(bridge_info)
 }
 
-/// Transport an observer uses to fetch deposit evidence from a Monero node. The runtime injects a
-/// real monerod/wallet-rpc client; tests inject a stub. Keeping this a trait lets the
-/// verification logic stay node-independent and unit-testable.
 pub trait MoneroRpc {
-    /// Prove, via a transaction secret key, how much `address` received in transaction `txid`.
-    /// Mirrors monero-wallet-rpc `check_tx_key`.
     fn check_tx_key(
         &self,
         txid: &str,
@@ -154,19 +121,11 @@ pub trait MoneroRpc {
         address: &str,
     ) -> Result<WalletTxProof, String>;
 
-    /// Fetch the raw `tx_extra` bytes of transaction `txid`. Mirrors monerod `get_transactions`.
     fn tx_extra(&self, txid: &str) -> Result<Vec<u8>, String>;
 
-    /// The custody wallet's confirmed, unlocked balance in atomic units (piconero). Mirrors
-    /// monero-wallet-rpc `get_balance` (`unlocked_balance`). Lets the runtime prove the bridge
-    /// multisig actually holds the XMR backing outstanding nXMR, rather than trusting the ledger's
-    /// internal double-entry alone.
     fn custody_unlocked_balance(&self) -> Result<u128, String>;
 }
 
-/// Verify a deposit by fetching its proof and `tx_extra` through `rpc`, then applying
-/// [`verify_deposit`]. Transport errors are surfaced as `Err(String)`; a well-formed but invalid
-/// deposit is surfaced as `Ok(Err(DepositRejection))`.
 pub fn verify_deposit_via<R: MoneroRpc + ?Sized>(
     rpc: &R,
     txid: &str,
@@ -183,7 +142,6 @@ mod tests {
     use super::*;
     use crate::tx_extra::encode_nebula_account_binding;
 
-    // A valid testnet bridge address (prefix 53), generated deterministically.
     const BRIDGE: &str =
         "9spAQWBqoTv3rZwuSi5uqJ3rZwuSi5uqJ3rZwuSi5uqJ3rZwuSi5uqJ3rZwuSi5uqJ3rZwuSi5uqJ3rZwuSi5uqJ2vgNZzY";
 
@@ -266,21 +224,18 @@ mod tests {
     #[test]
     fn enforces_account_binding() {
         let account = "nblahybrid-ed25519-mldsa65:abc";
-        // Correct binding accepted.
         assert!(verify_deposit(
             &claim(Some(account)),
             &good_proof(),
             &extra_binding(account)
         )
         .is_ok());
-        // Missing binding rejected.
         assert_eq!(
             verify_deposit(&claim(Some(account)), &good_proof(), &[]),
             Err(DepositRejection::MissingAccountBinding {
                 expected: account.to_string()
             })
         );
-        // Wrong binding rejected.
         let other = extra_binding("nblasomeoneelse");
         assert_eq!(
             verify_deposit(&claim(Some(account)), &good_proof(), &other),

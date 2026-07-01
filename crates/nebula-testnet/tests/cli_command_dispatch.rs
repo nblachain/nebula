@@ -1,16 +1,5 @@
-//! Smoke tests for the `nebula-testnet` binary's command dispatch.
-//!
-//! The CLI is a hand-rolled `args.iter().any(...)` flag dispatch in `bin/nebula-testnet.rs`.
-//! The privacy + Monero-bridge commands added during the pillars sprint
-//! (`--build-shield`, `--build-unshield`, `--build-shielded-transfer`,
-//! `--verify-monero-deposit`, and `--generate-account --scheme`) were previously only
-//! exercised by CI, so a refactor of the dispatch could silently break them. These tests
-//! run the real binary and assert each command is routed to its handler and emits the
-//! expected output, locking the dispatch behaviour in place.
-
 use std::process::Command;
 
-/// Run the built binary with `args`, returning `(combined stdout+stderr, success)`.
 fn run(args: &[&str]) -> (String, bool) {
     let output = Command::new(env!("CARGO_BIN_EXE_nebula-testnet"))
         .args(args)
@@ -90,7 +79,6 @@ fn build_shielded_transfer_dispatches_and_proves() {
 
 #[test]
 fn build_unshield_rejects_an_opening_that_does_not_match_the_commitment() {
-    // amount/blinding that do not open the supplied commitment must be caught locally.
     let (out, ok) = run(&[
         "--build-unshield",
         "--commitment",
@@ -111,8 +99,6 @@ fn build_unshield_rejects_an_opening_that_does_not_match_the_commitment() {
 
 #[test]
 fn verify_monero_deposit_dispatches_and_reports_transport_failure() {
-    // Port 1 is unreachable, so the verifier should surface a transport error and exit 1
-    // (rather than, say, falling through to a different command's handler).
     let (out, ok) = run(&[
         "--verify-monero-deposit",
         "--wallet-rpc-url",

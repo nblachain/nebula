@@ -137,10 +137,8 @@ fn public_rpc_methods_remain_callable_without_admin_token() {
 #[test]
 fn shielded_rpc_methods_are_dispatched() {
     let (rpc_addr, _admin_addr) = start_rpc_server_with_admin(Some(ADMIN_TOKEN));
-    // The read method is dispatched and reports an empty shielded pool.
     let notes_response = rpc_call(&rpc_addr, "nebula_shieldedNotes", json!({}));
     assert_eq!(rpc_result(&notes_response)["shielded_notes"], json!([]));
-    // The write methods are dispatched (they reach param parsing, not "unknown method").
     let shield = rpc_call(&rpc_addr, "nebula_shield", json!({ "account": "x" }));
     assert_rpc_error_contains(&shield, "amount");
     let transfer = rpc_call(&rpc_addr, "nebula_shieldedTransfer", json!({}));
@@ -161,7 +159,6 @@ fn shielded_lifecycle_round_trips_over_rpc() {
         json!({ "account": account.clone() }),
     ));
 
-    // Shield 100 NBLA; blindings are chosen so a later 70/30 split balances exactly.
     let b1 = Blinding::from_bytes([1u8; 32]);
     let b2 = Blinding::from_bytes([2u8; 32]);
     let b_in = b1.add(&b2);
@@ -180,7 +177,6 @@ fn shielded_lifecycle_round_trips_over_rpc() {
     );
     assert_eq!(rpc_result(&shield)["commitment"], note);
 
-    // Confidential split 100 -> 70 + 30; the node verifies range + balance proofs, learning no amount.
     let (c1, p1) = prove_amount(70, &b1);
     let (c2, p2) = prove_amount(30, &b2);
     let transfer = rpc_call(
@@ -196,7 +192,6 @@ fn shielded_lifecycle_round_trips_over_rpc() {
     );
     assert_eq!(rpc_result(&transfer)["shielded"], true);
 
-    // Unshield the 70 note back to transparent NBLA.
     let unshield = rpc_call(
         &rpc_addr,
         "nebula_unshield",
@@ -209,7 +204,6 @@ fn shielded_lifecycle_round_trips_over_rpc() {
     );
     assert_eq!(rpc_result(&unshield)["unshielded"], true);
 
-    // The pool now holds only the 30 note.
     let notes_response = rpc_call(&rpc_addr, "nebula_shieldedNotes", json!({}));
     let notes = rpc_result(&notes_response)["shielded_notes"]
         .as_array()

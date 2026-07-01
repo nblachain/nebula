@@ -13138,9 +13138,6 @@ fn verify_signature_material(
     expected_public_key: &str,
     expected_signature_root: &str,
 ) {
-    // The algorithm label is derived from the (authoritative) expected key's scheme, so an
-    // Ed25519 signer keeps the historical "ed25519-<suffix>" label and a hybrid signer is required
-    // to carry the "hybrid-ed25519-mldsa65-<suffix>" label — post-quantum roots verify end-to-end.
     let expected_algorithm = attestation_algorithm(expected_public_key, algorithm_suffix);
     require_eq(
         errors,
@@ -13411,8 +13408,6 @@ fn sample_ed25519_secret_key_hex(seed: u8) -> String {
 }
 
 fn sign_root_with_secret_key(secret_key_hex: &str, signing_root: &str) -> Result<String, String> {
-    // Scheme-aware: a bare-hex secret signs classical Ed25519 (byte-identical to before), while a
-    // scheme-tagged secret (e.g. "hybrid-ed25519-mldsa65:...") produces a post-quantum signature.
     nebula_crypto::scheme_sign_root(secret_key_hex, signing_root)
 }
 
@@ -13420,27 +13415,18 @@ fn public_key_hex_for_secret_key(secret_key_hex: &str) -> Result<String, String>
     nebula_crypto::scheme_derive_public(secret_key_hex)
 }
 
-/// Derive the attestation `algorithm` label for a signer's public key as `<scheme-tag>-<suffix>`.
-/// A classical Ed25519 key yields `ed25519-<suffix>` (unchanged); a hybrid key yields
-/// `hybrid-ed25519-mldsa65-<suffix>`, so post-quantum attestation roots are labelled and verified
-/// consistently with the key that signed them.
 fn attestation_algorithm(public_key_hex: &str, suffix: &str) -> String {
     let tag =
         nebula_crypto::scheme_tag_for_public(public_key_hex, "public_key").unwrap_or("ed25519");
     format!("{tag}-{suffix}")
 }
 
-/// Validate a signing public key that may be a classical bare-hex Ed25519 key or a scheme-tagged
-/// (post-quantum / hybrid) key. The legacy error message is preserved so existing negative tests
-/// keep passing while hybrid keys are now accepted.
 fn require_signing_public_key(errors: &mut Vec<String>, label: &str, value: &str) {
     if nebula_crypto::validate_scheme_public(value, label).is_err() {
         errors.push(format!("{label} must be a 64-character hex value"));
     }
 }
 
-/// Validate a signing signature that may be classical bare-hex Ed25519 or scheme-tagged. Exact
-/// length/encoding is enforced by `scheme_verify_root`; here we only require it to be present.
 fn require_scheme_signature(errors: &mut Vec<String>, label: &str, value: &str) {
     if value.is_empty() {
         errors.push(format!("{label} must not be empty"));
@@ -15680,11 +15666,7 @@ mod public_launch {
 
     #[test]
     fn attestation_signature_material_accepts_post_quantum_hybrid_keys() {
-        // Fulfils nebulacha.in's "post-quantum attestation roots": the shared attestation verifier
-        // accepts a hybrid Ed25519 + ML-DSA-65 signature, labels it post-quantum, and rejects
-        // tampering — the same path that backs operator/observer/acceptance/activation/join
-        // evidence.
-        let seed = "11".repeat(64); // hybrid seed = 32-byte Ed25519 seed || 32-byte ML-DSA seed
+        let seed = "11".repeat(64);
         let secret = nebula_crypto::scheme_secret_from_seed(
             nebula_crypto::SchemeId::HybridEd25519MlDsa65,
             &seed,
@@ -15719,7 +15701,6 @@ mod public_launch {
             "hybrid attestation must verify: {errors:?}"
         );
 
-        // Verifying against a different root (tamper) must fail on both signature halves.
         let mut errors = Vec::new();
         let other_root = json_artifact_sha3_256("different-root");
         verify_signature_material(
@@ -15735,7 +15716,6 @@ mod public_launch {
             "a tampered hybrid attestation must be rejected"
         );
 
-        // A classical Ed25519 signer keeps the historical label (backward compatibility).
         let ed_secret = "22".repeat(32);
         let ed_public = nebula_crypto::scheme_derive_public(&ed_secret).unwrap();
         assert_eq!(
@@ -15746,7 +15726,6 @@ mod public_launch {
 
     #[test]
     fn economics_trial_requires_exact_nxmr_validator_reward() {
-        // Rate is 1 and both bps are 10_000, so expected buyback == expected nXMR reward == fees.
         let make = |nxmr_validator_reward_nebulai: u128| runtime::RuntimeSnapshotEconomics {
             included_nbla_receipt_count: 1,
             included_nxmr_receipt_count: 1,
@@ -15764,12 +15743,10 @@ mod public_launch {
             "exact reward should pass: {errors:?}"
         );
 
-        // Over-reported by 1 is rejected (the `<` -> `!=` tightening).
         let mut errors = Vec::new();
         require_public_launch_economics_trial(&mut errors, &make(1_001));
         assert!(errors.iter().any(|error| error.contains(msg)), "{errors:?}");
 
-        // Under-reported is rejected too.
         let mut errors = Vec::new();
         require_public_launch_economics_trial(&mut errors, &make(999));
         assert!(errors.iter().any(|error| error.contains(msg)), "{errors:?}");

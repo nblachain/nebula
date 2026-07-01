@@ -295,8 +295,6 @@ fn parse_u32_arg(args: &[String], name: &str, default: u32) -> u32 {
 }
 
 fn generate_account(args: &[String], wants_json: bool) {
-    // `--scheme` selects the signature scheme. Hybrid and ML-DSA-65 keys are post-quantum;
-    // Ed25519 remains the default for backward compatibility.
     let scheme = match arg_value(args, "--scheme") {
         None | Some("ed25519") => nebula_crypto::SchemeId::Ed25519,
         Some("mldsa65") => nebula_crypto::SchemeId::MlDsa65,
@@ -461,7 +459,6 @@ fn build_unshield(args: &[String], wants_json: bool) {
         process::exit(1);
     });
 
-    // Verify the opening locally so the operator catches mistakes before submitting.
     let blinding_bytes = hex::decode(&blinding_hex).unwrap_or_else(|error| {
         eprintln!("--blinding must be hex: {error}");
         process::exit(1);
@@ -541,8 +538,6 @@ fn build_shielded_transfer(args: &[String], _wants_json: bool) {
             "range_proof_hex": hex::encode(proof),
         }));
     }
-    // The caller must choose output amounts that sum to the inputs and blindings that sum to the
-    // input blindings; the runtime verifies the homomorphic balance before accepting the transfer.
     let params = serde_json::json!({ "inputs": inputs, "outputs": outputs });
     println!(
         "{}",
@@ -2272,8 +2267,6 @@ fn sign_bridge_observer_evidence(args: &[String], wants_json: bool) {
             }
         };
 
-    // Optional verify-before-sign: when a wallet-rpc URL and tx key are supplied, the observer
-    // confirms the deposit against a Monero node and refuses to vouch for an unverified deposit.
     if let Some(wallet_rpc_url) = arg_value(args, "--wallet-rpc-url") {
         let tx_key = required_bridge_arg(args, "--tx-key", wants_json);
         let bridge_address = required_bridge_arg(args, "--bridge-address", wants_json);

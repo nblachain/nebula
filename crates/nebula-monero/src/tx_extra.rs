@@ -1,14 +1,3 @@
-//! Parsing of Monero's `tx_extra` field.
-//!
-//! `tx_extra` is a flat, tag-prefixed byte blob carried by every Monero transaction. Nebula's
-//! bridge reads it for two reasons: to recover the transaction public key(s) needed for view-key
-//! amount proofs, and — experimentally — to let a deposit name its destination Nebula account by
-//! embedding a binding in the extra-nonce field (see [`nebula_account_binding`]).
-//!
-//! Tags handled: `0x00` padding, `0x01` tx public key, `0x02` extra nonce, `0x04` additional
-//! public keys. Any other tag stops parsing with [`TxExtraError::UnknownTag`], matching Monero's
-//! refusal to guess the layout of unknown records.
-
 use core::fmt;
 
 const TAG_PADDING: u8 = 0x00;
@@ -16,24 +5,16 @@ const TAG_PUBKEY: u8 = 0x01;
 const TAG_NONCE: u8 = 0x02;
 const TAG_ADDITIONAL_PUBKEYS: u8 = 0x04;
 
-/// Nonce sub-tag for an unencrypted 32-byte payment id.
 const NONCE_PAYMENT_ID: u8 = 0x00;
-/// Nonce sub-tag for an encrypted 8-byte payment id.
 const NONCE_ENCRYPTED_PAYMENT_ID: u8 = 0x01;
-/// Experimental Nebula nonce sub-tag carrying a destination account binding. Chosen outside the
-/// range of Monero's defined nonce sub-tags (0x00/0x01) to avoid collisions.
 const NEBULA_BINDING_TAG: u8 = 0xCE;
 
 const KEY_LEN: usize = 32;
 
-/// An error parsing a `tx_extra` blob.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TxExtraError {
-    /// The blob ended in the middle of a field.
     Truncated,
-    /// A record used a tag this parser does not understand.
     UnknownTag(u8),
-    /// A varint ran past the end of the blob or overflowed 64 bits.
     BadVarint,
 }
 
@@ -49,14 +30,10 @@ impl fmt::Display for TxExtraError {
 
 impl std::error::Error for TxExtraError {}
 
-/// The decoded contents of a `tx_extra` blob that Nebula cares about.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TxExtra {
-    /// The primary transaction public key, if present (tag `0x01`).
     pub tx_public_key: Option<[u8; KEY_LEN]>,
-    /// Per-output additional transaction public keys (tag `0x04`).
     pub additional_public_keys: Vec<[u8; KEY_LEN]>,
-    /// The raw extra-nonce payload, if present (tag `0x02`).
     pub nonce: Option<Vec<u8>>,
 }
 
@@ -92,7 +69,6 @@ fn read_key(data: &[u8], pos: &mut usize) -> Result<[u8; KEY_LEN], TxExtraError>
     Ok(key)
 }
 
-/// Parse a Monero `tx_extra` blob into the fields Nebula uses.
 pub fn parse_tx_extra(extra: &[u8]) -> Result<TxExtra, TxExtraError> {
     let mut out = TxExtra::default();
     let mut pos = 0usize;
@@ -101,14 +77,12 @@ pub fn parse_tx_extra(extra: &[u8]) -> Result<TxExtra, TxExtraError> {
         pos += 1;
         match tag {
             TAG_PADDING => {
-                // Padding is a run of zero bytes (typically trailing); consume them.
                 while pos < extra.len() && extra[pos] == 0 {
                     pos += 1;
                 }
             }
             TAG_PUBKEY => {
                 let key = read_key(extra, &mut pos)?;
-                // Monero keeps the first pubkey as the canonical one.
                 if out.tx_public_key.is_none() {
                     out.tx_public_key = Some(key);
                 }
@@ -132,7 +106,6 @@ pub fn parse_tx_extra(extra: &[u8]) -> Result<TxExtra, TxExtraError> {
     Ok(out)
 }
 
-/// An unencrypted 32-byte payment id carried in the extra nonce, if present.
 pub fn payment_id(nonce: &[u8]) -> Option<[u8; 32]> {
     if nonce.len() == 1 + 32 && nonce[0] == NONCE_PAYMENT_ID {
         let mut id = [0u8; 32];
@@ -143,7 +116,6 @@ pub fn payment_id(nonce: &[u8]) -> Option<[u8; 32]> {
     }
 }
 
-/// An encrypted 8-byte payment id carried in the extra nonce, if present.
 pub fn encrypted_payment_id(nonce: &[u8]) -> Option<[u8; 8]> {
     if nonce.len() == 1 + 8 && nonce[0] == NONCE_ENCRYPTED_PAYMENT_ID {
         let mut id = [0u8; 8];
@@ -154,7 +126,6 @@ pub fn encrypted_payment_id(nonce: &[u8]) -> Option<[u8; 8]> {
     }
 }
 
-/// Build an extra-nonce payload that binds a Monero deposit to a Nebula account id (experimental).
 pub fn encode_nebula_account_binding(account: &str) -> Vec<u8> {
     let mut nonce = Vec::with_capacity(1 + account.len());
     nonce.push(NEBULA_BINDING_TAG);
@@ -162,7 +133,6 @@ pub fn encode_nebula_account_binding(account: &str) -> Vec<u8> {
     nonce
 }
 
-/// Recover a Nebula account id from an extra-nonce payload, if it carries a Nebula binding.
 pub fn nebula_account_binding(nonce: &[u8]) -> Option<String> {
     match nonce.split_first() {
         Some((&NEBULA_BINDING_TAG, rest)) => String::from_utf8(rest.to_vec()).ok(),
@@ -224,7 +194,6 @@ mod tests {
     fn round_trips_nebula_account_binding() {
         let account = "nblahybrid-ed25519-mldsa65:abc123";
         let nonce = encode_nebula_account_binding(account);
-        // Wrap it in a real tx_extra nonce record and parse it back out.
         let mut extra = vec![TAG_NONCE, nonce.len() as u8];
         extra.extend_from_slice(&nonce);
         let parsed = parse_tx_extra(&extra).unwrap();
@@ -239,7 +208,6 @@ mod tests {
     #[test]
     fn rejects_unknown_tag_and_truncation() {
         assert_eq!(parse_tx_extra(&[0x77]), Err(TxExtraError::UnknownTag(0x77)));
-        // Pubkey tag with only 3 trailing bytes.
         assert_eq!(
             parse_tx_extra(&[TAG_PUBKEY, 1, 2, 3]),
             Err(TxExtraError::Truncated)
