@@ -58,12 +58,11 @@ with the mitigations Nebula implements and the residual gaps. Read alongside
   sequencer-attested (no in-block journal); chain-governed policy (fee floor, faucet rate, block/
   mempool limits) travels in the sequencer-attested config, guarded by the distinct-peer sync
   quorum rather than a separately-signed governance root; and censorship/liveness depend on the
-  single sequencer — decentralized BFT is future work. The per-block `fee_preference` stamp is
-  sequencer-signed but not cross-checked against the signed preference registry at each height
-  (the registry is current-state, not history); a compromised sequencer stamping a false
-  preference can only redenominate the validator-reward share of fees that were actually paid —
-  it is custody-neutral and non-inflationary, and preference *registration* itself requires the
-  validator's own signed, sequence-numbered authorization.
+  single sequencer — decentralized BFT is future work. Each block that stamps `nxmr` fee routing
+  must carry the producing validator's own signed, sequence-numbered fee-preference authorization
+  (verified under the launch-attested cosigner key, a key distinct from the sequencer block key),
+  and `validate_snapshot` rejects a stamp without a valid authorization — so the raw sequencer key
+  alone cannot redirect the in-kind nXMR reward.
 
 ### Network attacker (MITM on Monero or peer RPC)
 - **Monero RPC:** mitigated by TLS with optional SHA-256 leaf-certificate pinning

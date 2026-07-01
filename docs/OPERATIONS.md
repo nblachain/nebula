@@ -119,9 +119,11 @@ Validators choose the denomination of their fee revenue per the hybrid fee model
 Change it with `nebula_setValidatorFeePreference` (admin RPC): the validator signs
 `fee_preference_authorization_root(chain_id, validator_id, preference, sequence)` with its
 launch-attested cosigner key (any valid scheme key on unbound dev nodes); `sequence` must advance
-by exactly 1 per change, so an old signed authorization cannot be replayed. The active preference
-is stamped into each produced block (`fee_preference`, signed under the block root) and followers
-re-execute the in-kind split from that stamp. Read the registry with
+by exactly 1 per change, so an old signed authorization cannot be replayed. Each block that
+routes `nxmr` carries the producer's signed authorization (`fee_preference` +
+`fee_preference_authorization`, folded into the block root); `validate_snapshot` rejects a stamp
+whose authorization is missing or fails to verify under the cosigner key, so followers accept the
+in-kind split only when it is provably validator-authorized. Read the registry with
 `nebula_validatorFeePreferences` (public).
 
 ## Bridge (optional, sequencer only)

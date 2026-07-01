@@ -51,6 +51,7 @@ pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
 pub const DEFAULT_MAX_REQUESTS_PER_MINUTE: u32 = 600;
 pub const DEFAULT_MAX_ACTIVE_CONNECTIONS: usize = 512;
 pub const MAX_EVM_GAS_LIMIT: u64 = 30_000_000;
+pub const MAX_EVM_VIEW_GAS_LIMIT: u64 = 10_000_000;
 pub const DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS: usize = 32;
 pub const DEFAULT_MAX_SNAPSHOT_RESPONSE_BYTES: usize = 268_435_456;
 const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
@@ -791,6 +792,8 @@ pub struct RuntimeBlock {
     pub co_signatures: Vec<RuntimeBlockCoSignature>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fee_preference: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fee_preference_authorization: Option<RuntimeValidatorFeePreference>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3748,6 +3751,10 @@ impl NebulaRuntime {
         self.evm.storage_at(address_hex, slot_hex)
     }
 
+    pub fn evm_executor_snapshot(&self) -> nebula_evm::EvmExecutor {
+        self.evm.clone()
+    }
+
     pub fn evm_view(
         &self,
         caller_hex: &str,
@@ -3755,23 +3762,22 @@ impl NebulaRuntime {
         calldata_hex: &str,
         gas_limit: u64,
     ) -> Result<nebula_evm::EvmOutcome, String> {
-        if gas_limit == 0 || gas_limit > MAX_EVM_GAS_LIMIT {
+        if gas_limit == 0 || gas_limit > MAX_EVM_VIEW_GAS_LIMIT {
             return Err(format!(
-                "evm gas_limit must be between 1 and {MAX_EVM_GAS_LIMIT}"
+                "evm view gas_limit must be between 1 and {MAX_EVM_VIEW_GAS_LIMIT}"
             ));
         }
         let mut executor = self.evm.clone();
         executor.view(caller_hex, contract_hex, calldata_hex, gas_limit)
     }
 
-    fn evm_charge_and_fund(
-        &mut self,
+    fn evm_precheck_fee(
+        &self,
         account: &str,
-        caller_address: &str,
         value: u128,
         gas_limit: u64,
         nonce: u64,
-    ) -> Result<(), String> {
+    ) -> Result<u128, String> {
         let fee_nebulai = u128::from(gas_limit)
             .checked_mul(self.config.gas_price_nebulai)
             .ok_or_else(|| "evm fee computation overflowed".to_string())?;
@@ -3780,7 +3786,7 @@ impl NebulaRuntime {
             .ok_or_else(|| "evm debit computation overflowed".to_string())?;
         let sender = self
             .accounts
-            .get_mut(account)
+            .get(account)
             .ok_or_else(|| format!("account {account} does not exist"))?;
         if sender.nonce != nonce {
             return Err(format!(
@@ -3794,7 +3800,26 @@ impl NebulaRuntime {
                 sender.nbla_nebulai
             ));
         }
-        sender.nbla_nebulai -= debit;
+        Ok(fee_nebulai)
+    }
+
+    fn evm_commit_charge(
+        &mut self,
+        account: &str,
+        value: u128,
+        fee_nebulai: u128,
+    ) -> Result<(), String> {
+        let debit = value
+            .checked_add(fee_nebulai)
+            .ok_or_else(|| "evm debit computation overflowed".to_string())?;
+        let sender = self
+            .accounts
+            .get_mut(account)
+            .ok_or_else(|| format!("account {account} does not exist"))?;
+        sender.nbla_nebulai = sender
+            .nbla_nebulai
+            .checked_sub(debit)
+            .ok_or_else(|| "evm debit underflowed".to_string())?;
         sender.nonce = sender
             .nonce
             .checked_add(1)
@@ -3808,10 +3833,36 @@ impl NebulaRuntime {
             .nbla_nebulai
             .checked_add(fee_nebulai)
             .ok_or_else(|| "evm fee credit overflowed".to_string())?;
+        Ok(())
+    }
+
+    fn evm_execute_atomic<F>(
+        &mut self,
+        account: &str,
+        caller_address: &str,
+        value: u128,
+        gas_limit: u64,
+        nonce: u64,
+        run: F,
+    ) -> Result<nebula_evm::EvmOutcome, String>
+    where
+        F: FnOnce(&mut nebula_evm::EvmExecutor) -> Result<nebula_evm::EvmOutcome, String>,
+    {
+        let fee_nebulai = self.evm_precheck_fee(account, value, gas_limit, nonce)?;
         if value > 0 {
             self.evm.credit_balance(caller_address, value)?;
         }
-        Ok(())
+        let outcome = match run(&mut self.evm) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                if value > 0 {
+                    self.evm.debit_balance(caller_address, value)?;
+                }
+                return Err(error);
+            }
+        };
+        self.evm_commit_charge(account, value, fee_nebulai)?;
+        Ok(outcome)
     }
 
     pub fn evm_deploy(
@@ -3841,9 +3892,15 @@ impl NebulaRuntime {
         );
         verify_account_signature(account, &authorization_root, signature, "evm_signature")?;
         let caller_address = nebula_evm::evm_address_for_account(account);
-        self.evm_charge_and_fund(account, &caller_address, value, gas_limit, nonce)?;
-        self.evm
-            .deploy(&caller_address, init_code_hex, value, gas_limit)
+        let init_code = init_code_hex.to_string();
+        self.evm_execute_atomic(
+            account,
+            &caller_address,
+            value,
+            gas_limit,
+            nonce,
+            |executor| executor.deploy(&caller_address, &init_code, value, gas_limit),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3876,13 +3933,15 @@ impl NebulaRuntime {
         );
         verify_account_signature(account, &authorization_root, signature, "evm_signature")?;
         let caller_address = nebula_evm::evm_address_for_account(account);
-        self.evm_charge_and_fund(account, &caller_address, value, gas_limit, nonce)?;
-        self.evm.call(
+        let contract = contract_hex.to_string();
+        let calldata = calldata_hex.to_string();
+        self.evm_execute_atomic(
+            account,
             &caller_address,
-            contract_hex,
-            calldata_hex,
             value,
             gas_limit,
+            nonce,
+            |executor| executor.call(&caller_address, &contract, &calldata, value, gas_limit),
         )
     }
 
@@ -4762,19 +4821,23 @@ impl NebulaRuntime {
             .expect("sequencer block production must have a valid signing key")
     }
 
-    fn producer_fee_preference(&self) -> Option<String> {
+    fn producer_fee_preference(&self) -> Option<RuntimeValidatorFeePreference> {
         self.validator_fee_preferences
             .get(&self.config.validator_id)
             .filter(|entry| entry.preference == VALIDATOR_FEE_PREFERENCE_NXMR)
-            .map(|entry| entry.preference.clone())
+            .cloned()
     }
 
     pub fn try_produce_block(&mut self) -> Result<RuntimeBlock, String> {
         self.ensure_accountability_clean()?;
         let parent = self.latest_block();
         let height = parent.height + 1;
-        let fee_preference = self.producer_fee_preference();
-        let nxmr_reward_preferred = fee_preference.is_some();
+        let producer_preference = self.producer_fee_preference();
+        let nxmr_reward_preferred = producer_preference.is_some();
+        let fee_preference = producer_preference
+            .as_ref()
+            .map(|entry| entry.preference.clone());
+        let fee_preference_authorization = producer_preference;
         let mut included = Vec::new();
         let mut rejected_tx_ids = Vec::new();
 
@@ -4824,6 +4887,7 @@ impl NebulaRuntime {
             signature: String::new(),
             co_signatures: Vec::new(),
             fee_preference,
+            fee_preference_authorization,
         };
         self.finalize_block(&mut block)?;
         self.blocks.push(block.clone());
@@ -4845,6 +4909,7 @@ impl NebulaRuntime {
             signature: String::new(),
             co_signatures: Vec::new(),
             fee_preference: None,
+            fee_preference_authorization: None,
         };
         self.finalize_block(&mut block)?;
         Ok(block)
@@ -6525,10 +6590,17 @@ fn dispatch_json_rpc_method(
             let caller = required_str_param(&params, "caller")?;
             let contract = required_str_param(&params, "contract")?;
             let calldata = optional_str_param(&params, "calldata")?.unwrap_or_default();
-            let gas_limit =
-                optional_u64_param(&params, "gas_limit")?.unwrap_or(nebula_evm::DEFAULT_GAS_LIMIT);
-            let runtime = state.runtime.lock().expect("runtime mutex poisoned");
-            let outcome = runtime.evm_view(&caller, &contract, &calldata, gas_limit)?;
+            let gas_limit = optional_u64_param(&params, "gas_limit")?
+                .unwrap_or(nebula_evm::DEFAULT_GAS_LIMIT)
+                .min(MAX_EVM_VIEW_GAS_LIMIT);
+            nebula_evm::validate_address_hex(&caller, "caller")?;
+            nebula_evm::validate_address_hex(&contract, "contract")?;
+            nebula_evm::validate_calldata_hex(&calldata, "calldata")?;
+            let mut executor = {
+                let runtime = state.runtime.lock().expect("runtime mutex poisoned");
+                runtime.evm_executor_snapshot()
+            };
+            let outcome = executor.view(&caller, &contract, &calldata, gas_limit)?;
             Ok(json!(outcome))
         }
         "nebula_evmDeploy" => {
@@ -7302,6 +7374,53 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
                     block.height
                 ));
             }
+            let authorization = block.fee_preference_authorization.as_ref().ok_or_else(|| {
+                format!(
+                    "block {} stamps a fee_preference but carries no signed authorization",
+                    block.height
+                )
+            })?;
+            if &authorization.preference != fee_preference {
+                return Err(format!(
+                    "block {} fee_preference {fee_preference} does not match its authorization preference {}",
+                    block.height, authorization.preference
+                ));
+            }
+            validate_fee_preference_key(
+                snapshot.config.launch_binding.as_ref(),
+                &block.producer,
+                &authorization.public_key_hex,
+            )
+            .map_err(|error| {
+                format!(
+                    "block {} fee_preference authorization key rejected: {error}",
+                    block.height
+                )
+            })?;
+            let authorization_root = fee_preference_authorization_root(
+                &snapshot.config.chain_id,
+                &block.producer,
+                &authorization.preference,
+                authorization.sequence,
+            );
+            verify_scheme_evidence_signature(
+                &authorization.public_key_hex,
+                "fee_preference_public_key",
+                &authorization_root,
+                &authorization.signature,
+                "fee_preference_signature",
+            )
+            .map_err(|error| {
+                format!(
+                    "block {} fee_preference authorization is not proven: {error}",
+                    block.height
+                )
+            })?;
+        } else if block.fee_preference_authorization.is_some() {
+            return Err(format!(
+                "block {} carries a fee_preference authorization without a fee_preference stamp",
+                block.height
+            ));
         }
         if block.block_hash != block_root(block) {
             return Err(format!("block {} block_hash does not match", block.height));
@@ -10006,6 +10125,9 @@ fn block_root(block: &RuntimeBlock) -> String {
     if let Some(fee_preference) = &block.fee_preference {
         value["fee_preference"] = json!(fee_preference);
     }
+    if let Some(authorization) = &block.fee_preference_authorization {
+        value["fee_preference_authorization"] = json!(authorization);
+    }
     stable_runtime_root(&value)
 }
 
@@ -12299,6 +12421,36 @@ mod tests {
         signed_fee_preference(&mut runtime, VALIDATOR_FEE_PREFERENCE_NBLA, 2).unwrap();
         let block = runtime.produce_block();
         assert!(block.fee_preference.is_none());
+    }
+
+    #[test]
+    fn validate_snapshot_rejects_block_fee_preference_without_valid_authorization() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        runtime.faucet(&test_account_id()).unwrap();
+        runtime.produce_block();
+
+        // A sequencer-signed block that stamps nxmr routing but carries no
+        // cosigner-signed authorization must be rejected.
+        let mut snapshot = runtime.export_snapshot();
+        snapshot.blocks.last_mut().unwrap().fee_preference =
+            Some(VALIDATOR_FEE_PREFERENCE_NXMR.to_string());
+        refresh_default_signed_snapshot_roots(&mut snapshot);
+        let error = validate_snapshot(&snapshot).unwrap_err();
+        assert!(error.contains("no signed authorization"), "{error}");
+
+        // A forged authorization with a bad signature must also be rejected.
+        let mut snapshot = runtime.export_snapshot();
+        let block = snapshot.blocks.last_mut().unwrap();
+        block.fee_preference = Some(VALIDATOR_FEE_PREFERENCE_NXMR.to_string());
+        block.fee_preference_authorization = Some(RuntimeValidatorFeePreference {
+            preference: VALIDATOR_FEE_PREFERENCE_NXMR.to_string(),
+            sequence: 1,
+            public_key_hex: test_public_key_hex(0x3d),
+            signature: sign_root_with_seed(0x3d, &"22".repeat(32)),
+        });
+        refresh_default_signed_snapshot_roots(&mut snapshot);
+        let error = validate_snapshot(&snapshot).unwrap_err();
+        assert!(error.contains("not proven"), "{error}");
     }
 
     #[test]
