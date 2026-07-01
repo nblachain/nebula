@@ -229,6 +229,21 @@ pub struct RuntimeBridgeObserverKey {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct RuntimeValidatorCosignerKey {
+    pub validator_id: String,
+    pub public_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeBlockCoSignature {
+    pub validator_id: String,
+    pub public_key: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeValidatorRewardAccount {
     pub validator_id: String,
     pub operator_id: String,
@@ -258,6 +273,8 @@ pub struct RuntimeLaunchBinding {
     pub validator_reward_accounts: Vec<RuntimeValidatorRewardAccount>,
     pub bridge_operator_keys: Vec<RuntimeBridgeOperatorKey>,
     pub bridge_observer_keys: Vec<RuntimeBridgeObserverKey>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub validator_cosigner_keys: Vec<RuntimeValidatorCosignerKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quorum_policy: Option<RuntimeQuorumPolicy>,
 }
@@ -268,6 +285,8 @@ pub struct RuntimeQuorumPolicy {
     pub bridge_deposit_observer: usize,
     pub bridge_withdrawal_operator: usize,
     pub sequencer_rotation_operator: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_cosigner: Option<usize>,
 }
 
 impl RuntimeLaunchBinding {
@@ -374,6 +393,37 @@ impl RuntimeLaunchBinding {
                 self.bridge_operator_keys.len(),
                 "sequencer_rotation_operator",
             )?;
+            if let Some(block_cosigner) = policy.block_cosigner {
+                validate_role_quorum(
+                    block_cosigner,
+                    1,
+                    self.validator_cosigner_keys.len(),
+                    "block_cosigner",
+                )?;
+            }
+        }
+        let mut cosigner_ids = BTreeSet::new();
+        let mut cosigner_keys = BTreeSet::new();
+        for (index, cosigner) in self.validator_cosigner_keys.iter().enumerate() {
+            if cosigner.validator_id.trim().is_empty() {
+                return Err(format!(
+                    "validator_cosigner_keys[{index}].validator_id must not be empty"
+                ));
+            }
+            nebula_crypto::validate_scheme_public(
+                &cosigner.public_key,
+                &format!("validator_cosigner_keys[{index}].public_key"),
+            )?;
+            if !cosigner_ids.insert(cosigner.validator_id.to_ascii_lowercase()) {
+                return Err(format!(
+                    "validator_cosigner_keys[{index}].validator_id is duplicated"
+                ));
+            }
+            if !cosigner_keys.insert(cosigner.public_key.to_ascii_lowercase()) {
+                return Err(format!(
+                    "validator_cosigner_keys[{index}].public_key is duplicated"
+                ));
+            }
         }
         Ok(())
     }
@@ -654,6 +704,8 @@ pub struct RuntimeBlock {
     pub state_root: String,
     pub block_hash: String,
     pub signature: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub co_signatures: Vec<RuntimeBlockCoSignature>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3968,6 +4020,7 @@ impl NebulaRuntime {
             state_root,
             block_hash: String::new(),
             signature: String::new(),
+            co_signatures: Vec::new(),
         };
         self.finalize_block(&mut block)?;
         self.blocks.push(block.clone());
@@ -3987,6 +4040,7 @@ impl NebulaRuntime {
             state_root: self.state_root(),
             block_hash: String::new(),
             signature: String::new(),
+            co_signatures: Vec::new(),
         };
         self.finalize_block(&mut block)?;
         Ok(block)
@@ -5984,6 +6038,16 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
         let expected_public_key_hex = sequencer_public_key_for_height(snapshot, block.height);
         verify_block_signature(block, &expected_public_key_hex)
             .map_err(|error| format!("block {} signature rejected: {error}", block.height))?;
+        if block.height > 0 {
+            let required_cosigners = block_cosigner_quorum(snapshot.config.launch_binding.as_ref());
+            let roster = snapshot
+                .config
+                .launch_binding
+                .as_ref()
+                .map(|binding| binding.validator_cosigner_keys.as_slice())
+                .unwrap_or(&[]);
+            verify_block_cosigner_quorum(block, roster, required_cosigners)?;
+        }
         for tx in &block.transactions {
             validate_transaction_shape(tx)?;
         }
@@ -6147,6 +6211,84 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
             nxmr_custody.nxmr_custody_deficit_units
         ));
     }
+    reexecute_replayable_state(snapshot)?;
+    Ok(())
+}
+
+fn reexecute_replayable_state(snapshot: &RuntimeSnapshot) -> Result<(), String> {
+    let mut nxmr_ledger: BTreeMap<String, i128> = BTreeMap::new();
+    let mut validator_points_total: u128 = 0;
+
+    fn credit(ledger: &mut BTreeMap<String, i128>, id: &str, delta: i128) -> Result<(), String> {
+        let entry = ledger.entry(id.to_string()).or_insert(0);
+        *entry = entry
+            .checked_add(delta)
+            .ok_or_else(|| format!("re-executed nXMR ledger for {id} overflowed"))?;
+        Ok(())
+    }
+
+    for deposit in snapshot.bridge_deposits.values() {
+        let amount = i128::try_from(deposit.amount_nxmr_units)
+            .map_err(|_| "bridge deposit nXMR exceeds the re-execution range".to_string())?;
+        credit(&mut nxmr_ledger, &deposit.account, amount)?;
+    }
+    for withdrawal in snapshot.withdrawals.values() {
+        if withdrawal.status == "reverted" {
+            continue;
+        }
+        let amount = i128::try_from(withdrawal.amount_nxmr_units)
+            .map_err(|_| "withdrawal nXMR exceeds the re-execution range".to_string())?;
+        credit(&mut nxmr_ledger, &withdrawal.account, -amount)?;
+    }
+    for block in &snapshot.blocks {
+        for tx in &block.transactions {
+            let fee_asset = tx.fee_asset_kind()?;
+            let quote = quote_hybrid_fee(
+                fee_asset,
+                tx.gas_units,
+                tx.gas_price_nebulai,
+                Some(TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT),
+            )
+            .map_err(|error| format!("re-execution fee quote rejected: {error:?}"))?;
+            validator_points_total = validator_points_total
+                .checked_add(quote.validator_points)
+                .ok_or_else(|| "re-executed validator points overflowed".to_string())?;
+            if fee_asset == FeeAsset::NXmr {
+                let paid = i128::try_from(quote.paid_amount_units)
+                    .map_err(|_| "nXMR fee exceeds the re-execution range".to_string())?;
+                credit(&mut nxmr_ledger, &tx.from, -paid)?;
+            }
+        }
+    }
+
+    for (id, account) in &snapshot.accounts {
+        let expected = *nxmr_ledger.get(id).unwrap_or(&0);
+        let got = i128::try_from(account.nxmr_units)
+            .map_err(|_| format!("account {id} nxmr_units exceeds the re-execution range"))?;
+        if got != expected {
+            return Err(format!(
+                "re-executed nXMR for account {id} expected {expected} but state has {got}"
+            ));
+        }
+    }
+    for (id, amount) in &nxmr_ledger {
+        if *amount != 0 && !snapshot.accounts.contains_key(id) {
+            return Err(format!(
+                "re-executed nXMR for account {id} is {amount} but no account entry exists"
+            ));
+        }
+    }
+
+    let points_in_state = snapshot.accounts.values().try_fold(0u128, |sum, account| {
+        sum.checked_add(account.validator_points)
+            .ok_or_else(|| "validator points state sum overflowed".to_string())
+    })?;
+    if points_in_state != validator_points_total {
+        return Err(format!(
+            "re-executed validator points expected {validator_points_total} but state has {points_in_state}"
+        ));
+    }
+
     Ok(())
 }
 
@@ -7158,6 +7300,87 @@ fn rotation_quorum(binding: Option<&RuntimeLaunchBinding>) -> usize {
         .map_or(MIN_SEQUENCER_ROTATION_OPERATOR_QUORUM, |p| {
             p.sequencer_rotation_operator
         })
+}
+
+fn block_cosigner_quorum(binding: Option<&RuntimeLaunchBinding>) -> usize {
+    binding
+        .and_then(|b| b.quorum_policy.as_ref())
+        .and_then(|p| p.block_cosigner)
+        .unwrap_or(0)
+}
+
+pub fn cosign_block(
+    validator_id: &str,
+    cosigner_secret_key_hex: &str,
+    block: &RuntimeBlock,
+) -> Result<RuntimeBlockCoSignature, String> {
+    let public_key = nebula_crypto::scheme_normalize_public(
+        &nebula_crypto::scheme_derive_public(cosigner_secret_key_hex)?,
+        "cosigner_public_key",
+    )?;
+    let signature = nebula_crypto::scheme_sign_root(cosigner_secret_key_hex, &block.block_hash)?;
+    Ok(RuntimeBlockCoSignature {
+        validator_id: validator_id.to_string(),
+        public_key,
+        signature,
+    })
+}
+
+fn verify_block_cosigner_quorum(
+    block: &RuntimeBlock,
+    roster: &[RuntimeValidatorCosignerKey],
+    quorum: usize,
+) -> Result<(), String> {
+    let mut roster_keys = BTreeMap::<&str, &str>::new();
+    for key in roster {
+        roster_keys.insert(key.validator_id.as_str(), key.public_key.as_str());
+    }
+    let mut seen_ids = BTreeSet::new();
+    let mut seen_keys = BTreeSet::new();
+    for cosig in &block.co_signatures {
+        let expected_key = roster_keys
+            .get(cosig.validator_id.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "block {} co-signer {} is not in the validator cosigner roster",
+                    block.height, cosig.validator_id
+                )
+            })?;
+        if !cosig.public_key.eq_ignore_ascii_case(expected_key) {
+            return Err(format!(
+                "block {} co-signer {} public_key does not match the roster",
+                block.height, cosig.validator_id
+            ));
+        }
+        if !seen_ids.insert(cosig.validator_id.to_ascii_lowercase()) {
+            return Err(format!(
+                "block {} has a duplicate co-signer {}",
+                block.height, cosig.validator_id
+            ));
+        }
+        if !seen_keys.insert(cosig.public_key.to_ascii_lowercase()) {
+            return Err(format!(
+                "block {} has a duplicate co-signer public_key",
+                block.height
+            ));
+        }
+        nebula_crypto::scheme_verify_root(&cosig.public_key, &block.block_hash, &cosig.signature)
+            .map_err(|error| {
+            format!(
+                "block {} co-signer {} signature rejected: {error}",
+                block.height, cosig.validator_id
+            )
+        })?;
+    }
+    if seen_ids.len() < quorum {
+        return Err(format!(
+            "block {} has {} valid co-signatures but needs {}",
+            block.height,
+            seen_ids.len(),
+            quorum
+        ));
+    }
+    Ok(())
 }
 
 fn validate_identity_root_quorum(
@@ -8265,6 +8488,7 @@ mod tests {
                     public_key: test_public_key_hex(0xb2),
                 },
             ],
+            validator_cosigner_keys: Vec::new(),
             quorum_policy: None,
         }
     }
@@ -8872,6 +9096,111 @@ mod tests {
         assert!(validate_snapshot(&snapshot)
             .unwrap_err()
             .contains("nXMR custody mismatch"));
+    }
+
+    #[test]
+    fn reexec_rejects_nxmr_moved_between_accounts() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let account = test_account_id();
+        let mut deposit = test_bridge_deposit('5', '6');
+        deposit.account = account.clone();
+        runtime.observe_bridge_deposit(deposit).unwrap();
+        runtime.produce_block();
+        let mut snapshot = runtime.export_snapshot();
+        assert!(validate_snapshot(&snapshot).is_ok());
+
+        snapshot.accounts.get_mut(&account).unwrap().nxmr_units -= 1_000;
+        snapshot
+            .accounts
+            .entry("bob".to_string())
+            .or_insert_with(RuntimeAccount::empty)
+            .nxmr_units = 1_000;
+        refresh_default_signed_snapshot_roots(&mut snapshot);
+
+        let error = validate_snapshot(&snapshot).unwrap_err();
+        assert!(error.contains("re-executed nXMR"), "{error}");
+    }
+
+    #[test]
+    fn reexec_rejects_inflated_validator_points() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        runtime.faucet("alice").unwrap();
+        runtime.produce_block();
+        let mut snapshot = runtime.export_snapshot();
+        assert!(validate_snapshot(&snapshot).is_ok());
+
+        snapshot.accounts.get_mut("alice").unwrap().validator_points += 1;
+        refresh_default_signed_snapshot_roots(&mut snapshot);
+
+        let error = validate_snapshot(&snapshot).unwrap_err();
+        assert!(error.contains("re-executed validator points"), "{error}");
+    }
+
+    #[test]
+    fn co_signatures_do_not_change_block_hash() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        runtime.faucet("alice").unwrap();
+        let block = runtime.produce_block();
+        let hash_before = block_root(&block);
+        let mut with_cosig = block.clone();
+        with_cosig.co_signatures = vec![cosign_block("v", &"31".repeat(32), &block).unwrap()];
+        assert_eq!(
+            block_root(&with_cosig),
+            hash_before,
+            "co-signatures must not change the block hash"
+        );
+    }
+
+    #[test]
+    fn block_cosigner_quorum_verifies_and_rejects() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        runtime.faucet("alice").unwrap();
+        let block = runtime.produce_block();
+
+        let sec_a = "41".repeat(32);
+        let sec_b = "42".repeat(32);
+        let cosig_a = cosign_block("validator-a", &sec_a, &block).unwrap();
+        let cosig_b = cosign_block("validator-b", &sec_b, &block).unwrap();
+        let roster = vec![
+            RuntimeValidatorCosignerKey {
+                validator_id: "validator-a".to_string(),
+                public_key: cosig_a.public_key.clone(),
+            },
+            RuntimeValidatorCosignerKey {
+                validator_id: "validator-b".to_string(),
+                public_key: cosig_b.public_key.clone(),
+            },
+        ];
+
+        let mut both = block.clone();
+        both.co_signatures = vec![cosig_a.clone(), cosig_b.clone()];
+        assert!(verify_block_cosigner_quorum(&both, &roster, 2).is_ok());
+
+        let mut one = block.clone();
+        one.co_signatures = vec![cosig_a.clone()];
+        assert!(verify_block_cosigner_quorum(&one, &roster, 2).is_err());
+
+        let mut dup = block.clone();
+        dup.co_signatures = vec![cosig_a.clone(), cosig_a.clone()];
+        assert!(verify_block_cosigner_quorum(&dup, &roster, 2).is_err());
+
+        let mut unknown = block.clone();
+        let cosig_c = cosign_block("validator-c", &"43".repeat(32), &block).unwrap();
+        unknown.co_signatures = vec![cosig_a.clone(), cosig_c];
+        assert!(verify_block_cosigner_quorum(&unknown, &roster, 2).is_err());
+
+        let mut wrong_hash = block.clone();
+        wrong_hash.block_hash = "0".repeat(64);
+        let bad = cosign_block("validator-b", &sec_b, &wrong_hash).unwrap();
+        let mut tampered = block.clone();
+        tampered.co_signatures = vec![
+            cosig_a.clone(),
+            RuntimeBlockCoSignature {
+                signature: bad.signature,
+                ..cosig_b.clone()
+            },
+        ];
+        assert!(verify_block_cosigner_quorum(&tampered, &roster, 2).is_err());
     }
 
     #[test]
@@ -11044,6 +11373,7 @@ mod tests {
             bridge_deposit_observer: 3,
             bridge_withdrawal_operator: 4,
             sequencer_rotation_operator: 5,
+            block_cosigner: None,
         });
         assert_eq!(observer_quorum(Some(&binding)), 3);
         assert_eq!(operator_quorum(Some(&binding)), 4);
