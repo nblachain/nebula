@@ -49,6 +49,29 @@ jobs:
           public_rpc_rejects_admin_methods_even_with_valid_token
           -- --exact --nocapture
 
+      - name: Test EVM execution crate
+        run: cargo test -p nebula-evm
+
+      - name: Smoke EVM runtime integration (fees, atomicity, snapshot round-trip)
+        run: >
+          cargo test -p nebula-testnet --lib evm_ -- --nocapture
+
+      - name: Smoke hybrid fee-preference routing and anti-replay
+        run: >
+          cargo test -p nebula-testnet --lib fee_preference -- --nocapture
+
+      - name: Smoke validator fee-preference back-and-forth switching
+        run: >
+          cargo test -p nebula-testnet --lib
+          runtime::tests::validator_can_switch_fee_preference_back_and_forth_and_snapshot_stays_valid
+          -- --exact --nocapture
+
+      - name: Smoke mainnet-readiness gate
+        run: >
+          cargo test -p nebula-testnet --lib
+          runtime::tests::mainnet_readiness_reports_code_gates_and_external_gates
+          -- --exact --nocapture
+
       - name: Run Nebula test suite
         run: cargo test --workspace -- --test-threads=1
 
