@@ -3,9 +3,11 @@ use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::Identity;
 use merlin::Transcript;
+use sha3::{Digest, Sha3_256};
 
 pub const RANGE_BITS: usize = 64;
 const TRANSCRIPT_LABEL: &[u8] = b"nebula-confidential-amount-v1";
+pub const NULLIFIER_DOMAIN: &[u8] = b"nebula-nullifier-v1";
 
 fn pedersen_gens() -> PedersenGens {
     PedersenGens::default()
@@ -53,9 +55,33 @@ impl Commitment {
         Ok(Commitment(compressed))
     }
 
+    pub fn as_bytes(&self) -> [u8; 32] {
+        *self.0.as_bytes()
+    }
+
     fn point(&self) -> Option<RistrettoPoint> {
         self.0.decompress()
     }
+}
+
+pub fn nullifier(blinding: &Blinding, commitment: &Commitment) -> [u8; 32] {
+    let mut hasher = Sha3_256::new();
+    hasher.update(NULLIFIER_DOMAIN);
+    hasher.update(blinding.to_bytes());
+    hasher.update(commitment.as_bytes());
+    hasher.finalize().into()
+}
+
+pub fn nullifier_hex(blinding_hex: &str, commitment_hex: &str) -> Result<String, String> {
+    let blinding_bytes =
+        hex::decode(blinding_hex).map_err(|error| format!("blinding hex: {error}"))?;
+    let blinding_array: [u8; 32] = blinding_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| "blinding must be 32 bytes".to_string())?;
+    let blinding = Blinding::from_bytes(blinding_array);
+    let commitment = Commitment::from_hex(commitment_hex)?;
+    Ok(hex::encode(nullifier(&blinding, &commitment)))
 }
 
 pub fn commit(value: u64, blinding: &Blinding) -> Commitment {
@@ -175,5 +201,36 @@ mod tests {
         assert_eq!(hex.len(), 64);
         assert_eq!(Commitment::from_hex(&hex).unwrap(), commitment);
         assert!(Commitment::from_hex("zz").is_err());
+    }
+
+    #[test]
+    fn nullifier_is_deterministic() {
+        let blinding = Blinding::from_bytes([5u8; 32]);
+        let commitment = commit(100, &blinding);
+        assert_eq!(
+            nullifier(&blinding, &commitment),
+            nullifier(&blinding, &commitment)
+        );
+    }
+
+    #[test]
+    fn nullifiers_differ_across_notes() {
+        let b1 = Blinding::from_bytes([5u8; 32]);
+        let b2 = Blinding::from_bytes([6u8; 32]);
+        let c1 = commit(100, &b1);
+        let c2 = commit(100, &b2);
+        assert_ne!(nullifier(&b1, &c1), nullifier(&b2, &c2));
+        assert_ne!(nullifier(&b1, &c1), nullifier(&b1, &c2));
+    }
+
+    #[test]
+    fn nullifier_hex_len_and_bad_input() {
+        let blinding = Blinding::from_bytes([5u8; 32]);
+        let commitment = commit(100, &blinding);
+        let nf = nullifier_hex(&hex::encode(blinding.to_bytes()), &commitment.to_hex()).unwrap();
+        assert_eq!(nf.len(), 64);
+        assert_eq!(nf, hex::encode(nullifier(&blinding, &commitment)));
+        assert!(nullifier_hex("zz", &commitment.to_hex()).is_err());
+        assert!(nullifier_hex(&hex::encode(blinding.to_bytes()), "zz").is_err());
     }
 }

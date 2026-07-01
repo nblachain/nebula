@@ -32,6 +32,7 @@ pub const DEFAULT_FAUCET_NBLA: u128 = 10_000 * NEBULAI_PER_NBLA;
 pub const DEFAULT_FAUCET_NXMR: u128 = 0;
 pub const MIN_BRIDGE_CONFIRMATIONS: u64 = 10;
 pub const MAX_SHIELDED_TRANSFER_IO: usize = 16;
+pub const NULLIFIER_HEX_LEN: usize = 64;
 pub const MIN_BRIDGE_DEPOSIT_OBSERVER_QUORUM: usize = 2;
 pub const MIN_WITHDRAWAL_OPERATOR_QUORUM: usize = 2;
 pub const MIN_SEQUENCER_ROTATION_OPERATOR_QUORUM: usize = 2;
@@ -667,6 +668,10 @@ pub struct RuntimeSnapshot {
     pub accountability_reports: Vec<RuntimeAccountabilityReport>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub shielded_notes: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub note_commitments: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub nullifiers: BTreeSet<String>,
     pub root: String,
 }
 
@@ -1103,6 +1108,8 @@ pub struct NebulaRuntime {
     sequencer_key_rotations: Vec<RuntimeSequencerKeyRotation>,
     accountability_reports: Vec<RuntimeAccountabilityReport>,
     shielded_notes: BTreeSet<String>,
+    note_commitments: BTreeSet<String>,
+    nullifiers: BTreeSet<String>,
     monero_bridge: Option<MoneroBridgeVerifier>,
 }
 
@@ -3058,6 +3065,13 @@ pub struct ShieldedOutput {
     pub range_proof_hex: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ShieldedInput {
+    pub commitment: String,
+    pub nullifier: String,
+}
+
 fn parse_blinding(blinding_hex: &str) -> Result<nebula_privacy::Blinding, String> {
     let bytes = hex::decode(blinding_hex).map_err(|error| format!("blinding hex: {error}"))?;
     let bytes: [u8; 32] = bytes
@@ -3111,6 +3125,8 @@ impl NebulaRuntime {
             sequencer_key_rotations: Vec::new(),
             accountability_reports: Vec::new(),
             shielded_notes: BTreeSet::new(),
+            note_commitments: BTreeSet::new(),
+            nullifiers: BTreeSet::new(),
             monero_bridge: None,
         };
         runtime.accounts.insert(
@@ -3202,6 +3218,8 @@ impl NebulaRuntime {
             sequencer_key_rotations: snapshot.sequencer_key_rotations,
             accountability_reports: snapshot.accountability_reports,
             shielded_notes: snapshot.shielded_notes,
+            note_commitments: snapshot.note_commitments,
+            nullifiers: snapshot.nullifiers,
             monero_bridge: None,
         })
     }
@@ -3230,6 +3248,8 @@ impl NebulaRuntime {
             sequencer_key_rotations: self.sequencer_key_rotations.clone(),
             accountability_reports: self.accountability_reports.clone(),
             shielded_notes: self.shielded_notes.clone(),
+            note_commitments: self.note_commitments.clone(),
+            nullifiers: self.nullifiers.clone(),
             root: String::new(),
         };
         snapshot.root = snapshot_root(&snapshot);
@@ -4244,6 +4264,7 @@ impl NebulaRuntime {
             .checked_add(1)
             .ok_or_else(|| "shield nonce overflowed".to_string())?;
         self.shielded_notes.insert(commitment.clone());
+        self.note_commitments.insert(commitment.clone());
         Ok(commitment)
     }
 
@@ -4313,6 +4334,110 @@ impl NebulaRuntime {
         }
         for output in outputs {
             self.shielded_notes.insert(output.commitment.clone());
+            self.note_commitments.insert(output.commitment.clone());
+        }
+        Ok(())
+    }
+
+    pub fn shielded_transfer_v2(
+        &mut self,
+        inputs: &[ShieldedInput],
+        outputs: &[ShieldedOutput],
+    ) -> Result<(), String> {
+        self.ensure_accountability_clean()?;
+        if inputs.is_empty() || outputs.is_empty() {
+            return Err("shielded transfer requires at least one input and one output".to_string());
+        }
+        if inputs.len() > MAX_SHIELDED_TRANSFER_IO || outputs.len() > MAX_SHIELDED_TRANSFER_IO {
+            return Err(format!(
+                "shielded transfer exceeds the maximum of {MAX_SHIELDED_TRANSFER_IO} inputs/outputs"
+            ));
+        }
+
+        let mut input_set = BTreeSet::new();
+        let mut batch_nullifiers = BTreeSet::new();
+        let mut input_commitments = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            let nullifier = input.nullifier.to_ascii_lowercase();
+            if nullifier.len() != NULLIFIER_HEX_LEN
+                || !nullifier.chars().all(|c| c.is_ascii_hexdigit())
+            {
+                return Err(format!(
+                    "shielded input nullifier {} must be a 64-character hex value",
+                    input.nullifier
+                ));
+            }
+            if !input_set.insert(input.commitment.clone()) {
+                return Err(format!("duplicate shielded input {}", input.commitment));
+            }
+            if !batch_nullifiers.insert(nullifier.clone()) {
+                return Err(format!(
+                    "duplicate shielded input nullifier {}",
+                    input.nullifier
+                ));
+            }
+            if !self.note_commitments.contains(&input.commitment) {
+                return Err(format!(
+                    "shielded input {} is not a known note commitment",
+                    input.commitment
+                ));
+            }
+            if !self.shielded_notes.contains(&input.commitment) {
+                return Err(format!(
+                    "shielded input {} is not an unspent note",
+                    input.commitment
+                ));
+            }
+            if self.nullifiers.contains(&nullifier) {
+                return Err(format!(
+                    "shielded input nullifier {} was already spent",
+                    input.nullifier
+                ));
+            }
+            input_commitments.push(nebula_privacy::Commitment::from_hex(&input.commitment)?);
+        }
+
+        let mut output_set = BTreeSet::new();
+        let mut output_commitments = Vec::with_capacity(outputs.len());
+        for output in outputs {
+            if !output_set.insert(output.commitment.clone()) {
+                return Err(format!("duplicate shielded output {}", output.commitment));
+            }
+            if self.shielded_notes.contains(&output.commitment)
+                && !input_set.contains(&output.commitment)
+            {
+                return Err(format!(
+                    "shielded output {} collides with an existing note",
+                    output.commitment
+                ));
+            }
+            let commitment = nebula_privacy::Commitment::from_hex(&output.commitment)?;
+            let proof = hex::decode(&output.range_proof_hex)
+                .map_err(|error| format!("range proof hex: {error}"))?;
+            if !nebula_privacy::verify_amount(&commitment, &proof) {
+                return Err(format!(
+                    "shielded output {} has an invalid range proof",
+                    output.commitment
+                ));
+            }
+            output_commitments.push(commitment);
+        }
+
+        let zero_fee = nebula_privacy::commit(0, &nebula_privacy::Blinding::from_bytes([0u8; 32]));
+        if !nebula_privacy::amounts_balance(&input_commitments, &output_commitments, &zero_fee) {
+            return Err(
+                "shielded transfer does not balance: input commitments must equal outputs"
+                    .to_string(),
+            );
+        }
+
+        for input in inputs {
+            self.shielded_notes.remove(&input.commitment);
+            self.nullifiers.insert(input.nullifier.to_ascii_lowercase());
+        }
+        for output in outputs {
+            self.shielded_notes.insert(output.commitment.clone());
+            self.note_commitments.insert(output.commitment.clone());
         }
         Ok(())
     }
@@ -4336,7 +4461,9 @@ impl NebulaRuntime {
         if expected != commitment_hex {
             return Err("unshield opening does not match the shielded note".to_string());
         }
+        let nullifier = nebula_privacy::nullifier_hex(blinding_hex, commitment_hex)?;
         self.shielded_notes.remove(commitment_hex);
+        self.nullifiers.insert(nullifier);
         let recipient = self
             .accounts
             .entry(account.to_string())
@@ -4352,6 +4479,21 @@ impl NebulaRuntime {
         &self.shielded_notes
     }
 
+    pub fn note_commitments(&self) -> &BTreeSet<String> {
+        &self.note_commitments
+    }
+
+    pub fn nullifiers(&self) -> &BTreeSet<String> {
+        &self.nullifiers
+    }
+
+    pub fn note_accumulator_root(&self) -> String {
+        stable_runtime_root(&json!({
+            "note_accumulator_domain": "nebula-runtime-note-accumulator-v1",
+            "note_commitments": self.note_commitments,
+        }))
+    }
+
     fn state_root(&self) -> String {
         runtime_state_root(
             &self.accounts,
@@ -4361,6 +4503,8 @@ impl NebulaRuntime {
             self.buyback_pool_nebulai,
             self.validator_reward_nebulai,
             &self.shielded_notes,
+            &self.note_commitments,
+            &self.nullifiers,
         )
     }
 }
@@ -5569,6 +5713,18 @@ fn dispatch_json_rpc_method(
             state.persist()?;
             Ok(json!({ "shielded": true }))
         }
+        "nebula_shieldedTransferV2" => {
+            ensure_block_producer(state)?;
+            let inputs = optional_json_array_param::<ShieldedInput>(&params, "inputs")?;
+            let outputs = optional_json_array_param::<ShieldedOutput>(&params, "outputs")?;
+            {
+                let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
+                runtime.shielded_transfer_v2(&inputs, &outputs)?;
+            }
+            state.commit_direct_state_mutation()?;
+            state.persist()?;
+            Ok(json!({ "shielded": true }))
+        }
         "nebula_unshield" => {
             ensure_block_producer(state)?;
             let commitment = required_str_param(&params, "commitment")?;
@@ -5585,7 +5741,12 @@ fn dispatch_json_rpc_method(
         }
         "nebula_shieldedNotes" => {
             let runtime = state.runtime.lock().expect("runtime mutex poisoned");
-            Ok(json!({ "shielded_notes": runtime.shielded_notes() }))
+            Ok(json!({
+                "shielded_notes": runtime.shielded_notes(),
+                "note_commitments": runtime.note_commitments(),
+                "nullifiers": runtime.nullifiers(),
+                "note_accumulator_root": runtime.note_accumulator_root(),
+            }))
         }
         "nebula_requestWithdrawal" => {
             ensure_block_producer(state)?;
@@ -6183,6 +6344,8 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
         snapshot.buyback_pool_nebulai,
         snapshot.validator_reward_nebulai,
         &snapshot.shielded_notes,
+        &snapshot.note_commitments,
+        &snapshot.nullifiers,
     );
     if snapshot.state_root != expected_state_root {
         return Err("snapshot state_root does not match snapshot state".to_string());
@@ -8326,6 +8489,7 @@ fn accountability_root(reports: &[RuntimeAccountabilityReport]) -> String {
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_state_root(
     accounts: &BTreeMap<String, RuntimeAccount>,
     bridge_deposits: &BTreeMap<String, RuntimeBridgeDeposit>,
@@ -8334,6 +8498,8 @@ fn runtime_state_root(
     buyback_pool_nebulai: u128,
     validator_reward_nebulai: u128,
     shielded_notes: &BTreeSet<String>,
+    note_commitments: &BTreeSet<String>,
+    nullifiers: &BTreeSet<String>,
 ) -> String {
     let mut value = json!({
         "state_domain": "nebula-runtime-state-v1",
@@ -8346,6 +8512,12 @@ fn runtime_state_root(
     });
     if !shielded_notes.is_empty() {
         value["shielded_notes"] = json!(shielded_notes);
+    }
+    if !note_commitments.is_empty() {
+        value["note_commitments"] = json!(note_commitments);
+    }
+    if !nullifiers.is_empty() {
+        value["nullifiers"] = json!(nullifiers);
     }
     stable_runtime_root(&value)
 }
@@ -8372,6 +8544,12 @@ fn snapshot_root(snapshot: &RuntimeSnapshot) -> String {
     });
     if !snapshot.shielded_notes.is_empty() {
         value["shielded_notes"] = json!(snapshot.shielded_notes);
+    }
+    if !snapshot.note_commitments.is_empty() {
+        value["note_commitments"] = json!(snapshot.note_commitments);
+    }
+    if !snapshot.nullifiers.is_empty() {
+        value["nullifiers"] = json!(snapshot.nullifiers);
     }
     stable_runtime_root(&value)
 }
@@ -8673,6 +8851,8 @@ mod tests {
             snapshot.buyback_pool_nebulai,
             snapshot.validator_reward_nebulai,
             &snapshot.shielded_notes,
+            &snapshot.note_commitments,
+            &snapshot.nullifiers,
         );
         let latest = snapshot
             .blocks
@@ -8977,6 +9157,8 @@ mod tests {
             snapshot.buyback_pool_nebulai,
             snapshot.validator_reward_nebulai,
             &snapshot.shielded_notes,
+            &snapshot.note_commitments,
+            &snapshot.nullifiers,
         )
     }
 
@@ -11079,6 +11261,107 @@ mod tests {
             error.contains("maximum"),
             "expected a max inputs/outputs error, got: {error}"
         );
+    }
+
+    #[test]
+    fn shielded_transfer_v2_tracks_accumulator_and_nullifiers() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let account = test_account_id();
+        runtime.faucet(&account).unwrap();
+
+        let b1 = nebula_privacy::Blinding::from_bytes([1u8; 32]);
+        let b2 = nebula_privacy::Blinding::from_bytes([2u8; 32]);
+        let b_in = b1.add(&b2);
+        let note = shield_signed(&mut runtime, 100, &b_in, 0);
+        assert!(runtime.note_commitments().contains(&note));
+
+        let nullifier =
+            nebula_privacy::nullifier_hex(&hex::encode(b_in.to_bytes()), &note).unwrap();
+        let (c1, p1) = nebula_privacy::prove_amount(70, &b1);
+        let (c2, p2) = nebula_privacy::prove_amount(30, &b2);
+        let inputs = vec![ShieldedInput {
+            commitment: note.clone(),
+            nullifier: nullifier.clone(),
+        }];
+        let outputs = vec![
+            ShieldedOutput {
+                commitment: c1.to_hex(),
+                range_proof_hex: hex::encode(&p1),
+            },
+            ShieldedOutput {
+                commitment: c2.to_hex(),
+                range_proof_hex: hex::encode(&p2),
+            },
+        ];
+        runtime.shielded_transfer_v2(&inputs, &outputs).unwrap();
+
+        assert!(!runtime.shielded_notes().contains(&note));
+        assert!(runtime.note_commitments().contains(&note));
+        assert!(runtime.nullifiers().contains(&nullifier));
+        assert!(runtime.shielded_notes().contains(&c1.to_hex()));
+        assert!(runtime.note_commitments().contains(&c1.to_hex()));
+
+        assert!(runtime.shielded_transfer_v2(&inputs, &outputs).is_err());
+    }
+
+    #[test]
+    fn shielded_transfer_v2_rejects_unknown_commitment_and_bad_nullifier() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let account = test_account_id();
+        runtime.faucet(&account).unwrap();
+        let b = nebula_privacy::Blinding::from_bytes([3u8; 32]);
+        let note = shield_signed(&mut runtime, 50, &b, 0);
+        let (c, p) = nebula_privacy::prove_amount(50, &b);
+        let outputs = vec![ShieldedOutput {
+            commitment: c.to_hex(),
+            range_proof_hex: hex::encode(&p),
+        }];
+
+        let unknown = vec![ShieldedInput {
+            commitment: "0".repeat(64),
+            nullifier: "1".repeat(64),
+        }];
+        assert!(runtime.shielded_transfer_v2(&unknown, &outputs).is_err());
+
+        let bad_nf = vec![ShieldedInput {
+            commitment: note,
+            nullifier: "xyz".to_string(),
+        }];
+        assert!(runtime.shielded_transfer_v2(&bad_nf, &outputs).is_err());
+    }
+
+    #[test]
+    fn unshield_records_canonical_nullifier() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let account = test_account_id();
+        runtime.faucet(&account).unwrap();
+        let b = nebula_privacy::Blinding::from_bytes([4u8; 32]);
+        let note = shield_signed(&mut runtime, 40, &b, 0);
+        runtime.produce_block();
+        runtime
+            .unshield(&note, 40, &hex::encode(b.to_bytes()), &account)
+            .unwrap();
+        let expected = nebula_privacy::nullifier_hex(&hex::encode(b.to_bytes()), &note).unwrap();
+        assert!(runtime.nullifiers().contains(&expected));
+    }
+
+    #[test]
+    fn snapshot_roundtrip_carries_accumulator_and_nullifiers() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let account = test_account_id();
+        runtime.faucet(&account).unwrap();
+        let b = nebula_privacy::Blinding::from_bytes([5u8; 32]);
+        let note = shield_signed(&mut runtime, 30, &b, 0);
+        runtime.produce_block();
+        runtime
+            .unshield(&note, 30, &hex::encode(b.to_bytes()), &account)
+            .unwrap();
+        runtime.produce_block();
+
+        let snapshot = runtime.export_snapshot();
+        validate_snapshot(&snapshot).unwrap();
+        assert!(!snapshot.note_commitments.is_empty());
+        assert!(!snapshot.nullifiers.is_empty());
     }
 
     fn shield_signed(
