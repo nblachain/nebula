@@ -14,7 +14,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 pub mod scheme;
 pub use scheme::{
     scheme_derive_public, scheme_normalize_public, scheme_secret_from_seed, scheme_sign_root,
-    scheme_verify_root, validate_scheme_public, SchemeId,
+    scheme_tag_for_public, scheme_verify_root, validate_scheme_public, SchemeId,
 };
 
 /// Validate that `value` is exactly `hex_len` ASCII hex characters.

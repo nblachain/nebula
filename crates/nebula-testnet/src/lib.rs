@@ -4071,6 +4071,7 @@ pub fn verify_validator_set_json(input: &str) -> Result<ValidatorSetReport, Atte
     let mut network_keys = BTreeSet::new();
     let mut reward_accounts = BTreeSet::new();
     let mut endpoints = BTreeSet::new();
+    let mut contacts = BTreeSet::new();
     let mut total_genesis_power = 0_u64;
 
     for (index, validator) in manifest.validators.iter().enumerate() {
@@ -4086,6 +4087,7 @@ pub fn verify_validator_set_json(input: &str) -> Result<ValidatorSetReport, Atte
             &mut network_keys,
             &mut reward_accounts,
             &mut endpoints,
+            &mut contacts,
             &mut total_genesis_power,
             economics_root,
         );
@@ -4414,7 +4416,7 @@ pub fn verify_operator_acceptance_jsons(
             &mut errors,
             &format!("entries[{index}].signature"),
             &entry.signature,
-            "ed25519-testnet-operator-acceptance",
+            "testnet-operator-acceptance",
             &entry.operator_public_key,
             &operator_acceptance_signature_root(entry),
         );
@@ -5875,7 +5877,7 @@ pub fn verify_validator_activation_jsons(
             &mut errors,
             &format!("entries[{index}].signature"),
             &entry.signature,
-            "ed25519-testnet-validator-activation",
+            "testnet-validator-activation",
             &entry.consensus_public_key,
             &validator_activation_signature_root(entry),
         );
@@ -6297,7 +6299,7 @@ pub fn verify_operator_join_confirmation_jsons(
             &mut errors,
             &format!("entries[{index}].signature"),
             &entry.signature,
-            "ed25519-testnet-operator-join-confirmation",
+            "testnet-operator-join-confirmation",
             &entry.operator_public_key,
             &operator_join_confirmation_signature_root(entry),
         );
@@ -6559,7 +6561,7 @@ pub fn verify_public_observer_confirmation_jsons(
             &mut errors,
             &format!("entries[{index}].signature"),
             &entry.signature,
-            "ed25519-testnet-public-observer-confirmation",
+            "testnet-public-observer-confirmation",
             observer_keys_by_id_region
                 .get(&(entry.observer_id.as_str(), entry.region.as_str()))
                 .copied()
@@ -7686,9 +7688,9 @@ fn require_public_launch_economics_trial(
             economics.total_nxmr_fees_units, economics.buyback_pool_nebulai
         ));
     }
-    if economics.nxmr_validator_reward_nebulai < expected_nxmr_validator_reward_nebulai {
+    if economics.nxmr_validator_reward_nebulai != expected_nxmr_validator_reward_nebulai {
         errors.push(format!(
-            "runtime_surface.snapshot.nxmr_validator_reward_nebulai expected at least {expected_nxmr_validator_reward_nebulai} from nXMR gas rewards but got {}",
+            "runtime_surface.snapshot.nxmr_validator_reward_nebulai expected exactly {expected_nxmr_validator_reward_nebulai} from nXMR gas rewards but got {}",
             economics.nxmr_validator_reward_nebulai
         ));
     }
@@ -10222,7 +10224,7 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &format!("operators[{index}].public_key"),
             &operator.public_key,
         );
-        require_hex_value(
+        require_signing_public_key(
             errors,
             &format!("operators[{index}].public_key"),
             &operator.public_key,
@@ -10263,7 +10265,7 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             &operator.signature_sha3_256,
             &operator_signature_root(operator, &witness_evidence_root),
         );
-        require_signature_hex(
+        require_scheme_signature(
             errors,
             &format!("operators[{index}].signature_hex"),
             &operator.signature_hex,
@@ -10271,13 +10273,12 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
         if !operator.verified {
             errors.push(format!("operators[{index}].verified must be true"));
         }
-        if let Err(error) = verify_ed25519_signature(
+        if let Err(error) = nebula_crypto::scheme_verify_root(
             &operator.public_key,
             &operator.signature_sha3_256,
             &operator.signature_hex,
-            &format!("operators[{index}].signature_hex"),
         ) {
-            errors.push(error);
+            errors.push(format!("operators[{index}].signature_hex: {error}"));
         }
     }
     if operator_ids.len() < MIN_PUBLIC_TESTNET_OPERATORS {
@@ -10469,14 +10470,14 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             errors,
             &format!("observers[{index}].signature.algorithm"),
             &observer.signature.algorithm,
-            "ed25519-testnet-attestation",
+            &attestation_algorithm(&observer.signature.public_key, "testnet-attestation"),
         );
         require_non_empty(
             errors,
             &format!("observers[{index}].signature.public_key"),
             &observer.signature.public_key,
         );
-        require_hex_value(
+        require_signing_public_key(
             errors,
             &format!("observers[{index}].signature.public_key"),
             &observer.signature.public_key,
@@ -10502,7 +10503,7 @@ fn verify_network_witnesses(errors: &mut Vec<String>, attestation: &DeploymentAt
             errors,
             &format!("observers[{index}].signature"),
             &observer.signature,
-            "ed25519-testnet-attestation",
+            "testnet-attestation",
             &observer.signature.public_key,
             &observer_signature_root(observer, &witness_evidence_root),
         );
@@ -10643,6 +10644,7 @@ fn verify_validator_admission(
     network_keys: &mut BTreeSet<String>,
     reward_accounts: &mut BTreeSet<String>,
     endpoints: &mut BTreeSet<String>,
+    contacts: &mut BTreeSet<String>,
     total_genesis_power: &mut u64,
     fee_policy_root: &str,
 ) {
@@ -10770,6 +10772,12 @@ fn verify_validator_admission(
     );
     require_operator_contact(
         errors,
+        &format!("validators[{index}].operator_contact"),
+        &validator.operator_contact,
+    );
+    insert_unique(
+        errors,
+        contacts,
         &format!("validators[{index}].operator_contact"),
         &validator.operator_contact,
     );
@@ -12235,7 +12243,7 @@ fn verify_validator_join_entries(
             errors,
             &format!("entries[{index}].signature"),
             &entry.signature,
-            "ed25519-testnet-validator-join",
+            "testnet-validator-join",
             &entry.consensus_public_key,
             &validator_join_signature_root(entry),
         );
@@ -13121,42 +13129,23 @@ fn require_hex_value(errors: &mut Vec<String>, label: &str, value: &str) {
     }
 }
 
-fn require_signature_hex(errors: &mut Vec<String>, label: &str, value: &str) {
-    if value.len() != 128 || !value.chars().all(|c| c.is_ascii_hexdigit()) {
-        errors.push(format!(
-            "{label} must be a 128-character hex Ed25519 signature"
-        ));
-    }
-}
-
-fn verify_ed25519_signature(
-    public_key_hex: &str,
-    signing_root: &str,
-    signature_hex: &str,
-    signature_label: &str,
-) -> Result<(), String> {
-    nebula_crypto::verify_ed25519_signature(
-        public_key_hex,
-        "public_key",
-        signing_root,
-        signature_hex,
-        signature_label,
-    )
-}
-
 fn verify_signature_material(
     errors: &mut Vec<String>,
     label: &str,
     signature: &SignatureVerification,
-    expected_algorithm: &str,
+    algorithm_suffix: &str,
     expected_public_key: &str,
     expected_signature_root: &str,
 ) {
+    // The algorithm label is derived from the (authoritative) expected key's scheme, so an
+    // Ed25519 signer keeps the historical "ed25519-<suffix>" label and a hybrid signer is required
+    // to carry the "hybrid-ed25519-mldsa65-<suffix>" label — post-quantum roots verify end-to-end.
+    let expected_algorithm = attestation_algorithm(expected_public_key, algorithm_suffix);
     require_eq(
         errors,
         &format!("{label}.algorithm"),
         &signature.algorithm,
-        expected_algorithm,
+        &expected_algorithm,
     );
     require_eq(
         errors,
@@ -13164,7 +13153,7 @@ fn verify_signature_material(
         &signature.public_key,
         expected_public_key,
     );
-    require_hex_value(
+    require_signing_public_key(
         errors,
         &format!("{label}.public_key"),
         &signature.public_key,
@@ -13175,7 +13164,7 @@ fn verify_signature_material(
         &signature.signature_sha3_256,
         expected_signature_root,
     );
-    require_signature_hex(
+    require_scheme_signature(
         errors,
         &format!("{label}.signature_hex"),
         &signature.signature_hex,
@@ -13183,13 +13172,12 @@ fn verify_signature_material(
     if !signature.verified {
         errors.push(format!("{label}.verified must be true"));
     }
-    if let Err(error) = verify_ed25519_signature(
+    if let Err(error) = nebula_crypto::scheme_verify_root(
         &signature.public_key,
         expected_signature_root,
         &signature.signature_hex,
-        &format!("{label}.signature_hex"),
     ) {
-        errors.push(error);
+        errors.push(format!("{label}.signature_hex: {error}"));
     }
 }
 
@@ -13422,11 +13410,40 @@ fn sample_ed25519_secret_key_hex(seed: u8) -> String {
 }
 
 fn sign_root_with_secret_key(secret_key_hex: &str, signing_root: &str) -> Result<String, String> {
-    nebula_crypto::sign_ed25519_root(secret_key_hex, "secret_key_hex", signing_root)
+    // Scheme-aware: a bare-hex secret signs classical Ed25519 (byte-identical to before), while a
+    // scheme-tagged secret (e.g. "hybrid-ed25519-mldsa65:...") produces a post-quantum signature.
+    nebula_crypto::scheme_sign_root(secret_key_hex, signing_root)
 }
 
 fn public_key_hex_for_secret_key(secret_key_hex: &str) -> Result<String, String> {
-    nebula_crypto::public_key_hex_for_secret(secret_key_hex, "secret_key_hex")
+    nebula_crypto::scheme_derive_public(secret_key_hex)
+}
+
+/// Derive the attestation `algorithm` label for a signer's public key as `<scheme-tag>-<suffix>`.
+/// A classical Ed25519 key yields `ed25519-<suffix>` (unchanged); a hybrid key yields
+/// `hybrid-ed25519-mldsa65-<suffix>`, so post-quantum attestation roots are labelled and verified
+/// consistently with the key that signed them.
+fn attestation_algorithm(public_key_hex: &str, suffix: &str) -> String {
+    let tag =
+        nebula_crypto::scheme_tag_for_public(public_key_hex, "public_key").unwrap_or("ed25519");
+    format!("{tag}-{suffix}")
+}
+
+/// Validate a signing public key that may be a classical bare-hex Ed25519 key or a scheme-tagged
+/// (post-quantum / hybrid) key. The legacy error message is preserved so existing negative tests
+/// keep passing while hybrid keys are now accepted.
+fn require_signing_public_key(errors: &mut Vec<String>, label: &str, value: &str) {
+    if nebula_crypto::validate_scheme_public(value, label).is_err() {
+        errors.push(format!("{label} must be a 64-character hex value"));
+    }
+}
+
+/// Validate a signing signature that may be classical bare-hex Ed25519 or scheme-tagged. Exact
+/// length/encoding is enforced by `scheme_verify_root`; here we only require it to be present.
+fn require_scheme_signature(errors: &mut Vec<String>, label: &str, value: &str) {
+    if value.is_empty() {
+        errors.push(format!("{label} must not be empty"));
+    }
 }
 
 fn sample_secret_key_for_public_key(public_key_hex: &str) -> Option<String> {
@@ -15174,9 +15191,9 @@ mod public_launch {
 
         match error {
             AttestationError::Invalid(errors) => {
-                assert!(errors.iter().any(|error| {
-                    error.starts_with("operators[0].signature_hex Ed25519 verification failed")
-                }));
+                assert!(errors
+                    .iter()
+                    .any(|error| { error.starts_with("operators[0].signature_hex") }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
@@ -15639,6 +15656,91 @@ mod public_launch {
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }
+    }
+
+    #[test]
+    fn validator_set_rejects_duplicate_operator_contact() {
+        let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
+        value["validators"][1]["operator_contact"] =
+            value["validators"][0]["operator_contact"].clone();
+        refresh_validator_manifest_root(&mut value, 1);
+
+        let error = verify_validator_set_json(&value.to_string()).unwrap_err();
+
+        match error {
+            AttestationError::Invalid(errors) => {
+                assert!(errors
+                    .iter()
+                    .any(|error| error == "validators[1].operator_contact must be unique"));
+            }
+            AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
+        }
+    }
+
+    #[test]
+    fn attestation_signature_material_accepts_post_quantum_hybrid_keys() {
+        // Fulfils nebulacha.in's "post-quantum attestation roots": the shared attestation verifier
+        // accepts a hybrid Ed25519 + ML-DSA-65 signature, labels it post-quantum, and rejects
+        // tampering — the same path that backs operator/observer/acceptance/activation/join
+        // evidence.
+        let seed = "11".repeat(64); // hybrid seed = 32-byte Ed25519 seed || 32-byte ML-DSA seed
+        let secret = nebula_crypto::scheme_secret_from_seed(
+            nebula_crypto::SchemeId::HybridEd25519MlDsa65,
+            &seed,
+        )
+        .unwrap();
+        let public = nebula_crypto::scheme_derive_public(&secret).unwrap();
+        let root = json_artifact_sha3_256("nebula-post-quantum-attestation-test");
+        let signature_hex = nebula_crypto::scheme_sign_root(&secret, &root).unwrap();
+        let signature = SignatureVerification {
+            algorithm: attestation_algorithm(&public, "testnet-attestation"),
+            public_key: public.clone(),
+            signature_sha3_256: root.clone(),
+            signature_hex,
+            verified: true,
+        };
+        assert_eq!(
+            signature.algorithm, "hybrid-ed25519-mldsa65-testnet-attestation",
+            "attestation roots signed with a hybrid key must be labelled post-quantum"
+        );
+
+        let mut errors = Vec::new();
+        verify_signature_material(
+            &mut errors,
+            "sig",
+            &signature,
+            "testnet-attestation",
+            &public,
+            &root,
+        );
+        assert!(
+            errors.is_empty(),
+            "hybrid attestation must verify: {errors:?}"
+        );
+
+        // Verifying against a different root (tamper) must fail on both signature halves.
+        let mut errors = Vec::new();
+        let other_root = json_artifact_sha3_256("different-root");
+        verify_signature_material(
+            &mut errors,
+            "sig",
+            &signature,
+            "testnet-attestation",
+            &public,
+            &other_root,
+        );
+        assert!(
+            !errors.is_empty(),
+            "a tampered hybrid attestation must be rejected"
+        );
+
+        // A classical Ed25519 signer keeps the historical label (backward compatibility).
+        let ed_secret = "22".repeat(32);
+        let ed_public = nebula_crypto::scheme_derive_public(&ed_secret).unwrap();
+        assert_eq!(
+            attestation_algorithm(&ed_public, "testnet-attestation"),
+            "ed25519-testnet-attestation"
+        );
     }
 
     #[test]
@@ -16123,11 +16225,9 @@ mod public_launch {
 
         match error {
             AttestationError::Invalid(errors) => {
-                assert!(errors.iter().any(|error| {
-                    error.starts_with(
-                        "entries[0].signature.signature_hex Ed25519 verification failed",
-                    )
-                }));
+                assert!(errors
+                    .iter()
+                    .any(|error| { error.starts_with("entries[0].signature.signature_hex") }));
             }
             AttestationError::MalformedJson(error) => panic!("unexpected malformed JSON: {error}"),
         }

@@ -160,6 +160,14 @@ pub fn validate_scheme_public(value: &str, name: &str) -> Result<SchemeId, Strin
     Ok(scheme)
 }
 
+/// Detect the signature scheme of a public key encoding (bare Ed25519 or scheme-tagged),
+/// validating that the key material parses, and return the scheme's stable wire tag. Used to
+/// label attestation `algorithm` fields consistently with the actual key (e.g. `ed25519` vs
+/// `hybrid-ed25519-mldsa65`).
+pub fn scheme_tag_for_public(value: &str, name: &str) -> Result<&'static str, String> {
+    Ok(validate_scheme_public(value, name)?.tag())
+}
+
 /// Validate and lower-case a scheme public key (bare Ed25519 or tagged) for canonical storage.
 pub fn scheme_normalize_public(value: &str, name: &str) -> Result<String, String> {
     validate_scheme_public(value, name)?;

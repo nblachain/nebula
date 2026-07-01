@@ -31,6 +31,9 @@ pub const DEFAULT_MAX_MEMPOOL_TRANSACTIONS: usize = 10_000;
 pub const DEFAULT_FAUCET_NBLA: u128 = 10_000 * NEBULAI_PER_NBLA;
 pub const DEFAULT_FAUCET_NXMR: u128 = 0;
 pub const MIN_BRIDGE_CONFIRMATIONS: u64 = 10;
+/// Maximum inputs or outputs accepted in a single shielded transfer. Bounds per-request
+/// Bulletproofs range-proof verification so one call cannot exhaust the sequencer's CPU.
+pub const MAX_SHIELDED_TRANSFER_IO: usize = 16;
 pub const MIN_BRIDGE_DEPOSIT_OBSERVER_QUORUM: usize = 2;
 pub const MIN_WITHDRAWAL_OPERATOR_QUORUM: usize = 2;
 pub const MIN_SEQUENCER_ROTATION_OPERATOR_QUORUM: usize = 2;
@@ -4070,6 +4073,13 @@ impl NebulaRuntime {
         self.ensure_accountability_clean()?;
         if inputs.is_empty() || outputs.is_empty() {
             return Err("shielded transfer requires at least one input and one output".to_string());
+        }
+        // Bound the batch so a single request cannot force unbounded Bulletproofs range-proof
+        // verification on the sequencer (CPU-exhaustion / DoS guard; not a soundness bound).
+        if inputs.len() > MAX_SHIELDED_TRANSFER_IO || outputs.len() > MAX_SHIELDED_TRANSFER_IO {
+            return Err(format!(
+                "shielded transfer exceeds the maximum of {MAX_SHIELDED_TRANSFER_IO} inputs/outputs"
+            ));
         }
 
         let mut input_set = BTreeSet::new();
@@ -10590,6 +10600,25 @@ mod tests {
         assert!(runtime
             .shielded_transfer(&["0".repeat(64)], &tampered)
             .is_err());
+    }
+
+    #[test]
+    fn shielded_transfer_rejects_oversized_batches() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        // More outputs than MAX_SHIELDED_TRANSFER_IO must be rejected before any proof work.
+        let outputs: Vec<ShieldedOutput> = (0..MAX_SHIELDED_TRANSFER_IO + 1)
+            .map(|i| ShieldedOutput {
+                commitment: format!("{i:064x}"),
+                range_proof_hex: String::new(),
+            })
+            .collect();
+        let error = runtime
+            .shielded_transfer(&["0".repeat(64)], &outputs)
+            .unwrap_err();
+        assert!(
+            error.contains("maximum"),
+            "expected a max inputs/outputs error, got: {error}"
+        );
     }
 
     fn shield_signed(
