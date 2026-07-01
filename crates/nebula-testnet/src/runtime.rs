@@ -4065,6 +4065,12 @@ impl NebulaRuntime {
             .unwrap_or(0)
             .checked_add(1)
             .ok_or_else(|| "fee preference activation height overflowed".to_string())?;
+        // If another change for this validator is already pending at the same activation
+        // height (a second set before the next block is produced), the newer, higher-sequence
+        // authorization supersedes it in place, keeping activation heights strictly increasing.
+        self.validator_fee_preference_log.retain(|record| {
+            !(record.validator_id == validator_id && record.activation_height == activation_height)
+        });
         self.validator_fee_preference_log
             .push(RuntimeValidatorFeePreferenceActivation {
                 validator_id: validator_id.to_string(),
@@ -12558,6 +12564,20 @@ mod tests {
         refresh_default_signed_snapshot_roots(&mut snapshot);
         let error = validate_snapshot(&snapshot).unwrap_err();
         assert!(error.contains("no active authorization"), "{error}");
+    }
+
+    #[test]
+    fn two_fee_preference_changes_before_a_block_keep_the_snapshot_self_valid() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        signed_fee_preference(&mut runtime, VALIDATOR_FEE_PREFERENCE_NXMR, 1).unwrap();
+        signed_fee_preference(&mut runtime, VALIDATOR_FEE_PREFERENCE_NBLA, 2).unwrap();
+        let block = runtime.produce_block();
+        // The latest change (nbla) wins; no nxmr routing is stamped, and the node's own
+        // snapshot must validate (the earlier same-height pending record was superseded).
+        assert!(block.fee_preference.is_none());
+        let snapshot = runtime.export_snapshot();
+        assert_eq!(snapshot.validator_fee_preference_log.len(), 1);
+        validate_snapshot(&snapshot).unwrap();
     }
 
     #[test]
