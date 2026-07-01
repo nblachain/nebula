@@ -256,4 +256,20 @@ mod tests {
             assert_eq!(pos, buf.len());
         }
     }
+
+    #[test]
+    fn parse_tx_extra_never_panics_or_hangs_on_arbitrary_bytes() {
+        let mut state: u64 = 0x0ddc_0ffe_ebad_f00d;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u8
+        };
+        for _ in 0..40_000 {
+            let len = (next() as usize) % 96;
+            let bytes: Vec<u8> = (0..len).map(|_| next()).collect();
+            let _ = parse_tx_extra(&bytes);
+        }
+    }
 }

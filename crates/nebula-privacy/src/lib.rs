@@ -233,4 +233,48 @@ mod tests {
         assert!(nullifier_hex("zz", &commitment.to_hex()).is_err());
         assert!(nullifier_hex(&hex::encode(blinding.to_bytes()), "zz").is_err());
     }
+
+    #[test]
+    fn balance_holds_for_valid_splits_and_rejects_inflation_across_many_cases() {
+        let mut state: u64 = 0x00c0_ffee_1234_5678;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            state >> 33
+        };
+        let seed = |value: u64| -> [u8; 32] {
+            let mut bytes = [0u8; 32];
+            bytes[..8].copy_from_slice(&value.to_le_bytes());
+            bytes[8] = 1;
+            bytes
+        };
+        for case in 0..300u64 {
+            let out1 = next() % 1_000_000;
+            let out2 = next() % 1_000_000;
+            let fee = next() % 10_000;
+            let total = out1 + out2 + fee;
+
+            let r_out1 = Blinding::from_bytes(seed(next()));
+            let r_out2 = Blinding::from_bytes(seed(next()));
+            let r_fee = Blinding::from_bytes(seed(next()));
+            let r_in = r_out1.add(&r_out2).add(&r_fee);
+
+            let input = commit(total, &r_in);
+            let o1 = commit(out1, &r_out1);
+            let o2 = commit(out2, &r_out2);
+            let fee_commitment = commit(fee, &r_fee);
+
+            assert!(
+                amounts_balance(&[input], &[o1, o2], &fee_commitment),
+                "case {case} with a correct split must balance"
+            );
+
+            let inflated = commit(out1 + 1, &r_out1);
+            assert!(
+                !amounts_balance(&[input], &[inflated, o2], &fee_commitment),
+                "case {case} inflating an output by 1 must be caught"
+            );
+        }
+    }
 }

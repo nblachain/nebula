@@ -181,4 +181,38 @@ mod tests {
             assert!(matches!(decode(bad), Err(Base58Error::Overflow)), "{bad}");
         }
     }
+
+    #[test]
+    fn decode_never_panics_on_arbitrary_input() {
+        let mut state: u64 = 0x243f_6a88_85a3_08d3;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        for _ in 0..20_000 {
+            let len = (next() % 48) as usize;
+            let candidate: String = (0..len)
+                .map(|_| char::from(0x21u8.wrapping_add((next() % 0x5e) as u8)))
+                .collect();
+            let _ = decode(&candidate);
+        }
+    }
+
+    #[test]
+    fn round_trips_arbitrary_random_bytes() {
+        let mut state: u64 = 0xb5ad_4ece_da10_00b5;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u8
+        };
+        for _ in 0..2_000 {
+            let len = (next() % 65) as usize;
+            let bytes: Vec<u8> = (0..len).map(|_| next()).collect();
+            assert_eq!(decode(&encode(&bytes)).unwrap(), bytes);
+        }
+    }
 }
