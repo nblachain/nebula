@@ -30,8 +30,8 @@ with the mitigations Nebula implements and the residual gaps. Read alongside
 - **Withdrawal side:** M operators can approve a fraudulent payout. **Mitigations:** account
   nonce+signature binding before nXMR burn, launch-attested operator quorum, replay guards,
   optional on-chain payout proof (`check_tx_key` against the withdrawal address), and a
-  configurable **withdrawal challenge window** (`finalizing` → `settle`/`challenge` → `reverted`)
-  that lets a fraudulent finalization be reverted before it settles, restoring the user's own
+  configurable **withdrawal challenge window** (`finalizing` → `settled` on settle, or `reverted` on
+  challenge) that lets a fraudulent finalization be reverted before it settles, restoring the user's own
   burned nXMR escrow (`challenge_withdrawal`). Operator bond slashing
   (`slash_bridge_participant`) is a *separate*, unlinked economic penalty — the burned bond is not
   paid out to the user. **Residual:** the window only helps while the payout has not yet settled;
