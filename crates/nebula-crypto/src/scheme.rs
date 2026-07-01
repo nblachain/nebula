@@ -433,4 +433,108 @@ mod tests {
         let replacement = if current == b'0' { '1' } else { '0' };
         hex_string.replace_range(index..index + 1, &replacement.to_string());
     }
+
+    fn lcg(state: &mut u64) -> u64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *state >> 33
+    }
+
+    #[test]
+    fn parsers_never_panic_on_arbitrary_input() {
+        const POOL: &[u8] = b"0123456789abcdefABCDEF:xyzZ-_. \x00\xff";
+        let mut state: u64 = 0x5eed_5eed_5eed_5eed;
+        let real_public = scheme_derive_public(&secret_for(SchemeId::Ed25519)).unwrap();
+        for _ in 0..20_000 {
+            let len = (lcg(&mut state) % 200) as usize;
+            let candidate: String = (0..len)
+                .map(|_| char::from(POOL[(lcg(&mut state) as usize) % POOL.len()]))
+                .collect();
+            let _ = validate_scheme_public(&candidate, "fuzz");
+            let _ = scheme_tag_for_public(&candidate, "fuzz");
+            let _ = scheme_normalize_public(&candidate, "fuzz");
+            let _ = scheme_derive_public(&candidate);
+            let _ = scheme_sign_root(&candidate, ROOT);
+            let _ = scheme_verify_root(&candidate, ROOT, &candidate);
+            let _ = scheme_verify_root(&real_public, ROOT, &candidate);
+            let _ = scheme_verify_root(&candidate, &candidate, &candidate);
+        }
+    }
+
+    #[test]
+    fn tagged_inputs_with_arbitrary_payload_lengths_never_panic() {
+        let mut state: u64 = 0xdead_beef_cafe_f00d;
+        let tags = [
+            "ed25519",
+            "mldsa65",
+            "hybrid-ed25519-mldsa65",
+            "unknown-scheme",
+            "",
+        ];
+        let interesting_lens = [
+            0usize,
+            1,
+            31,
+            32,
+            33,
+            63,
+            64,
+            65,
+            ED25519_PUBLIC_LEN,
+            ED25519_SIGNATURE_LEN,
+            MLDSA65_PUBLIC_LEN - 1,
+            MLDSA65_PUBLIC_LEN,
+            MLDSA65_PUBLIC_LEN + 1,
+            MLDSA65_SIGNATURE_LEN,
+            ED25519_PUBLIC_LEN + MLDSA65_PUBLIC_LEN,
+            ED25519_SIGNATURE_LEN + MLDSA65_SIGNATURE_LEN,
+        ];
+        for _ in 0..600 {
+            let tag = tags[(lcg(&mut state) as usize) % tags.len()];
+            let byte_len = interesting_lens[(lcg(&mut state) as usize) % interesting_lens.len()];
+            let payload: String = (0..byte_len * 2)
+                .map(|_| char::from(b"0123456789abcdef"[(lcg(&mut state) as usize) % 16]))
+                .collect();
+            let candidate = if tag.is_empty() {
+                payload
+            } else {
+                format!("{tag}:{payload}")
+            };
+            let _ = validate_scheme_public(&candidate, "fuzz");
+            let _ = scheme_derive_public(&candidate);
+            let _ = scheme_sign_root(&candidate, ROOT);
+            let _ = scheme_verify_root(&candidate, ROOT, &candidate);
+        }
+    }
+
+    #[test]
+    fn random_seeds_round_trip_and_reject_cross_key_verification() {
+        let mut state: u64 = 0x0123_4567_89ab_cdef;
+        let mut random_hex = |bytes: usize| -> String {
+            (0..bytes * 2)
+                .map(|_| char::from(b"0123456789abcdef"[(lcg(&mut state) as usize) % 16]))
+                .collect()
+        };
+        for _ in 0..6 {
+            let root = random_hex(32);
+            for scheme in ALL {
+                let seed_a = random_hex(scheme.seed_len());
+                let seed_b = random_hex(scheme.seed_len());
+                let secret_a = scheme_secret_from_seed(scheme, &seed_a).unwrap();
+                let secret_b = scheme_secret_from_seed(scheme, &seed_b).unwrap();
+                let public_a = scheme_derive_public(&secret_a).unwrap();
+                let public_b = scheme_derive_public(&secret_b).unwrap();
+                let signature = scheme_sign_root(&secret_a, &root).unwrap();
+                scheme_verify_root(&public_a, &root, &signature).unwrap_or_else(|e| {
+                    panic!("{} random-seed round trip failed: {e}", scheme.tag())
+                });
+                assert!(
+                    scheme_verify_root(&public_b, &root, &signature).is_err(),
+                    "{} signature verified under a different random key",
+                    scheme.tag()
+                );
+            }
+        }
+    }
 }
