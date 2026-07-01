@@ -6,12 +6,13 @@ use nebula_testnet::{
     runtime::{
         bridge_observer_deposit_payload_root, bridge_observer_evidence_root,
         sequencer_key_rotation_approval_root, sequencer_key_rotation_payload_root,
-        serve_runtime_rpc_with_options, withdrawal_authorization_root,
+        serve_runtime_rpc_with_options, sign_runtime_root, withdrawal_authorization_root,
         withdrawal_operator_approval_root, withdrawal_operator_finalization_payload_root,
         NebulaRuntime, RuntimeBridgeDeposit, RuntimeBridgeObserverEvidence, RuntimeConfig,
         RuntimeLaunchBinding, RuntimeNodeOptions, RuntimePublicTestnetPeerManifestBinding,
         RuntimeSequencerKeyRotationApproval, RuntimeStorage, RuntimeTransaction,
-        RuntimeWithdrawalOperatorApproval, RuntimeWithdrawalRequest, MIN_BRIDGE_CONFIRMATIONS,
+        RuntimeWithdrawalOperatorApproval, RuntimeWithdrawalRequest,
+        DEFAULT_DEV_SEQUENCER_SECRET_KEY_HEX, MIN_BRIDGE_CONFIRMATIONS,
     },
     sample_deployment_attestation_json_pretty, sample_public_probe_json_pretty,
     sample_public_status_manifest_json_pretty, sample_validator_set_json_pretty,
@@ -1119,6 +1120,10 @@ fn launch_bound_accountability_report_blocks_public_ops_and_mutations() {
         .expect("latest hash is a string")
         .to_string();
 
+    let sequencer_secret = "3d".repeat(32);
+    let first_block_signature = sign_runtime_root(&sequencer_secret, &first_block_hash).unwrap();
+    let second_block_hash = hex_64("launch-bound-second-block");
+    let second_block_signature = sign_runtime_root(&sequencer_secret, &second_block_hash).unwrap();
     let report = rpc_call(
         &admin_addr,
         "nebula_reportEquivocation",
@@ -1126,7 +1131,9 @@ fn launch_bound_accountability_report_blocks_public_ops_and_mutations() {
             "admin_token": ADMIN_TOKEN,
             "height": height,
             "first_block_hash": first_block_hash,
-            "second_block_hash": hex_64("launch-bound-second-block"),
+            "first_block_signature": first_block_signature,
+            "second_block_hash": second_block_hash,
+            "second_block_signature": second_block_signature,
             "reporter_id": "operator-a",
             "evidence_root": hex_64("launch-bound-equivocation"),
         }),
@@ -1189,6 +1196,11 @@ fn accountability_evidence_closes_admin_producer_mutations_but_remains_visible()
         .as_str()
         .expect("block hash is a string");
 
+    let first_block_signature =
+        sign_runtime_root(DEFAULT_DEV_SEQUENCER_SECRET_KEY_HEX, first_block_hash).unwrap();
+    let second_block_hash = hex_64("second-block");
+    let second_block_signature =
+        sign_runtime_root(DEFAULT_DEV_SEQUENCER_SECRET_KEY_HEX, &second_block_hash).unwrap();
     let report = rpc_call(
         &admin_addr,
         "nebula_reportEquivocation",
@@ -1196,7 +1208,9 @@ fn accountability_evidence_closes_admin_producer_mutations_but_remains_visible()
             "admin_token": ADMIN_TOKEN,
             "height": height,
             "first_block_hash": first_block_hash,
-            "second_block_hash": hex_64("second-block"),
+            "first_block_signature": first_block_signature,
+            "second_block_hash": second_block_hash,
+            "second_block_signature": second_block_signature,
             "reporter_id": "operator-a",
             "evidence_root": hex_64("equivocation-evidence"),
         }),

@@ -14,7 +14,6 @@ const KEY_LEN: usize = 32;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TxExtraError {
     Truncated,
-    UnknownTag(u8),
     BadVarint,
 }
 
@@ -22,7 +21,6 @@ impl fmt::Display for TxExtraError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TxExtraError::Truncated => write!(f, "tx_extra ended mid-field"),
-            TxExtraError::UnknownTag(tag) => write!(f, "tx_extra has unknown tag {tag:#04x}"),
             TxExtraError::BadVarint => write!(f, "tx_extra varint is malformed"),
         }
     }
@@ -100,7 +98,7 @@ pub fn parse_tx_extra(extra: &[u8]) -> Result<TxExtra, TxExtraError> {
                     out.additional_public_keys.push(key);
                 }
             }
-            other => return Err(TxExtraError::UnknownTag(other)),
+            _ => break,
         }
     }
     Ok(out)
@@ -206,11 +204,34 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_tag_and_truncation() {
-        assert_eq!(parse_tx_extra(&[0x77]), Err(TxExtraError::UnknownTag(0x77)));
+    fn tolerates_unknown_tag_and_rejects_truncation() {
+        assert_eq!(parse_tx_extra(&[0x77]), Ok(TxExtra::default()));
         assert_eq!(
             parse_tx_extra(&[TAG_PUBKEY, 1, 2, 3]),
             Err(TxExtraError::Truncated)
+        );
+    }
+
+    #[test]
+    fn parses_binding_nonce_before_an_unknown_trailing_tag() {
+        let account = "nbla-acct-1";
+        let nonce = encode_nebula_account_binding(account);
+        let mut extra = vec![TAG_PUBKEY];
+        extra.extend_from_slice(&[9u8; KEY_LEN]);
+        extra.push(TAG_NONCE);
+        extra.push(nonce.len() as u8);
+        extra.extend_from_slice(&nonce);
+        extra.push(0x77);
+        extra.extend_from_slice(&[1, 2, 3, 4]);
+
+        let parsed = parse_tx_extra(&extra).unwrap();
+        assert!(parsed.tx_public_key.is_some());
+        let parsed_nonce = parsed
+            .nonce
+            .expect("binding nonce parsed before the unknown tag");
+        assert_eq!(
+            nebula_account_binding(&parsed_nonce).as_deref(),
+            Some(account)
         );
     }
 

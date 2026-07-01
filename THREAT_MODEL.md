@@ -46,11 +46,16 @@ with the mitigations Nebula implements and the residual gaps. Read alongside
 - Can forge state, censor, or halt the chain. **Mitigations:** followers verify the per-height
   sequencer signature *and* re-execute the replayable columns (per-account nXMR + validator
   points) so silent nXMR/point forgery is caught (`reexecute_replayable_state`); equivocation and
-  mis-sign evidence halt all mutations fail-closed (`ensure_accountability_clean`); key rotation
-  is scheme-aware and quorum-gated; N-of-M block co-signing (when configured) requires validator
-  attestations. **Residual:** NBLA balances, nonces, and the shielded-note set remain
-  sequencer-attested (no in-block journal), and censorship/liveness depend on the single
-  sequencer — decentralized BFT is future work.
+  mis-sign evidence halt all mutations fail-closed (`ensure_accountability_clean`). An equivocation
+  report only wedges the chain if it carries **cryptographic proof** — the sequencer's signatures
+  over two *different* block hashes at the same height, verified against the key active at that
+  height (`validate_accountability_report`) — so a fabricated report cannot grief the chain. Key
+  rotation is scheme-aware and quorum-gated; N-of-M block co-signing (when configured) requires
+  validator attestations. **Residual:** NBLA balances, nonces, and the shielded-note set remain
+  sequencer-attested (no in-block journal); chain-governed policy (fee floor, faucet rate, block/
+  mempool limits) travels in the sequencer-attested config, guarded by the distinct-peer sync
+  quorum rather than a separately-signed governance root; and censorship/liveness depend on the
+  single sequencer — decentralized BFT is future work.
 
 ### Network attacker (MITM on Monero or peer RPC)
 - **Monero RPC:** mitigated by TLS with optional SHA-256 leaf-certificate pinning

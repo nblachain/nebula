@@ -691,6 +691,8 @@ pub struct RuntimeAccountabilityReport {
     pub height: u64,
     pub first_block_hash: String,
     pub second_block_hash: String,
+    pub first_block_signature: String,
+    pub second_block_signature: String,
     pub reporter_id: String,
     pub evidence_root: String,
     pub reported_at_unix_ms: u128,
@@ -4235,11 +4237,14 @@ impl NebulaRuntime {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn report_equivocation(
         &mut self,
         height: u64,
         first_block_hash: &str,
+        first_block_signature: &str,
         second_block_hash: &str,
+        second_block_signature: &str,
         reporter_id: &str,
         evidence_root: &str,
     ) -> Result<AccountabilityReportReceipt, String> {
@@ -4267,18 +4272,25 @@ impl NebulaRuntime {
         {
             return Err(format!("accountability report {report_id} already exists"));
         }
+        let sequencer_public_key = resolve_sequencer_public_key_for_height(
+            &self.sequencer_key_rotations,
+            &self.config.sequencer_public_key_hex,
+            height,
+        );
         let mut report = RuntimeAccountabilityReport {
             report_id,
             height,
             first_block_hash,
             second_block_hash,
+            first_block_signature: first_block_signature.to_string(),
+            second_block_signature: second_block_signature.to_string(),
             reporter_id: reporter_id.to_string(),
             evidence_root,
             reported_at_unix_ms: unix_ms(),
             root: String::new(),
         };
         report.root = accountability_report_root(&report);
-        validate_accountability_report(&report)?;
+        validate_accountability_report(&report, &sequencer_public_key)?;
         self.accountability_reports.push(report.clone());
         Ok(AccountabilityReportReceipt {
             recorded: true,
@@ -6257,7 +6269,9 @@ fn dispatch_json_rpc_method(
             ensure_admin_rpc(state, &params, method)?;
             let height = required_u64_param(&params, "height")?;
             let first_block_hash = required_str_param(&params, "first_block_hash")?;
+            let first_block_signature = required_str_param(&params, "first_block_signature")?;
             let second_block_hash = required_str_param(&params, "second_block_hash")?;
+            let second_block_signature = required_str_param(&params, "second_block_signature")?;
             let reporter_id = required_str_param(&params, "reporter_id")?;
             let evidence_root = required_str_param(&params, "evidence_root")?;
             let report = {
@@ -6265,7 +6279,9 @@ fn dispatch_json_rpc_method(
                 runtime.report_equivocation(
                     height,
                     &first_block_hash,
+                    &first_block_signature,
                     &second_block_hash,
+                    &second_block_signature,
                     &reporter_id,
                     &evidence_root,
                 )?
@@ -6593,7 +6609,7 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
         return Err("snapshot root does not match snapshot contents".to_string());
     }
     validate_sequencer_key_history(snapshot)?;
-    validate_accountability_reports(&snapshot.accountability_reports)?;
+    validate_accountability_reports(snapshot)?;
 
     let mut previous_hash: Option<String> = None;
     for (index, block) in snapshot.blocks.iter().enumerate() {
@@ -7190,13 +7206,16 @@ fn validate_sequencer_key_rotation(
     Ok(())
 }
 
-fn sequencer_public_key_for_height(snapshot: &RuntimeSnapshot, height: u64) -> String {
-    let mut public_key = snapshot
-        .sequencer_key_rotations
+fn resolve_sequencer_public_key_for_height(
+    rotations: &[RuntimeSequencerKeyRotation],
+    fallback_public_key: &str,
+    height: u64,
+) -> String {
+    let mut public_key = rotations
         .first()
         .map(|rotation| rotation.old_public_key_hex.clone())
-        .unwrap_or_else(|| snapshot.config.sequencer_public_key_hex.clone());
-    for rotation in &snapshot.sequencer_key_rotations {
+        .unwrap_or_else(|| fallback_public_key.to_string());
+    for rotation in rotations {
         if height < rotation.activation_height {
             break;
         }
@@ -7205,10 +7224,19 @@ fn sequencer_public_key_for_height(snapshot: &RuntimeSnapshot, height: u64) -> S
     public_key
 }
 
-fn validate_accountability_reports(reports: &[RuntimeAccountabilityReport]) -> Result<(), String> {
+fn sequencer_public_key_for_height(snapshot: &RuntimeSnapshot, height: u64) -> String {
+    resolve_sequencer_public_key_for_height(
+        &snapshot.sequencer_key_rotations,
+        &snapshot.config.sequencer_public_key_hex,
+        height,
+    )
+}
+
+fn validate_accountability_reports(snapshot: &RuntimeSnapshot) -> Result<(), String> {
     let mut report_ids = BTreeMap::<String, usize>::new();
-    for (index, report) in reports.iter().enumerate() {
-        validate_accountability_report(report)
+    for (index, report) in snapshot.accountability_reports.iter().enumerate() {
+        let sequencer_public_key = sequencer_public_key_for_height(snapshot, report.height);
+        validate_accountability_report(report, &sequencer_public_key)
             .map_err(|error| format!("accountability_reports[{index}]: {error}"))?;
         let normalized_report_id = report.report_id.to_ascii_lowercase();
         if let Some(previous_index) = report_ids.insert(normalized_report_id, index) {
@@ -7220,7 +7248,10 @@ fn validate_accountability_reports(reports: &[RuntimeAccountabilityReport]) -> R
     Ok(())
 }
 
-fn validate_accountability_report(report: &RuntimeAccountabilityReport) -> Result<(), String> {
+fn validate_accountability_report(
+    report: &RuntimeAccountabilityReport,
+    sequencer_public_key: &str,
+) -> Result<(), String> {
     if report.height == 0 {
         return Err("height must be greater than zero".to_string());
     }
@@ -7235,6 +7266,29 @@ fn validate_accountability_report(report: &RuntimeAccountabilityReport) -> Resul
     }
     validate_account_id(&report.reporter_id)?;
     validate_fixed_hex(&report.evidence_root, "evidence_root", 64)?;
+    if report.first_block_signature.trim().is_empty()
+        || report.second_block_signature.trim().is_empty()
+    {
+        return Err(
+            "accountability report must carry both conflicting-block signatures".to_string(),
+        );
+    }
+    nebula_crypto::scheme_verify_root(
+        sequencer_public_key,
+        &report.first_block_hash,
+        &report.first_block_signature,
+    )
+    .map_err(|error| {
+        format!("first_block_signature is not a valid sequencer signature for the reported height: {error}")
+    })?;
+    nebula_crypto::scheme_verify_root(
+        sequencer_public_key,
+        &report.second_block_hash,
+        &report.second_block_signature,
+    )
+    .map_err(|error| {
+        format!("second_block_signature is not a valid sequencer signature for the reported height: {error}")
+    })?;
     let expected_report_id = accountability_report_id(
         report.height,
         &report.first_block_hash,
@@ -9113,6 +9167,8 @@ fn accountability_report_root(report: &RuntimeAccountabilityReport) -> String {
         "height": report.height,
         "first_block_hash": report.first_block_hash,
         "second_block_hash": report.second_block_hash,
+        "first_block_signature": report.first_block_signature,
+        "second_block_signature": report.second_block_signature,
         "reporter_id": report.reporter_id,
         "evidence_root": report.evidence_root,
         "reported_at_unix_ms": report.reported_at_unix_ms,
@@ -13074,13 +13130,34 @@ mod tests {
     fn runtime_records_equivocation_accountability_report() {
         let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
         runtime.produce_block();
-        let first_block_hash = runtime.latest_block().block_hash;
+        let first_block = runtime.latest_block();
+        let first_block_hash = first_block.block_hash.clone();
+        let first_block_signature = first_block.signature.clone();
+        let secret = runtime.sequencer_secret_key_hex.clone().unwrap();
         let second_block_hash = "e".repeat(64);
+        let second_block_signature = sign_block_hash(&second_block_hash, &secret).unwrap();
+
+        let forged = "1".repeat(64);
+        assert!(runtime
+            .report_equivocation(
+                1,
+                &first_block_hash,
+                &forged,
+                &second_block_hash,
+                &second_block_signature,
+                "observer-a",
+                &"c".repeat(64),
+            )
+            .unwrap_err()
+            .contains("first_block_signature"));
+
         let receipt = runtime
             .report_equivocation(
                 1,
                 &first_block_hash,
+                &first_block_signature,
                 &second_block_hash,
+                &second_block_signature,
                 "observer-a",
                 &"c".repeat(64),
             )
@@ -13093,7 +13170,9 @@ mod tests {
             .report_equivocation(
                 1,
                 &second_block_hash,
+                &second_block_signature,
                 &first_block_hash,
+                &first_block_signature,
                 "observer-a",
                 &"c".repeat(64),
             )
@@ -13115,6 +13194,37 @@ mod tests {
         assert!(ops
             .blocking_gaps
             .contains(&"sequencer-accountability-evidence-open".to_string()));
+    }
+
+    #[test]
+    fn validate_snapshot_rejects_unproven_accountability_report() {
+        let runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let mut snapshot = runtime.export_snapshot();
+        let mut report = RuntimeAccountabilityReport {
+            report_id: String::new(),
+            height: 1,
+            first_block_hash: "a".repeat(64),
+            second_block_hash: "b".repeat(64),
+            first_block_signature: "0".repeat(128),
+            second_block_signature: "0".repeat(128),
+            reporter_id: "attacker".to_string(),
+            evidence_root: "c".repeat(64),
+            reported_at_unix_ms: 1,
+            root: String::new(),
+        };
+        report.report_id = accountability_report_id(
+            report.height,
+            &report.first_block_hash,
+            &report.second_block_hash,
+            &report.reporter_id,
+            &report.evidence_root,
+        );
+        report.root = accountability_report_root(&report);
+        snapshot.accountability_reports.push(report);
+        snapshot.root = snapshot_root(&snapshot);
+
+        let error = validate_snapshot(&snapshot).unwrap_err();
+        assert!(error.contains("signature"), "{error}");
     }
 
     #[test]
@@ -13159,6 +13269,9 @@ mod tests {
         assert_eq!(block["height"], 2);
         assert_eq!(block["producer_public_key"], new_public_key_hex);
 
+        let second_block_hash = "f".repeat(64);
+        let second_block_signature =
+            sign_block_hash(&second_block_hash, &new_secret_key_hex).unwrap();
         let receipt = dispatch_json_rpc_method(
             &state,
             "nebula_reportEquivocation",
@@ -13166,7 +13279,9 @@ mod tests {
                 "admin_token": "admin",
                 "height": block["height"],
                 "first_block_hash": block["block_hash"].as_str().unwrap(),
-                "second_block_hash": "f".repeat(64),
+                "first_block_signature": block["signature"].as_str().unwrap(),
+                "second_block_hash": second_block_hash,
+                "second_block_signature": second_block_signature,
                 "reporter_id": "observer-a",
                 "evidence_root": "a".repeat(64),
             }),
