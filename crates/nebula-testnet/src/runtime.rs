@@ -50,6 +50,7 @@ pub const DEFAULT_SYNC_PEER_QUORUM: usize = 1;
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 1_048_576;
 pub const DEFAULT_MAX_REQUESTS_PER_MINUTE: u32 = 600;
 pub const DEFAULT_MAX_ACTIVE_CONNECTIONS: usize = 512;
+pub const MAX_EVM_GAS_LIMIT: u64 = 30_000_000;
 pub const DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS: usize = 32;
 pub const DEFAULT_MAX_SNAPSHOT_RESPONSE_BYTES: usize = 268_435_456;
 const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
@@ -747,6 +748,8 @@ pub struct RuntimeSnapshot {
     pub bridge_bonds: BTreeMap<String, RuntimeBridgeBond>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub validator_fee_preferences: BTreeMap<String, RuntimeValidatorFeePreference>,
+    #[serde(default, skip_serializing_if = "nebula_evm::EvmStateExport::is_empty")]
+    pub evm_state: nebula_evm::EvmStateExport,
     pub root: String,
 }
 
@@ -1201,6 +1204,7 @@ pub struct NebulaRuntime {
     nullifiers: BTreeSet<String>,
     bridge_bonds: BTreeMap<String, RuntimeBridgeBond>,
     validator_fee_preferences: BTreeMap<String, RuntimeValidatorFeePreference>,
+    evm: nebula_evm::EvmExecutor,
     monero_bridge: Option<MoneroBridgeVerifier>,
 }
 
@@ -3243,6 +3247,30 @@ fn parse_blinding(blinding_hex: &str) -> Result<nebula_privacy::Blinding, String
     Ok(nebula_privacy::Blinding::from_bytes(bytes))
 }
 
+pub fn evm_authorization_root(
+    account: &str,
+    action: &str,
+    target: &str,
+    payload_hex: &str,
+    value: u128,
+    gas_limit: u64,
+    nonce: u64,
+) -> String {
+    let payload_root = hex::encode(Sha3_256::digest(
+        payload_hex.to_ascii_lowercase().as_bytes(),
+    ));
+    stable_runtime_root(&json!({
+        "evm_domain": "nebula-runtime-evm-authorization-v1",
+        "account": account,
+        "action": action,
+        "target": target.to_ascii_lowercase(),
+        "payload_root": payload_root,
+        "value": value.to_string(),
+        "gas_limit": gas_limit,
+        "nonce": nonce,
+    }))
+}
+
 pub fn shield_authorization_root(
     account: &str,
     amount: u128,
@@ -3291,6 +3319,7 @@ impl NebulaRuntime {
             nullifiers: BTreeSet::new(),
             bridge_bonds: BTreeMap::new(),
             validator_fee_preferences: BTreeMap::new(),
+            evm: nebula_evm::EvmExecutor::new(),
             monero_bridge: None,
         };
         runtime.accounts.insert(
@@ -3386,6 +3415,8 @@ impl NebulaRuntime {
             nullifiers: snapshot.nullifiers,
             bridge_bonds: snapshot.bridge_bonds,
             validator_fee_preferences: snapshot.validator_fee_preferences,
+            evm: nebula_evm::EvmExecutor::import_state(&snapshot.evm_state)
+                .map_err(|error| format!("snapshot EVM state rejected: {error}"))?,
             monero_bridge: None,
         })
     }
@@ -3418,6 +3449,7 @@ impl NebulaRuntime {
             nullifiers: self.nullifiers.clone(),
             bridge_bonds: self.bridge_bonds.clone(),
             validator_fee_preferences: self.validator_fee_preferences.clone(),
+            evm_state: self.evm.export_state(),
             root: String::new(),
         };
         snapshot.root = snapshot_root(&snapshot);
@@ -3697,6 +3729,204 @@ impl NebulaRuntime {
             required_units,
             on_chain_unlocked_units,
         })
+    }
+
+    pub fn evm_address(&self, account: &str) -> Result<String, String> {
+        validate_account_id(account)?;
+        Ok(nebula_evm::evm_address_for_account(account))
+    }
+
+    pub fn evm_balance(&self, address_hex: &str) -> Result<u128, String> {
+        self.evm.balance_of(address_hex)
+    }
+
+    pub fn evm_code(&self, address_hex: &str) -> Result<String, String> {
+        self.evm.code_of(address_hex)
+    }
+
+    pub fn evm_storage(&self, address_hex: &str, slot_hex: &str) -> Result<String, String> {
+        self.evm.storage_at(address_hex, slot_hex)
+    }
+
+    pub fn evm_view(
+        &self,
+        caller_hex: &str,
+        contract_hex: &str,
+        calldata_hex: &str,
+        gas_limit: u64,
+    ) -> Result<nebula_evm::EvmOutcome, String> {
+        if gas_limit == 0 || gas_limit > MAX_EVM_GAS_LIMIT {
+            return Err(format!(
+                "evm gas_limit must be between 1 and {MAX_EVM_GAS_LIMIT}"
+            ));
+        }
+        let mut executor = self.evm.clone();
+        executor.view(caller_hex, contract_hex, calldata_hex, gas_limit)
+    }
+
+    fn evm_charge_and_fund(
+        &mut self,
+        account: &str,
+        caller_address: &str,
+        value: u128,
+        gas_limit: u64,
+        nonce: u64,
+    ) -> Result<(), String> {
+        let fee_nebulai = u128::from(gas_limit)
+            .checked_mul(self.config.gas_price_nebulai)
+            .ok_or_else(|| "evm fee computation overflowed".to_string())?;
+        let debit = value
+            .checked_add(fee_nebulai)
+            .ok_or_else(|| "evm debit computation overflowed".to_string())?;
+        let sender = self
+            .accounts
+            .get_mut(account)
+            .ok_or_else(|| format!("account {account} does not exist"))?;
+        if sender.nonce != nonce {
+            return Err(format!(
+                "evm nonce expected {} but got {nonce}",
+                sender.nonce
+            ));
+        }
+        if sender.nbla_nebulai < debit {
+            return Err(format!(
+                "insufficient NBLA for evm operation: need {debit}, have {}",
+                sender.nbla_nebulai
+            ));
+        }
+        sender.nbla_nebulai -= debit;
+        sender.nonce = sender
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| "evm nonce overflowed".to_string())?;
+        let reward_account_id = self.config.validator_reward_account();
+        let reward_account = self
+            .accounts
+            .entry(reward_account_id)
+            .or_insert_with(RuntimeAccount::empty);
+        reward_account.nbla_nebulai = reward_account
+            .nbla_nebulai
+            .checked_add(fee_nebulai)
+            .ok_or_else(|| "evm fee credit overflowed".to_string())?;
+        if value > 0 {
+            self.evm.credit_balance(caller_address, value)?;
+        }
+        Ok(())
+    }
+
+    pub fn evm_deploy(
+        &mut self,
+        account: &str,
+        init_code_hex: &str,
+        value: u128,
+        gas_limit: u64,
+        nonce: u64,
+        signature: &str,
+    ) -> Result<nebula_evm::EvmOutcome, String> {
+        self.ensure_accountability_clean()?;
+        if gas_limit == 0 || gas_limit > MAX_EVM_GAS_LIMIT {
+            return Err(format!(
+                "evm gas_limit must be between 1 and {MAX_EVM_GAS_LIMIT}"
+            ));
+        }
+        nebula_evm::validate_code_hex(init_code_hex, "init_code_hex")?;
+        let authorization_root = evm_authorization_root(
+            account,
+            "deploy",
+            "",
+            init_code_hex,
+            value,
+            gas_limit,
+            nonce,
+        );
+        verify_account_signature(account, &authorization_root, signature, "evm_signature")?;
+        let caller_address = nebula_evm::evm_address_for_account(account);
+        self.evm_charge_and_fund(account, &caller_address, value, gas_limit, nonce)?;
+        self.evm
+            .deploy(&caller_address, init_code_hex, value, gas_limit)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn evm_call(
+        &mut self,
+        account: &str,
+        contract_hex: &str,
+        calldata_hex: &str,
+        value: u128,
+        gas_limit: u64,
+        nonce: u64,
+        signature: &str,
+    ) -> Result<nebula_evm::EvmOutcome, String> {
+        self.ensure_accountability_clean()?;
+        if gas_limit == 0 || gas_limit > MAX_EVM_GAS_LIMIT {
+            return Err(format!(
+                "evm gas_limit must be between 1 and {MAX_EVM_GAS_LIMIT}"
+            ));
+        }
+        nebula_evm::validate_address_hex(contract_hex, "contract_hex")?;
+        nebula_evm::validate_calldata_hex(calldata_hex, "calldata_hex")?;
+        let authorization_root = evm_authorization_root(
+            account,
+            "call",
+            contract_hex,
+            calldata_hex,
+            value,
+            gas_limit,
+            nonce,
+        );
+        verify_account_signature(account, &authorization_root, signature, "evm_signature")?;
+        let caller_address = nebula_evm::evm_address_for_account(account);
+        self.evm_charge_and_fund(account, &caller_address, value, gas_limit, nonce)?;
+        self.evm.call(
+            &caller_address,
+            contract_hex,
+            calldata_hex,
+            value,
+            gas_limit,
+        )
+    }
+
+    pub fn evm_withdraw(
+        &mut self,
+        account: &str,
+        amount: u128,
+        nonce: u64,
+        signature: &str,
+    ) -> Result<u128, String> {
+        self.ensure_accountability_clean()?;
+        if amount == 0 {
+            return Err("evm withdraw amount must be greater than zero".to_string());
+        }
+        let authorization_root =
+            evm_authorization_root(account, "withdraw", "", "", amount, 0, nonce);
+        verify_account_signature(account, &authorization_root, signature, "evm_signature")?;
+        let caller_address = nebula_evm::evm_address_for_account(account);
+        {
+            let sender = self
+                .accounts
+                .get_mut(account)
+                .ok_or_else(|| format!("account {account} does not exist"))?;
+            if sender.nonce != nonce {
+                return Err(format!(
+                    "evm nonce expected {} but got {nonce}",
+                    sender.nonce
+                ));
+            }
+        }
+        self.evm.debit_balance(&caller_address, amount)?;
+        let sender = self
+            .accounts
+            .get_mut(account)
+            .ok_or_else(|| format!("account {account} does not exist"))?;
+        sender.nonce = sender
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| "evm nonce overflowed".to_string())?;
+        sender.nbla_nebulai = sender
+            .nbla_nebulai
+            .checked_add(amount)
+            .ok_or_else(|| "evm withdraw credit overflowed".to_string())?;
+        Ok(amount)
     }
 
     pub fn set_validator_fee_preference(
@@ -5083,6 +5313,7 @@ impl NebulaRuntime {
             &self.nullifiers,
             &self.bridge_bonds,
             &self.validator_fee_preferences,
+            &self.evm.export_state(),
         )
     }
 }
@@ -6265,6 +6496,92 @@ fn dispatch_json_rpc_method(
             state.persist()?;
             Ok(json!(report))
         }
+        "nebula_evmAddress" => {
+            let account = required_str_param(&params, "account")?;
+            let runtime = state.runtime.lock().expect("runtime mutex poisoned");
+            let address = runtime.evm_address(&account)?;
+            Ok(json!({ "account": account, "evm_address": address }))
+        }
+        "nebula_evmBalance" => {
+            let address = required_str_param(&params, "address")?;
+            let runtime = state.runtime.lock().expect("runtime mutex poisoned");
+            let balance = runtime.evm_balance(&address)?;
+            Ok(json!({ "address": address, "balance_nebulai": balance }))
+        }
+        "nebula_evmCode" => {
+            let address = required_str_param(&params, "address")?;
+            let runtime = state.runtime.lock().expect("runtime mutex poisoned");
+            let code = runtime.evm_code(&address)?;
+            Ok(json!({ "address": address, "code_hex": code }))
+        }
+        "nebula_evmStorage" => {
+            let address = required_str_param(&params, "address")?;
+            let slot = required_str_param(&params, "slot")?;
+            let runtime = state.runtime.lock().expect("runtime mutex poisoned");
+            let value = runtime.evm_storage(&address, &slot)?;
+            Ok(json!({ "address": address, "slot": slot, "value_hex": value }))
+        }
+        "nebula_evmView" => {
+            let caller = required_str_param(&params, "caller")?;
+            let contract = required_str_param(&params, "contract")?;
+            let calldata = optional_str_param(&params, "calldata")?.unwrap_or_default();
+            let gas_limit =
+                optional_u64_param(&params, "gas_limit")?.unwrap_or(nebula_evm::DEFAULT_GAS_LIMIT);
+            let runtime = state.runtime.lock().expect("runtime mutex poisoned");
+            let outcome = runtime.evm_view(&caller, &contract, &calldata, gas_limit)?;
+            Ok(json!(outcome))
+        }
+        "nebula_evmDeploy" => {
+            ensure_block_producer(state)?;
+            let account = required_str_param(&params, "account")?;
+            let init_code = required_str_param(&params, "init_code_hex")?;
+            let value = optional_u128_param(&params, "value")?.unwrap_or(0);
+            let gas_limit =
+                optional_u64_param(&params, "gas_limit")?.unwrap_or(nebula_evm::DEFAULT_GAS_LIMIT);
+            let nonce = required_u64_param(&params, "nonce")?;
+            let signature = required_str_param(&params, "signature")?;
+            let outcome = {
+                let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
+                runtime.evm_deploy(&account, &init_code, value, gas_limit, nonce, &signature)?
+            };
+            state.commit_direct_state_mutation()?;
+            state.persist()?;
+            Ok(json!(outcome))
+        }
+        "nebula_evmCall" => {
+            ensure_block_producer(state)?;
+            let account = required_str_param(&params, "account")?;
+            let contract = required_str_param(&params, "contract")?;
+            let calldata = optional_str_param(&params, "calldata")?.unwrap_or_default();
+            let value = optional_u128_param(&params, "value")?.unwrap_or(0);
+            let gas_limit =
+                optional_u64_param(&params, "gas_limit")?.unwrap_or(nebula_evm::DEFAULT_GAS_LIMIT);
+            let nonce = required_u64_param(&params, "nonce")?;
+            let signature = required_str_param(&params, "signature")?;
+            let outcome = {
+                let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
+                runtime.evm_call(
+                    &account, &contract, &calldata, value, gas_limit, nonce, &signature,
+                )?
+            };
+            state.commit_direct_state_mutation()?;
+            state.persist()?;
+            Ok(json!(outcome))
+        }
+        "nebula_evmWithdraw" => {
+            ensure_block_producer(state)?;
+            let account = required_str_param(&params, "account")?;
+            let amount = required_u128_param(&params, "amount")?;
+            let nonce = required_u64_param(&params, "nonce")?;
+            let signature = required_str_param(&params, "signature")?;
+            let withdrawn = {
+                let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
+                runtime.evm_withdraw(&account, amount, nonce, &signature)?
+            };
+            state.commit_direct_state_mutation()?;
+            state.persist()?;
+            Ok(json!({ "account": account, "withdrawn_nebulai": withdrawn }))
+        }
         "nebula_shield" => {
             ensure_block_producer(state)?;
             let account = required_str_param(&params, "account")?;
@@ -7141,6 +7458,7 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
         &snapshot.nullifiers,
         &snapshot.bridge_bonds,
         &snapshot.validator_fee_preferences,
+        &snapshot.evm_state,
     );
     if snapshot.state_root != expected_state_root {
         return Err("snapshot state_root does not match snapshot state".to_string());
@@ -8897,6 +9215,26 @@ where
     }
 }
 
+fn optional_str_param(params: &Value, name: &str) -> Result<Option<String>, String> {
+    match params.get(name) {
+        Some(value) if !value.is_null() => value
+            .as_str()
+            .map(|text| Some(text.to_string()))
+            .ok_or_else(|| format!("param {name} must be a string")),
+        _ => Ok(None),
+    }
+}
+
+fn optional_u64_param(params: &Value, name: &str) -> Result<Option<u64>, String> {
+    match params.get(name) {
+        Some(value) if !value.is_null() => value
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| format!("param {name} must be a u64")),
+        _ => Ok(None),
+    }
+}
+
 fn optional_u128_param(params: &Value, name: &str) -> Result<Option<u128>, String> {
     match params.get(name) {
         Some(value) if !value.is_null() => value_to_u128(value, name).map(Some),
@@ -9581,6 +9919,7 @@ fn runtime_state_root(
     nullifiers: &BTreeSet<String>,
     bridge_bonds: &BTreeMap<String, RuntimeBridgeBond>,
     validator_fee_preferences: &BTreeMap<String, RuntimeValidatorFeePreference>,
+    evm_state: &nebula_evm::EvmStateExport,
 ) -> String {
     let mut value = json!({
         "state_domain": "nebula-runtime-state-v1",
@@ -9605,6 +9944,9 @@ fn runtime_state_root(
     }
     if !validator_fee_preferences.is_empty() {
         value["validator_fee_preferences"] = json!(validator_fee_preferences);
+    }
+    if !evm_state.is_empty() {
+        value["evm_state"] = json!(evm_state);
     }
     stable_runtime_root(&value)
 }
@@ -9643,6 +9985,9 @@ fn snapshot_root(snapshot: &RuntimeSnapshot) -> String {
     }
     if !snapshot.validator_fee_preferences.is_empty() {
         value["validator_fee_preferences"] = json!(snapshot.validator_fee_preferences);
+    }
+    if !snapshot.evm_state.is_empty() {
+        value["evm_state"] = json!(snapshot.evm_state);
     }
     stable_runtime_root(&value)
 }
@@ -9952,6 +10297,7 @@ mod tests {
             &snapshot.nullifiers,
             &snapshot.bridge_bonds,
             &snapshot.validator_fee_preferences,
+            &snapshot.evm_state,
         );
         let latest = snapshot
             .blocks
@@ -10260,6 +10606,7 @@ mod tests {
             &snapshot.nullifiers,
             &snapshot.bridge_bonds,
             &snapshot.validator_fee_preferences,
+            &snapshot.evm_state,
         )
     }
 
@@ -11681,6 +12028,189 @@ mod tests {
             &sign_root_with_seed(0x3d, &root),
             sequence,
         )
+    }
+
+    const EVM_COUNTER_RUNTIME_HEX: &str = "6000546001018060005560005260206000f3";
+
+    fn evm_counter_init_code() -> String {
+        format!("6012600c60003960126000f3{EVM_COUNTER_RUNTIME_HEX}")
+    }
+
+    fn sign_evm_action(
+        account: &str,
+        action: &str,
+        target: &str,
+        payload_hex: &str,
+        value: u128,
+        gas_limit: u64,
+        nonce: u64,
+    ) -> String {
+        sign_test_root(&evm_authorization_root(
+            account,
+            action,
+            target,
+            payload_hex,
+            value,
+            gas_limit,
+            nonce,
+        ))
+    }
+
+    #[test]
+    fn evm_deploy_call_withdraw_flow_charges_fees_and_round_trips_snapshot() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let account = test_account_id();
+        runtime.faucet(&account).unwrap();
+        let gas_limit = 200_000u64;
+        let fee = u128::from(gas_limit) * runtime.config().gas_price_nebulai;
+        let reward_account = runtime.config().validator_reward_account();
+        let init_code = evm_counter_init_code();
+
+        let balance_before = runtime.account(&account).unwrap().nbla_nebulai;
+        let reward_before = runtime
+            .account(&reward_account)
+            .map(|state| state.nbla_nebulai)
+            .unwrap_or(0);
+        let deployed = runtime
+            .evm_deploy(
+                &account,
+                &init_code,
+                0,
+                gas_limit,
+                0,
+                &sign_evm_action(&account, "deploy", "", &init_code, 0, gas_limit, 0),
+            )
+            .unwrap();
+        assert!(deployed.success, "{deployed:?}");
+        let contract = deployed.contract_address.clone().unwrap();
+        assert_eq!(
+            runtime.account(&account).unwrap().nbla_nebulai,
+            balance_before - fee
+        );
+        assert_eq!(
+            runtime.account(&reward_account).unwrap().nbla_nebulai,
+            reward_before + fee
+        );
+        assert_eq!(
+            runtime.evm_code(&contract).unwrap(),
+            EVM_COUNTER_RUNTIME_HEX
+        );
+
+        let called = runtime
+            .evm_call(
+                &account,
+                &contract,
+                "",
+                0,
+                gas_limit,
+                1,
+                &sign_evm_action(&account, "call", &contract, "", 0, gas_limit, 1),
+            )
+            .unwrap();
+        assert!(called.success);
+        assert!(called.output.ends_with("01"));
+
+        let own_address = runtime.evm_address(&account).unwrap();
+        runtime
+            .evm_call(
+                &account,
+                &own_address,
+                "",
+                700,
+                gas_limit,
+                2,
+                &sign_evm_action(&account, "call", &own_address, "", 700, gas_limit, 2),
+            )
+            .unwrap();
+        assert_eq!(runtime.evm_balance(&own_address).unwrap(), 700);
+
+        let nbla_before_withdraw = runtime.account(&account).unwrap().nbla_nebulai;
+        runtime
+            .evm_withdraw(
+                &account,
+                700,
+                3,
+                &sign_test_root(&evm_authorization_root(
+                    &account, "withdraw", "", "", 700, 0, 3,
+                )),
+            )
+            .unwrap();
+        assert_eq!(runtime.evm_balance(&own_address).unwrap(), 0);
+        assert_eq!(
+            runtime.account(&account).unwrap().nbla_nebulai,
+            nbla_before_withdraw + 700
+        );
+
+        runtime.produce_block();
+        let snapshot = runtime.export_snapshot();
+        assert!(!snapshot.evm_state.is_empty());
+        validate_snapshot(&snapshot).unwrap();
+        let imported =
+            NebulaRuntime::from_snapshot(RuntimeConfig::public_testnet_default(), snapshot)
+                .unwrap();
+        assert_eq!(
+            imported.evm_code(&contract).unwrap(),
+            EVM_COUNTER_RUNTIME_HEX
+        );
+        let viewed = imported
+            .evm_view(&own_address, &contract, "", gas_limit)
+            .unwrap();
+        assert!(viewed.output.ends_with("02"));
+    }
+
+    #[test]
+    fn evm_operations_reject_bad_signature_wrong_nonce_and_bad_inputs() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let account = test_account_id();
+        runtime.faucet(&account).unwrap();
+        let init_code = evm_counter_init_code();
+        let gas_limit = 200_000u64;
+
+        let wrong_signature = sign_root_with_seed(0x3d, &"11".repeat(32));
+        assert!(runtime
+            .evm_deploy(&account, &init_code, 0, gas_limit, 0, &wrong_signature)
+            .is_err());
+        assert!(runtime
+            .evm_deploy(
+                &account,
+                &init_code,
+                0,
+                gas_limit,
+                5,
+                &sign_evm_action(&account, "deploy", "", &init_code, 0, gas_limit, 5),
+            )
+            .is_err());
+        assert!(runtime
+            .evm_deploy(
+                &account,
+                "not-hex",
+                0,
+                gas_limit,
+                0,
+                &sign_evm_action(&account, "deploy", "", "not-hex", 0, gas_limit, 0),
+            )
+            .is_err());
+        assert!(runtime
+            .evm_deploy(
+                &account,
+                &init_code,
+                0,
+                0,
+                0,
+                &sign_evm_action(&account, "deploy", "", &init_code, 0, 0, 0),
+            )
+            .is_err());
+        assert!(runtime
+            .evm_withdraw(
+                &account,
+                50,
+                0,
+                &sign_test_root(&evm_authorization_root(
+                    &account, "withdraw", "", "", 50, 0, 0
+                )),
+            )
+            .is_err());
+        assert_eq!(runtime.account(&account).unwrap().nonce, 0);
     }
 
     #[test]

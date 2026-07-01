@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/nebula-crypto",
+    "crates/nebula-evm",
     "crates/nebula-monero",
     "crates/nebula-privacy",
     "crates/nebula-testnet",

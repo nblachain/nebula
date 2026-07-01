@@ -13,6 +13,7 @@ with the mitigations Nebula implements and the residual gaps. Read alongside
 | **nXMR balances** | `RuntimeAccount.nxmr_units` | Bridge quorum + (opt-in) node view-key proofs; **follower re-execution** of per-account nXMR (including the in-kind validator fee share routed by each block's signed `fee_preference` stamp) |
 | **Custody XMR** | Off-chain Monero multisig wallet | M-of-N operators; optional on-chain balance check (`verify_on_chain_custody`); operator bonds |
 | **Shielded amounts** | Pedersen commitments in `shielded_notes` | Bulletproofs range proofs + homomorphic balance; amounts hidden, **graph public** |
+| **EVM contract state** | `RuntimeSnapshot.evm_state` (accounts/code/storage) | Signed state root; per-account signatures + nonces on deploy/call/withdraw; NBLA-only prepaid fees; sequencer-attested (no follower contract re-execution) |
 | **Sequencer signing key** | Operator infrastructure | Out-of-band key management (HSM = ops); equivocation accountability fail-closed |
 | **Bridge quorum keys** | Operator/observer infrastructure | Identity-attested launch roster; **slashable bonds**; signer diversity = ops |
 | **Validator co-signer keys** | Validator infrastructure | Launch-attested roster; N-of-M block co-signatures |

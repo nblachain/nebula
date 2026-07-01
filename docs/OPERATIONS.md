@@ -83,6 +83,27 @@ and rotation (`nebula_rotateSequencerKey`) requires an operator quorum.
 A node restart intentionally adopts chain governance from its own verified snapshot; cross-check
 governance parameters against peers via the sync quorum after any upgrade.
 
+## EVM execution
+
+The runtime embeds an EVM (`nebula-evm`, built on revm). NBLA (in nebulai) is the native EVM
+balance; each Nebula account maps to a deterministic EVM address
+(`nebula_evmAddress`). Contract state lives in the signed `state_root`/`snapshot_root`
+(folded only when non-empty, so pre-EVM roots are unchanged).
+
+- **Mutations** (signed with the account key over `evm_authorization_root`, account-nonce
+  replay-protected): `nebula_evmDeploy`, `nebula_evmCall` (both accept `value` in nebulai moved
+  from the transparent balance into the EVM), `nebula_evmWithdraw` (EVM balance back to NBLA).
+- **Reads**: `nebula_evmView` (non-committing call), `nebula_evmCode`, `nebula_evmStorage`,
+  `nebula_evmBalance`.
+- **Fees are NBLA-only** (`gas_limit × gas_price_nebulai`, prepaid, credited to the validator
+  reward account): EVM operations are direct state mutations outside block transactions, and the
+  nXMR fee pool plus per-account nXMR are follower-re-executed from block data alone — an nXMR
+  EVM fee would break that re-execution, so it is deliberately not offered.
+- Gas is capped at 30,000,000 per operation. Reverted executions still consume the fee and bump
+  the account nonce inside the EVM, matching standard EVM semantics.
+- Like NBLA balances and shielded notes, EVM state is sequencer-attested: followers verify it
+  through the signed state root rather than by re-executing contracts.
+
 ## Validator fee preference
 
 Validators choose the denomination of their fee revenue per the hybrid fee model:
