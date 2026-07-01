@@ -1,7 +1,7 @@
 use crate::{
     fee_policy_root, hybrid_fee_policy, quote_hybrid_fee, FeeAsset, HybridFeeQuote, CHAIN_ID,
     MINIMUM_GAS_PRICE_NEBULAI, NBLA_SYMBOL, NEBULAI_PER_NBLA, NXMR_SYMBOL,
-    TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT, VERSION,
+    NXMR_VALIDATOR_REWARD_BPS, TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT, VERSION,
 };
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
@@ -552,8 +552,26 @@ pub struct RuntimeReceipt {
     pub fee_asset: String,
     pub paid_amount_units: u128,
     pub validator_reward_nebulai: u128,
+    #[serde(default, skip_serializing_if = "u128_is_zero")]
+    pub validator_reward_nxmr_units: u128,
     pub buyback_nebulai: u128,
     pub error: Option<String>,
+}
+
+fn u128_is_zero(value: &u128) -> bool {
+    *value == 0
+}
+
+pub const VALIDATOR_FEE_PREFERENCE_NBLA: &str = "nbla";
+pub const VALIDATOR_FEE_PREFERENCE_NXMR: &str = "nxmr";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeValidatorFeePreference {
+    pub preference: String,
+    pub sequence: u64,
+    pub public_key_hex: String,
+    pub signature: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -727,6 +745,8 @@ pub struct RuntimeSnapshot {
     pub nullifiers: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bridge_bonds: BTreeMap<String, RuntimeBridgeBond>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub validator_fee_preferences: BTreeMap<String, RuntimeValidatorFeePreference>,
     pub root: String,
 }
 
@@ -766,6 +786,8 @@ pub struct RuntimeBlock {
     pub signature: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub co_signatures: Vec<RuntimeBlockCoSignature>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fee_preference: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1178,6 +1200,7 @@ pub struct NebulaRuntime {
     note_commitments: BTreeSet<String>,
     nullifiers: BTreeSet<String>,
     bridge_bonds: BTreeMap<String, RuntimeBridgeBond>,
+    validator_fee_preferences: BTreeMap<String, RuntimeValidatorFeePreference>,
     monero_bridge: Option<MoneroBridgeVerifier>,
 }
 
@@ -3267,6 +3290,7 @@ impl NebulaRuntime {
             note_commitments: BTreeSet::new(),
             nullifiers: BTreeSet::new(),
             bridge_bonds: BTreeMap::new(),
+            validator_fee_preferences: BTreeMap::new(),
             monero_bridge: None,
         };
         runtime.accounts.insert(
@@ -3361,6 +3385,7 @@ impl NebulaRuntime {
             note_commitments: snapshot.note_commitments,
             nullifiers: snapshot.nullifiers,
             bridge_bonds: snapshot.bridge_bonds,
+            validator_fee_preferences: snapshot.validator_fee_preferences,
             monero_bridge: None,
         })
     }
@@ -3392,6 +3417,7 @@ impl NebulaRuntime {
             note_commitments: self.note_commitments.clone(),
             nullifiers: self.nullifiers.clone(),
             bridge_bonds: self.bridge_bonds.clone(),
+            validator_fee_preferences: self.validator_fee_preferences.clone(),
             root: String::new(),
         };
         snapshot.root = snapshot_root(&snapshot);
@@ -3604,6 +3630,7 @@ impl NebulaRuntime {
                 fee_asset: tx.fee_asset.clone(),
                 paid_amount_units: 0,
                 validator_reward_nebulai: 0,
+                validator_reward_nxmr_units: 0,
                 buyback_nebulai: 0,
                 error: None,
             },
@@ -3670,6 +3697,71 @@ impl NebulaRuntime {
             required_units,
             on_chain_unlocked_units,
         })
+    }
+
+    pub fn set_validator_fee_preference(
+        &mut self,
+        validator_id: &str,
+        preference: &str,
+        public_key_hex: &str,
+        signature: &str,
+        sequence: u64,
+    ) -> Result<RuntimeValidatorFeePreference, String> {
+        self.ensure_accountability_clean()?;
+        if validator_id.trim().is_empty() {
+            return Err("fee preference validator_id must not be empty".to_string());
+        }
+        if preference != VALIDATOR_FEE_PREFERENCE_NBLA
+            && preference != VALIDATOR_FEE_PREFERENCE_NXMR
+        {
+            return Err(format!(
+                "fee preference must be {VALIDATOR_FEE_PREFERENCE_NBLA} or {VALIDATOR_FEE_PREFERENCE_NXMR}, got {preference}"
+            ));
+        }
+        let current_sequence = self
+            .validator_fee_preferences
+            .get(validator_id)
+            .map(|entry| entry.sequence)
+            .unwrap_or(0);
+        let expected_sequence = current_sequence
+            .checked_add(1)
+            .ok_or_else(|| "fee preference sequence overflowed".to_string())?;
+        if sequence != expected_sequence {
+            return Err(format!(
+                "fee preference sequence expected {expected_sequence} but got {sequence}"
+            ));
+        }
+        validate_fee_preference_key(
+            self.config.launch_binding.as_ref(),
+            validator_id,
+            public_key_hex,
+        )?;
+        let authorization_root = fee_preference_authorization_root(
+            &self.config.chain_id,
+            validator_id,
+            preference,
+            sequence,
+        );
+        verify_scheme_evidence_signature(
+            public_key_hex,
+            "fee_preference_public_key",
+            &authorization_root,
+            signature,
+            "fee_preference_signature",
+        )?;
+        let entry = RuntimeValidatorFeePreference {
+            preference: preference.to_string(),
+            sequence,
+            public_key_hex: public_key_hex.to_string(),
+            signature: signature.to_string(),
+        };
+        self.validator_fee_preferences
+            .insert(validator_id.to_string(), entry.clone());
+        Ok(entry)
+    }
+
+    pub fn validator_fee_preferences(&self) -> &BTreeMap<String, RuntimeValidatorFeePreference> {
+        &self.validator_fee_preferences
     }
 
     pub fn mainnet_readiness_facts(&self) -> RuntimeMainnetReadinessFacts {
@@ -4440,10 +4532,19 @@ impl NebulaRuntime {
             .expect("sequencer block production must have a valid signing key")
     }
 
+    fn producer_fee_preference(&self) -> Option<String> {
+        self.validator_fee_preferences
+            .get(&self.config.validator_id)
+            .filter(|entry| entry.preference == VALIDATOR_FEE_PREFERENCE_NXMR)
+            .map(|entry| entry.preference.clone())
+    }
+
     pub fn try_produce_block(&mut self) -> Result<RuntimeBlock, String> {
         self.ensure_accountability_clean()?;
         let parent = self.latest_block();
         let height = parent.height + 1;
+        let fee_preference = self.producer_fee_preference();
+        let nxmr_reward_preferred = fee_preference.is_some();
         let mut included = Vec::new();
         let mut rejected_tx_ids = Vec::new();
 
@@ -4452,7 +4553,7 @@ impl NebulaRuntime {
                 break;
             };
             let tx_id = tx.id();
-            match self.apply_transaction(&tx, height) {
+            match self.apply_transaction(&tx, height, nxmr_reward_preferred) {
                 Ok(receipt) => {
                     self.receipts.insert(tx_id, receipt);
                     included.push(tx);
@@ -4467,6 +4568,7 @@ impl NebulaRuntime {
                             fee_asset: tx.fee_asset.clone(),
                             paid_amount_units: 0,
                             validator_reward_nebulai: 0,
+                            validator_reward_nxmr_units: 0,
                             buyback_nebulai: 0,
                             error: Some(error),
                         },
@@ -4491,6 +4593,7 @@ impl NebulaRuntime {
             block_hash: String::new(),
             signature: String::new(),
             co_signatures: Vec::new(),
+            fee_preference,
         };
         self.finalize_block(&mut block)?;
         self.blocks.push(block.clone());
@@ -4511,6 +4614,7 @@ impl NebulaRuntime {
             block_hash: String::new(),
             signature: String::new(),
             co_signatures: Vec::new(),
+            fee_preference: None,
         };
         self.finalize_block(&mut block)?;
         Ok(block)
@@ -4542,14 +4646,31 @@ impl NebulaRuntime {
         &mut self,
         tx: &RuntimeTransaction,
         block_height: u64,
+        nxmr_reward_preferred: bool,
     ) -> Result<RuntimeReceipt, String> {
         let plan = self.transaction_execution_plan(tx)?;
+        let in_kind_nxmr = matches!(plan.asset, FeeAsset::NXmr) && nxmr_reward_preferred;
+        let validator_reward_nxmr_units = if in_kind_nxmr {
+            nxmr_in_kind_reward_units(plan.quote.paid_amount_units)?
+        } else {
+            0
+        };
+        let validator_reward_nebulai = if in_kind_nxmr {
+            0
+        } else {
+            plan.quote.validator_reward_nebulai
+        };
         self.accounts.insert(tx.from.clone(), plan.next_sender);
 
         if matches!(plan.asset, FeeAsset::NXmr) {
+            let pooled_units = plan
+                .quote
+                .paid_amount_units
+                .checked_sub(validator_reward_nxmr_units)
+                .ok_or_else(|| "nXMR fee split underflowed".to_string())?;
             self.total_nxmr_fees_units = self
                 .total_nxmr_fees_units
-                .checked_add(plan.quote.paid_amount_units)
+                .checked_add(pooled_units)
                 .ok_or_else(|| "nXMR fee accounting overflowed".to_string())?;
             self.buyback_pool_nebulai = self
                 .buyback_pool_nebulai
@@ -4573,15 +4694,19 @@ impl NebulaRuntime {
             .or_insert_with(RuntimeAccount::empty);
         reward_account.nbla_nebulai = reward_account
             .nbla_nebulai
-            .checked_add(plan.quote.validator_reward_nebulai)
+            .checked_add(validator_reward_nebulai)
             .ok_or_else(|| "validator reward credit overflowed".to_string())?;
+        reward_account.nxmr_units = reward_account
+            .nxmr_units
+            .checked_add(validator_reward_nxmr_units)
+            .ok_or_else(|| "validator nXMR reward credit overflowed".to_string())?;
         reward_account.validator_points = reward_account
             .validator_points
             .checked_add(plan.quote.validator_points)
             .ok_or_else(|| "validator points overflowed".to_string())?;
         self.validator_reward_nebulai = self
             .validator_reward_nebulai
-            .checked_add(plan.quote.validator_reward_nebulai)
+            .checked_add(validator_reward_nebulai)
             .ok_or_else(|| "validator reward accounting overflowed".to_string())?;
 
         Ok(RuntimeReceipt {
@@ -4590,7 +4715,8 @@ impl NebulaRuntime {
             block_height: Some(block_height),
             fee_asset: tx.fee_asset.clone(),
             paid_amount_units: plan.quote.paid_amount_units,
-            validator_reward_nebulai: plan.quote.validator_reward_nebulai,
+            validator_reward_nebulai,
+            validator_reward_nxmr_units,
             buyback_nebulai: plan.quote.buyback_nebulai,
             error: None,
         })
@@ -4956,6 +5082,7 @@ impl NebulaRuntime {
             &self.note_commitments,
             &self.nullifiers,
             &self.bridge_bonds,
+            &self.validator_fee_preferences,
         )
     }
 }
@@ -6263,6 +6390,36 @@ fn dispatch_json_rpc_method(
             };
             Ok(json!(report))
         }
+        "nebula_validatorFeePreferences" => {
+            let runtime = state.runtime.lock().expect("runtime mutex poisoned");
+            Ok(json!(runtime.validator_fee_preferences()))
+        }
+        "nebula_setValidatorFeePreference" => {
+            ensure_admin_rpc(state, &params, method)?;
+            ensure_block_producer(state)?;
+            let validator_id = required_str_param(&params, "validator_id")?;
+            let preference = required_str_param(&params, "preference")?;
+            let public_key_hex = required_str_param(&params, "public_key_hex")?;
+            let signature = required_str_param(&params, "signature")?;
+            let sequence = required_u64_param(&params, "sequence")?;
+            let entry = {
+                let mut runtime = state.runtime.lock().expect("runtime mutex poisoned");
+                runtime.set_validator_fee_preference(
+                    &validator_id,
+                    &preference,
+                    &public_key_hex,
+                    &signature,
+                    sequence,
+                )?
+            };
+            state.commit_direct_state_mutation()?;
+            state.persist()?;
+            Ok(json!({
+                "validator_id": validator_id,
+                "preference": entry.preference,
+                "sequence": entry.sequence,
+            }))
+        }
         "nebula_postBridgeBond" => {
             ensure_admin_rpc(state, &params, method)?;
             ensure_block_producer(state)?;
@@ -6422,6 +6579,7 @@ fn is_admin_rpc_method(method: &str) -> bool {
             | "nebula_unbondBridgeParticipant"
             | "nebula_settleWithdrawal"
             | "nebula_challengeWithdrawal"
+            | "nebula_setValidatorFeePreference"
     )
 }
 
@@ -6672,6 +6830,94 @@ fn verify_account_signature(
         .map_err(|error| format!("{signature_name}: {error}"))
 }
 
+fn nxmr_in_kind_reward_units(paid_amount_units: u128) -> Result<u128, String> {
+    paid_amount_units
+        .checked_mul(NXMR_VALIDATOR_REWARD_BPS)
+        .map(|scaled| scaled / 10_000)
+        .ok_or_else(|| "nXMR in-kind reward split overflowed".to_string())
+}
+
+fn fee_preference_authorization_root(
+    chain_id: &str,
+    validator_id: &str,
+    preference: &str,
+    sequence: u64,
+) -> String {
+    stable_runtime_root(&json!({
+        "fee_preference_domain": "nebula-validator-fee-preference-v1",
+        "chain_id": chain_id,
+        "validator_id": validator_id,
+        "preference": preference,
+        "sequence": sequence,
+    }))
+}
+
+fn validate_fee_preference_key(
+    binding: Option<&RuntimeLaunchBinding>,
+    validator_id: &str,
+    public_key_hex: &str,
+) -> Result<(), String> {
+    if let Some(binding) = binding {
+        if !binding.validator_cosigner_keys.is_empty() {
+            let roster_key = binding
+                .validator_cosigner_keys
+                .iter()
+                .find(|cosigner| cosigner.validator_id == validator_id)
+                .map(|cosigner| cosigner.public_key.as_str())
+                .ok_or_else(|| {
+                    format!(
+                        "fee preference validator {validator_id} is not in the launch-attested cosigner roster"
+                    )
+                })?;
+            if !public_key_hex.eq_ignore_ascii_case(roster_key) {
+                return Err(format!(
+                    "fee preference public_key does not match the launch-attested cosigner key for {validator_id}"
+                ));
+            }
+            return Ok(());
+        }
+    }
+    nebula_crypto::validate_scheme_public(public_key_hex, "fee_preference_public_key")?;
+    Ok(())
+}
+
+fn validate_validator_fee_preferences(snapshot: &RuntimeSnapshot) -> Result<(), String> {
+    let binding = snapshot.config.launch_binding.as_ref();
+    for (validator_id, entry) in &snapshot.validator_fee_preferences {
+        if entry.preference != VALIDATOR_FEE_PREFERENCE_NBLA
+            && entry.preference != VALIDATOR_FEE_PREFERENCE_NXMR
+        {
+            return Err(format!(
+                "snapshot fee preference for {validator_id} has invalid value {}",
+                entry.preference
+            ));
+        }
+        if entry.sequence == 0 {
+            return Err(format!(
+                "snapshot fee preference for {validator_id} must have a sequence of at least 1"
+            ));
+        }
+        validate_fee_preference_key(binding, validator_id, &entry.public_key_hex)?;
+        let authorization_root = fee_preference_authorization_root(
+            &snapshot.config.chain_id,
+            validator_id,
+            &entry.preference,
+            entry.sequence,
+        );
+        verify_scheme_evidence_signature(
+            &entry.public_key_hex,
+            "fee_preference_public_key",
+            &authorization_root,
+            &entry.signature,
+            "fee_preference_signature",
+        )
+        .map_err(|error| {
+            format!("snapshot fee preference for {validator_id} is not proven: {error}")
+        })?;
+    }
+    Ok(())
+}
+
 fn verify_scheme_evidence_signature(
     public_key_hex: &str,
     _public_key_name: &str,
@@ -6709,6 +6955,7 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
     }
     validate_sequencer_key_history(snapshot)?;
     validate_accountability_reports(snapshot)?;
+    validate_validator_fee_preferences(snapshot)?;
 
     let mut previous_hash: Option<String> = None;
     for (index, block) in snapshot.blocks.iter().enumerate() {
@@ -6730,6 +6977,14 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
         }
         if block.tx_root != transaction_root(&block.transactions, &block.rejected_tx_ids) {
             return Err(format!("block {} tx_root does not match", block.height));
+        }
+        if let Some(fee_preference) = &block.fee_preference {
+            if fee_preference != VALIDATOR_FEE_PREFERENCE_NXMR {
+                return Err(format!(
+                    "block {} fee_preference must be {VALIDATOR_FEE_PREFERENCE_NXMR} when present, got {fee_preference}",
+                    block.height
+                ));
+            }
         }
         if block.block_hash != block_root(block) {
             return Err(format!("block {} block_hash does not match", block.height));
@@ -6885,6 +7140,7 @@ fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
         &snapshot.note_commitments,
         &snapshot.nullifiers,
         &snapshot.bridge_bonds,
+        &snapshot.validator_fee_preferences,
     );
     if snapshot.state_root != expected_state_root {
         return Err("snapshot state_root does not match snapshot state".to_string());
@@ -6950,6 +7206,8 @@ fn reexecute_replayable_state(snapshot: &RuntimeSnapshot) -> Result<(), String> 
     }
     for block in &snapshot.blocks {
         let reward_account = reward_account_for_validator(binding, &block.producer);
+        let nxmr_reward_preferred =
+            block.fee_preference.as_deref() == Some(VALIDATOR_FEE_PREFERENCE_NXMR);
         for tx in &block.transactions {
             let fee_asset = tx.fee_asset_kind()?;
             let quote = quote_hybrid_fee(
@@ -6970,6 +7228,12 @@ fn reexecute_replayable_state(snapshot: &RuntimeSnapshot) -> Result<(), String> 
                 let paid = i128::try_from(quote.paid_amount_units)
                     .map_err(|_| "nXMR fee exceeds the re-execution range".to_string())?;
                 credit(&mut nxmr_ledger, &tx.from, -paid)?;
+                if nxmr_reward_preferred {
+                    let reward_units = nxmr_in_kind_reward_units(quote.paid_amount_units)?;
+                    let reward = i128::try_from(reward_units)
+                        .map_err(|_| "nXMR reward exceeds the re-execution range".to_string())?;
+                    credit(&mut nxmr_ledger, &reward_account, reward)?;
+                }
             }
         }
     }
@@ -7082,6 +7346,19 @@ pub fn derive_runtime_snapshot_economics(
                 )
             })?;
 
+            let nxmr_reward_preferred = matches!(fee_asset, FeeAsset::NXmr)
+                && block.fee_preference.as_deref() == Some(VALIDATOR_FEE_PREFERENCE_NXMR);
+            let expected_reward_nxmr_units = if nxmr_reward_preferred {
+                nxmr_in_kind_reward_units(quote.paid_amount_units)?
+            } else {
+                0
+            };
+            let expected_reward_nebulai = if nxmr_reward_preferred {
+                0
+            } else {
+                quote.validator_reward_nebulai
+            };
+
             if receipt.paid_amount_units != quote.paid_amount_units {
                 return Err(format!(
                     "included receipt {tx_id} paid_amount_units expected {} but got {}",
@@ -7094,16 +7371,22 @@ pub fn derive_runtime_snapshot_economics(
                     quote.buyback_nebulai, receipt.buyback_nebulai
                 ));
             }
-            if receipt.validator_reward_nebulai != quote.validator_reward_nebulai {
+            if receipt.validator_reward_nebulai != expected_reward_nebulai {
                 return Err(format!(
-                    "included receipt {tx_id} validator_reward_nebulai expected {} but got {}",
-                    quote.validator_reward_nebulai, receipt.validator_reward_nebulai
+                    "included receipt {tx_id} validator_reward_nebulai expected {expected_reward_nebulai} but got {}",
+                    receipt.validator_reward_nebulai
+                ));
+            }
+            if receipt.validator_reward_nxmr_units != expected_reward_nxmr_units {
+                return Err(format!(
+                    "included receipt {tx_id} validator_reward_nxmr_units expected {expected_reward_nxmr_units} but got {}",
+                    receipt.validator_reward_nxmr_units
                 ));
             }
 
             economics.validator_reward_nebulai = economics
                 .validator_reward_nebulai
-                .checked_add(quote.validator_reward_nebulai)
+                .checked_add(expected_reward_nebulai)
                 .ok_or_else(|| "validator reward receipt sum overflowed".to_string())?;
 
             match fee_asset {
@@ -7118,9 +7401,13 @@ pub fn derive_runtime_snapshot_economics(
                         .included_nxmr_receipt_count
                         .checked_add(1)
                         .ok_or_else(|| "nXMR receipt count overflowed".to_string())?;
+                    let pooled_units = quote
+                        .paid_amount_units
+                        .checked_sub(expected_reward_nxmr_units)
+                        .ok_or_else(|| "nXMR fee receipt split underflowed".to_string())?;
                     economics.total_nxmr_fees_units = economics
                         .total_nxmr_fees_units
-                        .checked_add(quote.paid_amount_units)
+                        .checked_add(pooled_units)
                         .ok_or_else(|| "nXMR fee receipt sum overflowed".to_string())?;
                     economics.buyback_pool_nebulai = economics
                         .buyback_pool_nebulai
@@ -7128,7 +7415,7 @@ pub fn derive_runtime_snapshot_economics(
                         .ok_or_else(|| "NBLA buyback receipt sum overflowed".to_string())?;
                     economics.nxmr_validator_reward_nebulai = economics
                         .nxmr_validator_reward_nebulai
-                        .checked_add(quote.validator_reward_nebulai)
+                        .checked_add(expected_reward_nebulai)
                         .ok_or_else(|| {
                             "nXMR validator reward receipt sum overflowed".to_string()
                         })?;
@@ -9293,6 +9580,7 @@ fn runtime_state_root(
     note_commitments: &BTreeSet<String>,
     nullifiers: &BTreeSet<String>,
     bridge_bonds: &BTreeMap<String, RuntimeBridgeBond>,
+    validator_fee_preferences: &BTreeMap<String, RuntimeValidatorFeePreference>,
 ) -> String {
     let mut value = json!({
         "state_domain": "nebula-runtime-state-v1",
@@ -9314,6 +9602,9 @@ fn runtime_state_root(
     }
     if !bridge_bonds.is_empty() {
         value["bridge_bonds"] = json!(bridge_bonds);
+    }
+    if !validator_fee_preferences.is_empty() {
+        value["validator_fee_preferences"] = json!(validator_fee_preferences);
     }
     stable_runtime_root(&value)
 }
@@ -9350,11 +9641,14 @@ fn snapshot_root(snapshot: &RuntimeSnapshot) -> String {
     if !snapshot.bridge_bonds.is_empty() {
         value["bridge_bonds"] = json!(snapshot.bridge_bonds);
     }
+    if !snapshot.validator_fee_preferences.is_empty() {
+        value["validator_fee_preferences"] = json!(snapshot.validator_fee_preferences);
+    }
     stable_runtime_root(&value)
 }
 
 fn block_root(block: &RuntimeBlock) -> String {
-    stable_runtime_root(&json!({
+    let mut value = json!({
         "block_domain": "nebula-runtime-block-v1",
         "height": block.height,
         "parent_hash": block.parent_hash,
@@ -9363,7 +9657,11 @@ fn block_root(block: &RuntimeBlock) -> String {
         "producer_public_key": block.producer_public_key,
         "tx_root": block.tx_root,
         "state_root": block.state_root,
-    }))
+    });
+    if let Some(fee_preference) = &block.fee_preference {
+        value["fee_preference"] = json!(fee_preference);
+    }
+    stable_runtime_root(&value)
 }
 
 fn stable_runtime_root(value: &Value) -> String {
@@ -9653,6 +9951,7 @@ mod tests {
             &snapshot.note_commitments,
             &snapshot.nullifiers,
             &snapshot.bridge_bonds,
+            &snapshot.validator_fee_preferences,
         );
         let latest = snapshot
             .blocks
@@ -9960,6 +10259,7 @@ mod tests {
             &snapshot.note_commitments,
             &snapshot.nullifiers,
             &snapshot.bridge_bonds,
+            &snapshot.validator_fee_preferences,
         )
     }
 
@@ -11363,6 +11663,130 @@ mod tests {
         assert_eq!(rpc_backup["rpc_client_identity_proxy_aware"], true);
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    fn signed_fee_preference(
+        runtime: &mut NebulaRuntime,
+        preference: &str,
+        sequence: u64,
+    ) -> Result<RuntimeValidatorFeePreference, String> {
+        let validator_id = runtime.config().validator_id.clone();
+        let chain_id = runtime.config().chain_id.clone();
+        let root =
+            fee_preference_authorization_root(&chain_id, &validator_id, preference, sequence);
+        runtime.set_validator_fee_preference(
+            &validator_id,
+            preference,
+            &test_public_key_hex(0x3d),
+            &sign_root_with_seed(0x3d, &root),
+            sequence,
+        )
+    }
+
+    #[test]
+    fn validator_fee_preference_routes_nxmr_reward_in_kind_and_reexecutes() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let account = test_account_id();
+        runtime.faucet(&account).unwrap();
+        runtime
+            .observe_bridge_deposit(test_bridge_deposit('2', '3'))
+            .unwrap();
+        let entry = signed_fee_preference(&mut runtime, VALIDATOR_FEE_PREFERENCE_NXMR, 1).unwrap();
+        assert_eq!(entry.preference, VALIDATOR_FEE_PREFERENCE_NXMR);
+
+        let reward_account = runtime.config().validator_reward_account();
+        let pool_before = runtime.export_snapshot().total_nxmr_fees_units;
+        let reward_nxmr_before = runtime
+            .account(&reward_account)
+            .map(|state| state.nxmr_units)
+            .unwrap_or(0);
+
+        let tx = sign_test_transaction(RuntimeTransaction {
+            from: account,
+            to: "nxmr-fee-recipient".to_string(),
+            amount_nebulai: 100,
+            gas_units: 100,
+            gas_price_nebulai: 10,
+            fee_asset: NXMR_SYMBOL.to_string(),
+            nonce: 0,
+            signature: String::new(),
+            memo: None,
+        });
+        let tx_id = tx.id();
+        runtime.submit_transaction(tx).unwrap();
+        let block = runtime.produce_block();
+        assert_eq!(
+            block.fee_preference.as_deref(),
+            Some(VALIDATOR_FEE_PREFERENCE_NXMR)
+        );
+
+        let receipt = runtime.receipt(&tx_id).unwrap();
+        assert_eq!(receipt.status, TransactionStatus::Included);
+        let expected_reward = nxmr_in_kind_reward_units(receipt.paid_amount_units).unwrap();
+        assert!(expected_reward > 0);
+        assert_eq!(receipt.validator_reward_nxmr_units, expected_reward);
+        assert_eq!(receipt.validator_reward_nebulai, 0);
+        assert_eq!(
+            runtime.account(&reward_account).unwrap().nxmr_units,
+            reward_nxmr_before + expected_reward
+        );
+
+        let snapshot = runtime.export_snapshot();
+        assert_eq!(
+            snapshot.total_nxmr_fees_units,
+            pool_before + receipt.paid_amount_units - expected_reward
+        );
+        validate_snapshot(&snapshot).unwrap();
+        NebulaRuntime::from_snapshot(RuntimeConfig::public_testnet_default(), snapshot).unwrap();
+    }
+
+    #[test]
+    fn validator_fee_preference_rejects_replay_bad_values_and_stale_sequences() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        assert!(signed_fee_preference(&mut runtime, "xmr", 1).is_err());
+        assert!(signed_fee_preference(&mut runtime, VALIDATOR_FEE_PREFERENCE_NXMR, 2).is_err());
+        signed_fee_preference(&mut runtime, VALIDATOR_FEE_PREFERENCE_NXMR, 1).unwrap();
+        assert!(signed_fee_preference(&mut runtime, VALIDATOR_FEE_PREFERENCE_NXMR, 1).is_err());
+
+        let validator_id = runtime.config().validator_id.clone();
+        let chain_id = runtime.config().chain_id.clone();
+        let stale_root = fee_preference_authorization_root(
+            &chain_id,
+            &validator_id,
+            VALIDATOR_FEE_PREFERENCE_NXMR,
+            1,
+        );
+        assert!(runtime
+            .set_validator_fee_preference(
+                &validator_id,
+                VALIDATOR_FEE_PREFERENCE_NXMR,
+                &test_public_key_hex(0x3d),
+                &sign_root_with_seed(0x3d, &stale_root),
+                2,
+            )
+            .is_err());
+
+        signed_fee_preference(&mut runtime, VALIDATOR_FEE_PREFERENCE_NBLA, 2).unwrap();
+        let block = runtime.produce_block();
+        assert!(block.fee_preference.is_none());
+    }
+
+    #[test]
+    fn validate_snapshot_rejects_forged_fee_preference_entry() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        signed_fee_preference(&mut runtime, VALIDATOR_FEE_PREFERENCE_NXMR, 1).unwrap();
+        runtime.produce_block();
+        let validator_id = runtime.config().validator_id.clone();
+
+        let mut snapshot = runtime.export_snapshot();
+        snapshot
+            .validator_fee_preferences
+            .get_mut(&validator_id)
+            .unwrap()
+            .preference = VALIDATOR_FEE_PREFERENCE_NBLA.to_string();
+        refresh_default_signed_snapshot_roots(&mut snapshot);
+        let error = validate_snapshot(&snapshot).unwrap_err();
+        assert!(error.contains("not proven"), "{error}");
     }
 
     #[test]

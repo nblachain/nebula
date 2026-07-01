@@ -10,7 +10,7 @@ with the mitigations Nebula implements and the residual gaps. Read alongside
 | Asset | Where it lives | Protected by |
 |---|---|---|
 | **NBLA balances** | `RuntimeAccount.nbla_nebulai` in the signed state | Sequencer state signature; per-account Ed25519/hybrid tx signatures + nonces |
-| **nXMR balances** | `RuntimeAccount.nxmr_units` | Bridge quorum + (opt-in) node view-key proofs; **follower re-execution** of per-account nXMR |
+| **nXMR balances** | `RuntimeAccount.nxmr_units` | Bridge quorum + (opt-in) node view-key proofs; **follower re-execution** of per-account nXMR (including the in-kind validator fee share routed by each block's signed `fee_preference` stamp) |
 | **Custody XMR** | Off-chain Monero multisig wallet | M-of-N operators; optional on-chain balance check (`verify_on_chain_custody`); operator bonds |
 | **Shielded amounts** | Pedersen commitments in `shielded_notes` | Bulletproofs range proofs + homomorphic balance; amounts hidden, **graph public** |
 | **Sequencer signing key** | Operator infrastructure | Out-of-band key management (HSM = ops); equivocation accountability fail-closed |
@@ -57,7 +57,12 @@ with the mitigations Nebula implements and the residual gaps. Read alongside
   sequencer-attested (no in-block journal); chain-governed policy (fee floor, faucet rate, block/
   mempool limits) travels in the sequencer-attested config, guarded by the distinct-peer sync
   quorum rather than a separately-signed governance root; and censorship/liveness depend on the
-  single sequencer — decentralized BFT is future work.
+  single sequencer — decentralized BFT is future work. The per-block `fee_preference` stamp is
+  sequencer-signed but not cross-checked against the signed preference registry at each height
+  (the registry is current-state, not history); a compromised sequencer stamping a false
+  preference can only redenominate the validator-reward share of fees that were actually paid —
+  it is custody-neutral and non-inflationary, and preference *registration* itself requires the
+  validator's own signed, sequence-numbered authorization.
 
 ### Network attacker (MITM on Monero or peer RPC)
 - **Monero RPC:** mitigated by TLS with optional SHA-256 leaf-certificate pinning

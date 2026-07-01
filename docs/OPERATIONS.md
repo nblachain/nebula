@@ -83,6 +83,26 @@ and rotation (`nebula_rotateSequencerKey`) requires an operator quorum.
 A node restart intentionally adopts chain governance from its own verified snapshot; cross-check
 governance parameters against peers via the sync quorum after any upgrade.
 
+## Validator fee preference
+
+Validators choose the denomination of their fee revenue per the hybrid fee model:
+
+- `nbla` (default): current behavior — nXMR-fee transactions route the full paid nXMR into the
+  custody fee pool and the validator reward is credited in NBLA.
+- `nxmr`: the validator-reward share of each nXMR-paid fee (`nxmr_validator_reward_bps`) is paid
+  **in kind** from the actually-paid nXMR into the producing validator's reward account; the
+  remainder goes to the custody fee pool. NBLA-fee transactions are unaffected. The custody sum
+  (accounts + pending withdrawals + fee pool) is preserved exactly, and validator points accrue
+  identically in both modes.
+
+Change it with `nebula_setValidatorFeePreference` (admin RPC): the validator signs
+`fee_preference_authorization_root(chain_id, validator_id, preference, sequence)` with its
+launch-attested cosigner key (any valid scheme key on unbound dev nodes); `sequence` must advance
+by exactly 1 per change, so an old signed authorization cannot be replayed. The active preference
+is stamped into each produced block (`fee_preference`, signed under the block root) and followers
+re-execute the in-kind split from that stamp. Read the registry with
+`nebula_validatorFeePreferences` (public).
+
 ## Bridge (optional, sequencer only)
 
 Enable live Monero verification with `--monero-wallet-rpc-url`, `--monero-daemon-rpc-url`,
