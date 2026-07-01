@@ -40,6 +40,7 @@ pub const MIN_BRIDGE_OBSERVER_BOND_NEBULAI: u128 = 500 * NEBULAI_PER_NBLA;
 pub const PUBLIC_LAUNCH_SIGNED_EVIDENCE_MAX_AGE_MS: u128 = 86_400_000;
 pub const PUBLIC_LAUNCH_SIGNED_EVIDENCE_FUTURE_SKEW_MS: u128 = 300_000;
 pub const NBLA_ACCOUNT_PREFIX: &str = "nbla";
+pub const MAX_ACCOUNT_ID_LEN: usize = 4096;
 pub const BRIDGE_CUSTODY_POLICY_ID: &str = "nebula-monero-bridge-custody-testnet-v1";
 pub const VALIDATOR_REWARD_ACCOUNT_PREFIX: &str = "validator:";
 pub const RUNTIME_SNAPSHOT_FILE: &str = "nebula-runtime-snapshot.json";
@@ -6410,7 +6411,7 @@ fn request_complete(buffer: &[u8]) -> bool {
     };
     let headers = String::from_utf8_lossy(&buffer[..header_end]);
     let content_length = content_length_from_headers(&headers).unwrap_or(0);
-    buffer.len() >= header_end + 4 + content_length
+    buffer.len() >= header_end.saturating_add(4).saturating_add(content_length)
 }
 
 fn request_size_exceeds_limit(buffer: &[u8], max_request_bytes: usize) -> bool {
@@ -6422,7 +6423,9 @@ fn request_size_exceeds_limit(buffer: &[u8], max_request_bytes: usize) -> bool {
     };
     let headers = String::from_utf8_lossy(&buffer[..header_end]);
     match content_length_from_headers(&headers) {
-        Some(content_length) => header_end + 4 + content_length > max_request_bytes,
+        Some(content_length) => {
+            header_end.saturating_add(4).saturating_add(content_length) > max_request_bytes
+        }
         None => false,
     }
 }
@@ -7254,6 +7257,12 @@ fn validate_account_id(account: &str) -> Result<(), String> {
     }
     if account.chars().any(char::is_whitespace) {
         return Err(format!("account {account} must not contain whitespace"));
+    }
+    if account.len() > MAX_ACCOUNT_ID_LEN {
+        return Err(format!(
+            "account id length {} exceeds the maximum {MAX_ACCOUNT_ID_LEN}",
+            account.len()
+        ));
     }
     Ok(())
 }
@@ -10110,6 +10119,26 @@ mod tests {
             credited
         );
         assert_eq!(runtime.bridge_deposits.len(), 1);
+    }
+
+    #[test]
+    fn account_id_length_is_bounded() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let overlong = "a".repeat(MAX_ACCOUNT_ID_LEN + 1);
+        let error = runtime.faucet(&overlong).unwrap_err();
+        assert!(error.contains("exceeds the maximum"), "{error}");
+        assert!(!runtime.accounts.contains_key(&overlong));
+
+        let at_limit = "n".repeat(MAX_ACCOUNT_ID_LEN);
+        assert!(runtime.faucet(&at_limit).is_ok());
+    }
+
+    #[test]
+    fn http_size_checks_do_not_overflow_on_huge_content_length() {
+        let request = format!("POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n", usize::MAX);
+        let buffer = request.as_bytes();
+        assert!(request_size_exceeds_limit(buffer, 1_048_576));
+        assert!(!request_complete(buffer));
     }
 
     #[test]
