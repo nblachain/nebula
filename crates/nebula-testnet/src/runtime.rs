@@ -3,7 +3,6 @@ use crate::{
     MINIMUM_GAS_PRICE_NEBULAI, NBLA_SYMBOL, NEBULAI_PER_NBLA, NXMR_SYMBOL,
     TARGET_NXMR_TO_NBLA_RATE_NEBULAI_PER_UNIT, VERSION,
 };
-use ed25519_dalek::VerifyingKey;
 use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use serde::{Deserialize, Serialize};
@@ -54,6 +53,7 @@ pub const DEFAULT_ADMIN_MAX_ACTIVE_CONNECTIONS: usize = 32;
 pub const DEFAULT_MAX_SNAPSHOT_RESPONSE_BYTES: usize = 268_435_456;
 const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
 const RPC_RATE_LIMIT_WINDOW_MS: u128 = 60_000;
+const RPC_RATE_LIMIT_MAX_TRACKED_CLIENTS: usize = 100_000;
 pub const DEFAULT_DEV_SEQUENCER_SECRET_KEY_HEX: &str =
     "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
@@ -1503,6 +1503,17 @@ impl RuntimeRpcState {
         let mut buckets = buckets
             .lock()
             .map_err(|_| "rate limit mutex poisoned".to_string())?;
+        if !buckets.contains_key(client_id) && buckets.len() >= RPC_RATE_LIMIT_MAX_TRACKED_CLIENTS {
+            buckets.retain(|_, bucket| {
+                now.saturating_sub(bucket.window_start_unix_ms) < RPC_RATE_LIMIT_WINDOW_MS
+            });
+            if buckets.len() >= RPC_RATE_LIMIT_MAX_TRACKED_CLIENTS {
+                return Err(format!(
+                    "{} rate limit table is full; retry shortly",
+                    access.label()
+                ));
+            }
+        }
         let bucket =
             buckets
                 .entry(client_id.to_string())
@@ -3479,9 +3490,7 @@ impl NebulaRuntime {
             return Err(error);
         }
         let tx_id = tx.id();
-        if self.receipts.contains_key(&tx_id)
-            || self.mempool.iter().any(|pending| pending.id() == tx_id)
-        {
+        if self.receipts.contains_key(&tx_id) {
             self.record_mempool_admission_rejection()?;
             return Err(format!("transaction {tx_id} already exists"));
         }
@@ -3745,6 +3754,8 @@ impl NebulaRuntime {
         deposit: RuntimeBridgeDeposit,
     ) -> Result<BridgeDepositReport, String> {
         self.ensure_accountability_clean()?;
+        let mut deposit = deposit;
+        deposit.monero_tx_id = deposit.monero_tx_id.to_ascii_lowercase();
         validate_bridge_deposit_for_launch_binding(&deposit, self.config.launch_binding.as_ref())?;
         if self.config.launch_binding.is_some() {
             validate_live_bridge_deposit_evidence_freshness(&deposit, unix_ms())?;
@@ -3992,6 +4003,7 @@ impl NebulaRuntime {
             }
         }
         let launch_binding = self.config.launch_binding.clone();
+        let is_live_bridge = self.monero_bridge.is_some();
         let withdrawal = self
             .withdrawals
             .get_mut(withdrawal_id)
@@ -4018,7 +4030,11 @@ impl NebulaRuntime {
                 unix_ms(),
             )?;
         }
-        let window = withdrawal_challenge_window_ms(launch_binding.as_ref());
+        let window = if is_live_bridge {
+            0
+        } else {
+            withdrawal_challenge_window_ms(launch_binding.as_ref())
+        };
         if window == 0 {
             withdrawal.status = "finalized".to_string();
         } else {
@@ -4087,6 +4103,12 @@ impl NebulaRuntime {
     ) -> Result<WithdrawalFinalizationReport, String> {
         self.ensure_accountability_clean()?;
         validate_fixed_hex(challenge_evidence_root, "challenge_evidence_root", 64)?;
+        if self.monero_bridge.is_some() {
+            return Err(
+                "live-mode withdrawals settle from a proven on-chain payout and cannot be challenge-reverted"
+                    .to_string(),
+            );
+        }
         let launch_binding = self.config.launch_binding.clone();
         let now = unix_ms();
         let (account, amount, deadline) = {
@@ -7133,10 +7155,8 @@ fn validate_sequencer_key_rotation(
     if rotation.activation_height == 0 {
         return Err("activation_height must be greater than zero".to_string());
     }
-    validate_fixed_hex(&rotation.old_public_key_hex, "old_public_key_hex", 64)?;
-    validate_fixed_hex(&rotation.new_public_key_hex, "new_public_key_hex", 64)?;
-    verifying_key_from_hex(&rotation.old_public_key_hex)?;
-    verifying_key_from_hex(&rotation.new_public_key_hex)?;
+    nebula_crypto::validate_scheme_public(&rotation.old_public_key_hex, "old_public_key_hex")?;
+    nebula_crypto::validate_scheme_public(&rotation.new_public_key_hex, "new_public_key_hex")?;
     if rotation
         .old_public_key_hex
         .eq_ignore_ascii_case(&rotation.new_public_key_hex)
@@ -8268,14 +8288,6 @@ fn validate_fixed_hex(value: &str, name: &str, len: usize) -> Result<(), String>
 fn normalize_fixed_hex(value: &str, name: &str, len: usize) -> Result<String, String> {
     validate_fixed_hex(value, name, len)?;
     Ok(value.to_ascii_lowercase())
-}
-
-fn verifying_key_from_hex(public_key_hex: &str) -> Result<VerifyingKey, String> {
-    verifying_key_from_hex_named(public_key_hex, "sequencer_public_key_hex")
-}
-
-fn verifying_key_from_hex_named(public_key_hex: &str, name: &str) -> Result<VerifyingKey, String> {
-    nebula_crypto::verifying_key_from_hex(public_key_hex, name)
 }
 
 pub fn public_key_hex_for_secret(secret_key_hex: &str) -> Result<String, String> {
@@ -10078,6 +10090,26 @@ mod tests {
             error.contains("block production does not gather"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn observe_bridge_deposit_rejects_case_variant_double_mint() {
+        let mut runtime = NebulaRuntime::new(RuntimeConfig::public_testnet_default()).unwrap();
+        let deposit = test_bridge_deposit('a', '2');
+        runtime.observe_bridge_deposit(deposit.clone()).unwrap();
+        let credited = runtime.account(&deposit.account).unwrap().nxmr_units;
+        assert_eq!(credited, deposit.amount_nxmr_units);
+
+        let mut variant = deposit.clone();
+        variant.monero_tx_id = deposit.monero_tx_id.to_ascii_uppercase();
+        let error = runtime.observe_bridge_deposit(variant).unwrap_err();
+        assert!(error.contains("already observed"), "{error}");
+
+        assert_eq!(
+            runtime.account(&deposit.account).unwrap().nxmr_units,
+            credited
+        );
+        assert_eq!(runtime.bridge_deposits.len(), 1);
     }
 
     #[test]
@@ -12508,6 +12540,92 @@ mod tests {
     }
 
     #[test]
+    fn live_bridge_withdrawal_settles_immediately_and_cannot_be_challenged() {
+        use nebula_monero::verify::{MoneroRpc, WalletTxProof};
+        const ADDR: &str = "9spAQWBqoTv3rZwuSi5uqJ3rZwuSi5uqJ3rZwuSi5uqJ3rZwuSi5uqJ3rZwuSi5uqJ3rZwuSi5uqJ3rZwuSi5uqJ2vgNZzY";
+
+        #[derive(Debug)]
+        struct PaidStub;
+        impl MoneroRpc for PaidStub {
+            fn check_tx_key(&self, _: &str, _: &str, _: &str) -> Result<WalletTxProof, String> {
+                Ok(WalletTxProof {
+                    received_atomic: 1_000_000,
+                    confirmations: MIN_BRIDGE_CONFIRMATIONS,
+                    in_pool: false,
+                })
+            }
+            fn tx_extra(&self, _: &str) -> Result<Vec<u8>, String> {
+                Ok(Vec::new())
+            }
+            fn custody_unlocked_balance(&self) -> Result<u128, String> {
+                Ok(1_000_000)
+            }
+        }
+
+        let mut config = runtime_config_with_launch_binding();
+        config.launch_binding.as_mut().unwrap().quorum_policy = Some(RuntimeQuorumPolicy {
+            bridge_deposit_observer: MIN_BRIDGE_DEPOSIT_OBSERVER_QUORUM,
+            bridge_withdrawal_operator: MIN_WITHDRAWAL_OPERATOR_QUORUM,
+            sequencer_rotation_operator: MIN_SEQUENCER_ROTATION_OPERATOR_QUORUM,
+            block_cosigner: None,
+            withdrawal_challenge_window_ms: Some(3_600_000),
+        });
+
+        let mut runtime = NebulaRuntime::new(config).unwrap();
+        runtime
+            .observe_bridge_deposit(signed_test_bridge_deposit('7', '8'))
+            .unwrap();
+        let withdrawal = runtime
+            .request_withdrawal(
+                &test_account_id(),
+                ADDR,
+                2_000,
+                0,
+                &test_withdrawal_signature(ADDR, 2_000, 0),
+            )
+            .unwrap()
+            .withdrawal;
+        let mut runtime = runtime.with_monero_bridge(MoneroBridgeVerifier::new(
+            std::sync::Arc::new(PaidStub),
+            "custody",
+        ));
+
+        let finalized_tx_id = "f".repeat(64);
+        let proof_root = "1".repeat(64);
+        let (ids, roots, apprs) =
+            test_operator_approval_quorum(&withdrawal, &finalized_tx_id, &proof_root);
+        let report = runtime
+            .finalize_withdrawal(
+                &withdrawal.withdrawal_id,
+                &finalized_tx_id,
+                &proof_root,
+                ids,
+                roots,
+                apprs,
+                Some(&"aa".repeat(32)),
+            )
+            .unwrap();
+
+        assert!(report.finalized);
+        assert_eq!(
+            runtime
+                .withdrawals
+                .get(&withdrawal.withdrawal_id)
+                .unwrap()
+                .status,
+            "finalized"
+        );
+
+        let error = runtime
+            .challenge_withdrawal(&withdrawal.withdrawal_id, &"a".repeat(64))
+            .unwrap_err();
+        assert!(error.contains("cannot be challenge-reverted"), "{error}");
+
+        runtime.produce_block();
+        validate_snapshot(&runtime.export_snapshot()).unwrap();
+    }
+
+    #[test]
     fn verify_on_chain_custody_compares_against_wallet_balance() {
         use nebula_monero::verify::{MoneroRpc, WalletTxProof};
 
@@ -12655,6 +12773,52 @@ mod tests {
         assert!(validate_snapshot(&tampered)
             .unwrap_err()
             .contains("block 1 signature rejected"));
+    }
+
+    #[test]
+    fn hybrid_sequencer_key_rotation_preserves_scheme() {
+        let old_seed = format!("{}{}", "07".repeat(32), "09".repeat(32));
+        let old_secret = nebula_crypto::scheme_secret_from_seed(
+            nebula_crypto::SchemeId::HybridEd25519MlDsa65,
+            &old_seed,
+        )
+        .unwrap();
+        let old_public = nebula_crypto::scheme_derive_public(&old_secret).unwrap();
+        assert!(old_public.starts_with("hybrid-ed25519-mldsa65:"));
+
+        let mut config = RuntimeConfig::public_testnet_default();
+        config.sequencer_public_key_hex = old_public.clone();
+        let mut runtime = NebulaRuntime::with_sequencer_secret(config, Some(old_secret)).unwrap();
+        runtime.produce_block();
+
+        let new_seed = format!("{}{}", "13".repeat(32), "15".repeat(32));
+        let new_secret = nebula_crypto::scheme_secret_from_seed(
+            nebula_crypto::SchemeId::HybridEd25519MlDsa65,
+            &new_seed,
+        )
+        .unwrap();
+        let new_public = nebula_crypto::scheme_derive_public(&new_secret).unwrap();
+        assert!(new_public.starts_with("hybrid-ed25519-mldsa65:"));
+
+        let rotation = runtime
+            .rotate_sequencer_key(
+                &new_secret,
+                &"b".repeat(64),
+                vec!["operator-a".to_string(), "operator-b".to_string()],
+                vec!["c".repeat(64), "d".repeat(64)],
+                Vec::new(),
+            )
+            .unwrap();
+        assert!(rotation.rotated);
+        assert_eq!(rotation.rotation.old_public_key_hex, old_public);
+        assert_eq!(rotation.rotation.new_public_key_hex, new_public);
+
+        let new_block = runtime.produce_block();
+        assert_eq!(new_block.producer_public_key, new_public);
+        assert!(new_block.signature.starts_with("hybrid-ed25519-mldsa65:"));
+        verify_block_signature(&new_block, &new_public).unwrap();
+
+        validate_snapshot(&runtime.export_snapshot()).unwrap();
     }
 
     #[test]

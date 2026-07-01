@@ -34,9 +34,13 @@ with the mitigations Nebula implements and the residual gaps. Read alongside
   challenge) that lets a fraudulent finalization be reverted before it settles, restoring the user's own
   burned nXMR escrow (`challenge_withdrawal`). Operator bond slashing
   (`slash_bridge_participant`) is a *separate*, unlinked economic penalty — the burned bond is not
-  paid out to the user. **Residual:** the window only helps while the payout has not yet settled;
-  it cannot claw back XMR already sent on-chain, and it does not compensate a user for a payout
-  that both settled and was fraudulent.
+  paid out to the user. The challenge window is an *optimistic* mechanism and is mutually exclusive
+  with live node verification: when a Monero verifier is configured (`with_monero_bridge`),
+  `finalize_withdrawal` requires the payout tx to be on-chain-confirmed (`check_tx_key`, ≥
+  `MIN_BRIDGE_CONFIRMATIONS`) and settles immediately, so a proven payout cannot be
+  challenge-reverted (which would double-credit the user). **Residual:** in optimistic mode the
+  window only helps while the payout has not yet settled; it cannot claw back XMR already sent
+  on-chain, and it does not compensate a user for a payout that both settled and was fraudulent.
 
 ### Compromised sequencer key
 - Can forge state, censor, or halt the chain. **Mitigations:** followers verify the per-height
