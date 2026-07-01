@@ -745,6 +745,10 @@ fn run_rpc_node(args: &[String], wants_json: bool) {
         max_snapshot_response_bytes,
         trust_private_proxy_headers,
         trusted_proxy_ips,
+        monero_wallet_rpc_url: arg_value(args, "--monero-wallet-rpc-url").map(str::to_string),
+        monero_daemon_rpc_url: arg_value(args, "--monero-daemon-rpc-url").map(str::to_string),
+        monero_custody_address: arg_value(args, "--monero-custody-address").map(str::to_string),
+        monero_cert_pins: arg_values(args, "--monero-cert-pin"),
     };
 
     if let Err(error) = config.validate() {

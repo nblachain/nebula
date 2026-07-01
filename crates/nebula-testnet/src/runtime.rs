@@ -84,6 +84,10 @@ pub struct RuntimeNodeOptions {
     pub max_snapshot_response_bytes: usize,
     pub trust_private_proxy_headers: bool,
     pub trusted_proxy_ips: Vec<String>,
+    pub monero_wallet_rpc_url: Option<String>,
+    pub monero_daemon_rpc_url: Option<String>,
+    pub monero_custody_address: Option<String>,
+    pub monero_cert_pins: Vec<String>,
 }
 
 impl Default for RuntimeNodeOptions {
@@ -106,6 +110,10 @@ impl Default for RuntimeNodeOptions {
             max_snapshot_response_bytes: DEFAULT_MAX_SNAPSHOT_RESPONSE_BYTES,
             trust_private_proxy_headers: false,
             trusted_proxy_ips: Vec::new(),
+            monero_wallet_rpc_url: None,
+            monero_daemon_rpc_url: None,
+            monero_custody_address: None,
+            monero_cert_pins: Vec::new(),
         }
     }
 }
@@ -3453,25 +3461,36 @@ impl NebulaRuntime {
         self.monero_bridge.is_some()
     }
 
-    /// Prove, against the live Monero custody wallet, that the bridge holds enough XMR to back all
-    /// outstanding nXMR (accounts + reserved withdrawals + collected fees). Complements the internal
-    /// double-entry reconciliation with a real on-chain balance check. Requires a live bridge.
+    /// Prove, against the live Monero custody wallet, that the bridge still holds enough XMR to
+    /// back all outstanding nXMR the custody wallet should hold: account balances + still-pending
+    /// (unpaid) withdrawals + collected fees. Finalized withdrawals are excluded because their XMR
+    /// has already left custody on payout. Requires a live bridge.
     pub fn verify_on_chain_custody(&self) -> Result<CustodyOnChainReport, String> {
         let verifier = self
             .monero_bridge
             .as_ref()
             .ok_or_else(|| "no live Monero bridge verifier configured".to_string())?;
-        let reconciliation = nxmr_custody_reconciliation(
-            &self.accounts,
-            &self.bridge_deposits,
-            &self.withdrawals,
-            self.total_nxmr_fees_units,
-        )?;
+        let account_units = self.accounts.values().try_fold(0u128, |sum, account| {
+            sum.checked_add(account.nxmr_units)
+                .ok_or_else(|| "nXMR custody accounting overflowed".to_string())
+        })?;
+        let pending_withdrawal_units = self
+            .withdrawals
+            .values()
+            .filter(|withdrawal| withdrawal.status != "finalized")
+            .try_fold(0u128, |sum, withdrawal| {
+                sum.checked_add(withdrawal.amount_nxmr_units)
+                    .ok_or_else(|| "nXMR custody accounting overflowed".to_string())
+            })?;
+        let required_units = account_units
+            .checked_add(pending_withdrawal_units)
+            .and_then(|sum| sum.checked_add(self.total_nxmr_fees_units))
+            .ok_or_else(|| "nXMR custody required accounting overflowed".to_string())?;
         let on_chain_unlocked_units = verifier.rpc.custody_unlocked_balance()?;
         Ok(CustodyOnChainReport {
-            required_units: reconciliation.nxmr_custody_required_units,
+            sufficient: on_chain_unlocked_units >= required_units,
+            required_units,
             on_chain_unlocked_units,
-            sufficient: on_chain_unlocked_units >= reconciliation.nxmr_custody_required_units,
         })
     }
 
@@ -3793,12 +3812,10 @@ impl NebulaRuntime {
             "operator_approval_roots",
             rotation_quorum(self.config.launch_binding.as_ref()),
         )?;
-        let new_sequencer_secret_key_hex = normalize_fixed_hex(
-            new_sequencer_secret_key_hex,
-            "new_sequencer_secret_key_hex",
-            64,
+        let new_public_key_hex = nebula_crypto::scheme_normalize_public(
+            &nebula_crypto::scheme_derive_public(new_sequencer_secret_key_hex)?,
+            "new_sequencer_public_key",
         )?;
-        let new_public_key_hex = public_key_hex_for_secret(&new_sequencer_secret_key_hex)?;
         if new_public_key_hex.eq_ignore_ascii_case(&self.config.sequencer_public_key_hex) {
             return Err("new sequencer key must differ from current key".to_string());
         }
@@ -3836,7 +3853,7 @@ impl NebulaRuntime {
             validate_live_sequencer_rotation_approval_freshness(&rotation, unix_ms())?;
         }
         self.config.sequencer_public_key_hex = rotation.new_public_key_hex.clone();
-        self.sequencer_secret_key_hex = Some(new_sequencer_secret_key_hex);
+        self.sequencer_secret_key_hex = Some(new_sequencer_secret_key_hex.to_string());
         self.sequencer_key_rotations.push(rotation.clone());
         Ok(SequencerKeyRotationReport {
             rotated: true,
@@ -4353,6 +4370,33 @@ pub fn serve_runtime_rpc(bind_addr: &str, config: RuntimeConfig) -> std::io::Res
     serve_runtime_rpc_with_options(bind_addr, config, RuntimeNodeOptions::default())
 }
 
+fn build_monero_bridge_verifier(
+    options: &RuntimeNodeOptions,
+) -> Result<Option<MoneroBridgeVerifier>, String> {
+    match (
+        &options.monero_wallet_rpc_url,
+        &options.monero_daemon_rpc_url,
+        &options.monero_custody_address,
+    ) {
+        (Some(wallet_rpc_url), Some(daemon_rpc_url), Some(custody_address)) => {
+            let rpc = nebula_monero::client::HttpMoneroRpc::new(
+                wallet_rpc_url.clone(),
+                daemon_rpc_url.clone(),
+            )
+            .with_cert_pins_hex(&options.monero_cert_pins)?;
+            Ok(Some(MoneroBridgeVerifier::new(
+                Arc::new(rpc),
+                custody_address.clone(),
+            )))
+        }
+        (None, None, None) => Ok(None),
+        _ => Err(
+            "a live Monero bridge requires --monero-wallet-rpc-url, --monero-daemon-rpc-url, and --monero-custody-address together"
+                .to_string(),
+        ),
+    }
+}
+
 pub fn serve_runtime_rpc_with_options(
     bind_addr: &str,
     config: RuntimeConfig,
@@ -4399,6 +4443,10 @@ pub fn serve_runtime_rpc_with_options(
         sync_limits.max_snapshot_response_bytes,
     )
     .map_err(std::io::Error::other)?;
+    let runtime = match build_monero_bridge_verifier(&options).map_err(std::io::Error::other)? {
+        Some(bridge) => runtime.with_monero_bridge(bridge),
+        None => runtime,
+    };
     if let Some(storage) = &storage {
         storage
             .save_runtime(&runtime)
@@ -5595,6 +5643,14 @@ fn dispatch_json_rpc_method(
             state.persist()?;
             Ok(json!(report))
         }
+        "nebula_verifyCustody" => {
+            ensure_admin_rpc(state, &params, method)?;
+            let report = {
+                let runtime = state.runtime.lock().expect("runtime mutex poisoned");
+                runtime.verify_on_chain_custody()?
+            };
+            Ok(json!(report))
+        }
         "nebula_rotateSequencerKey" => {
             ensure_admin_rpc(state, &params, method)?;
             ensure_block_producer(state)?;
@@ -5918,20 +5974,15 @@ fn verify_account_signature(
         .map_err(|error| format!("{signature_name}: {error}"))
 }
 
-fn verify_ed25519_signature(
+fn verify_scheme_evidence_signature(
     public_key_hex: &str,
-    public_key_name: &str,
+    _public_key_name: &str,
     signing_root: &str,
     signature_hex: &str,
     signature_name: &str,
 ) -> Result<(), String> {
-    nebula_crypto::verify_ed25519_signature(
-        public_key_hex,
-        public_key_name,
-        signing_root,
-        signature_hex,
-        signature_name,
-    )
+    nebula_crypto::scheme_verify_root(public_key_hex, signing_root, signature_hex)
+        .map_err(|error| format!("{signature_name}: {error}"))
 }
 
 fn validate_snapshot(snapshot: &RuntimeSnapshot) -> Result<(), String> {
@@ -6709,7 +6760,10 @@ fn validate_bridge_observer_evidence(
             ));
         }
         let observer_key_name = format!("observer_evidence[{index}].observer_public_key_hex");
-        validate_fixed_hex(&evidence.observer_public_key_hex, &observer_key_name, 64)?;
+        nebula_crypto::validate_scheme_public(
+            &evidence.observer_public_key_hex,
+            &observer_key_name,
+        )?;
         let observer_id = evidence.observer_id.to_ascii_lowercase();
         if let Some(previous_index) = seen_ids.insert(observer_id.clone(), index) {
             return Err(format!(
@@ -6748,7 +6802,7 @@ fn validate_bridge_observer_evidence(
                 "observer_evidence[{index}].payload_root does not match bridge deposit payload"
             ));
         }
-        verify_ed25519_signature(
+        verify_scheme_evidence_signature(
             &evidence.observer_public_key_hex,
             &observer_key_name,
             &evidence.payload_root,
@@ -6916,7 +6970,10 @@ fn validate_withdrawal_operator_approvals(
             ));
         }
         let operator_key_name = format!("operator_approvals[{index}].operator_public_key_hex");
-        validate_fixed_hex(&approval.operator_public_key_hex, &operator_key_name, 64)?;
+        nebula_crypto::validate_scheme_public(
+            &approval.operator_public_key_hex,
+            &operator_key_name,
+        )?;
         let operator_id = approval.operator_id.to_ascii_lowercase();
         if let Some(previous_index) = seen_ids.insert(operator_id.clone(), index) {
             return Err(format!(
@@ -6955,7 +7012,7 @@ fn validate_withdrawal_operator_approvals(
                 "operator_approvals[{index}].payload_root does not match withdrawal finalization payload"
             ));
         }
-        verify_ed25519_signature(
+        verify_scheme_evidence_signature(
             &approval.operator_public_key_hex,
             &operator_key_name,
             &approval.payload_root,
@@ -7040,7 +7097,10 @@ fn validate_sequencer_key_rotation_operator_approvals(
             ));
         }
         let operator_key_name = format!("operator_approvals[{index}].operator_public_key_hex");
-        validate_fixed_hex(&approval.operator_public_key_hex, &operator_key_name, 64)?;
+        nebula_crypto::validate_scheme_public(
+            &approval.operator_public_key_hex,
+            &operator_key_name,
+        )?;
         let operator_id = approval.operator_id.to_ascii_lowercase();
         if let Some(previous_index) = seen_ids.insert(operator_id.clone(), index) {
             return Err(format!(
@@ -7079,7 +7139,7 @@ fn validate_sequencer_key_rotation_operator_approvals(
                 "operator_approvals[{index}].payload_root does not match sequencer key rotation payload"
             ));
         }
-        verify_ed25519_signature(
+        verify_scheme_evidence_signature(
             &approval.operator_public_key_hex,
             &operator_key_name,
             &approval.payload_root,
@@ -7270,12 +7330,7 @@ fn validate_launch_bridge_operator_keys(binding: &RuntimeLaunchBinding) -> Resul
             &operator.region,
             &format!("bridge_operator_keys[{index}].region"),
         )?;
-        validate_fixed_hex(
-            &operator.public_key,
-            &format!("bridge_operator_keys[{index}].public_key"),
-            64,
-        )?;
-        verifying_key_from_hex_named(
+        nebula_crypto::validate_scheme_public(
             &operator.public_key,
             &format!("bridge_operator_keys[{index}].public_key"),
         )?;
@@ -7314,12 +7369,7 @@ fn validate_launch_bridge_observer_keys(binding: &RuntimeLaunchBinding) -> Resul
             &observer.region,
             &format!("bridge_observer_keys[{index}].region"),
         )?;
-        validate_fixed_hex(
-            &observer.public_key,
-            &format!("bridge_observer_keys[{index}].public_key"),
-            64,
-        )?;
-        verifying_key_from_hex_named(
+        nebula_crypto::validate_scheme_public(
             &observer.public_key,
             &format!("bridge_observer_keys[{index}].public_key"),
         )?;

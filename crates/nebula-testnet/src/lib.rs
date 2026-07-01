@@ -15745,6 +15745,37 @@ mod public_launch {
     }
 
     #[test]
+    fn economics_trial_requires_exact_nxmr_validator_reward() {
+        // Rate is 1 and both bps are 10_000, so expected buyback == expected nXMR reward == fees.
+        let make = |nxmr_validator_reward_nebulai: u128| runtime::RuntimeSnapshotEconomics {
+            included_nbla_receipt_count: 1,
+            included_nxmr_receipt_count: 1,
+            total_nxmr_fees_units: 1_000,
+            buyback_pool_nebulai: 1_000,
+            validator_reward_nebulai: 2_000,
+            nxmr_validator_reward_nebulai,
+        };
+        let msg = "nxmr_validator_reward_nebulai expected exactly";
+
+        let mut errors = Vec::new();
+        require_public_launch_economics_trial(&mut errors, &make(1_000));
+        assert!(
+            !errors.iter().any(|error| error.contains(msg)),
+            "exact reward should pass: {errors:?}"
+        );
+
+        // Over-reported by 1 is rejected (the `<` -> `!=` tightening).
+        let mut errors = Vec::new();
+        require_public_launch_economics_trial(&mut errors, &make(1_001));
+        assert!(errors.iter().any(|error| error.contains(msg)), "{errors:?}");
+
+        // Under-reported is rejected too.
+        let mut errors = Vec::new();
+        require_public_launch_economics_trial(&mut errors, &make(999));
+        assert!(errors.iter().any(|error| error.contains(msg)), "{errors:?}");
+    }
+
+    #[test]
     fn validator_set_rejects_region_with_whitespace() {
         let mut value = serde_json::from_str::<Value>(&sample_validator_set_json_pretty()).unwrap();
         value["validators"][0]["region"] = json!("us east");
