@@ -259,6 +259,13 @@ pub struct RuntimeValidatorCosignerKey {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct RuntimeWitnessKey {
+    pub witness_id: String,
+    pub public_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeBlockCoSignature {
     pub validator_id: String,
     pub public_key: String,
@@ -298,6 +305,8 @@ pub struct RuntimeLaunchBinding {
     pub bridge_observer_keys: Vec<RuntimeBridgeObserverKey>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub validator_cosigner_keys: Vec<RuntimeValidatorCosignerKey>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub witness_keys: Vec<RuntimeWitnessKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quorum_policy: Option<RuntimeQuorumPolicy>,
 }
@@ -451,6 +460,44 @@ impl RuntimeLaunchBinding {
             if !cosigner_keys.insert(cosigner.public_key.to_ascii_lowercase()) {
                 return Err(format!(
                     "validator_cosigner_keys[{index}].public_key is duplicated"
+                ));
+            }
+        }
+
+        // Witness keys are a distinct, role-separated key material: they must be valid scheme
+        // public keys, internally unique, and must not reuse any other role's key (validator
+        // cosigner, bridge operator, or bridge observer) — so the witness role is genuinely
+        // separated rather than derived from another role's keys.
+        let mut other_role_keys: BTreeSet<String> = BTreeSet::new();
+        other_role_keys.extend(cosigner_keys.iter().cloned());
+        for operator in &self.bridge_operator_keys {
+            other_role_keys.insert(operator.public_key.to_ascii_lowercase());
+        }
+        for observer in &self.bridge_observer_keys {
+            other_role_keys.insert(observer.public_key.to_ascii_lowercase());
+        }
+        let mut witness_ids = BTreeSet::new();
+        let mut witness_keys = BTreeSet::new();
+        for (index, witness) in self.witness_keys.iter().enumerate() {
+            if witness.witness_id.trim().is_empty() {
+                return Err(format!(
+                    "witness_keys[{index}].witness_id must not be empty"
+                ));
+            }
+            nebula_crypto::validate_scheme_public(
+                &witness.public_key,
+                &format!("witness_keys[{index}].public_key"),
+            )?;
+            if !witness_ids.insert(witness.witness_id.to_ascii_lowercase()) {
+                return Err(format!("witness_keys[{index}].witness_id is duplicated"));
+            }
+            let normalized_key = witness.public_key.to_ascii_lowercase();
+            if !witness_keys.insert(normalized_key.clone()) {
+                return Err(format!("witness_keys[{index}].public_key is duplicated"));
+            }
+            if other_role_keys.contains(&normalized_key) {
+                return Err(format!(
+                    "witness_keys[{index}].public_key must not reuse a validator cosigner, bridge operator, or bridge observer key"
                 ));
             }
         }
@@ -1006,6 +1053,7 @@ pub struct RuntimeMainnetReadinessFacts {
     pub live_monero_verifier_configured: bool,
     pub bridge_operator_count: usize,
     pub bridge_observer_count: usize,
+    pub witness_key_count: usize,
     pub bonded_operator_count: usize,
     pub bonded_observer_count: usize,
     pub sequencer_key_scheme: String,
@@ -2569,6 +2617,7 @@ impl RuntimeRpcState {
             "bonded_operator_count": facts.bonded_operator_count,
             "bridge_observer_count": facts.bridge_observer_count,
             "bonded_observer_count": facts.bonded_observer_count,
+            "witness_key_count": facts.witness_key_count,
             "live_value_enabled": bridge_policy().live_value_enabled,
             "code_gates_ready": blocking_gaps.is_empty(),
             "blocking_gaps": blocking_gaps,
@@ -4124,6 +4173,7 @@ impl NebulaRuntime {
             live_monero_verifier_configured: self.monero_bridge.is_some(),
             bridge_operator_count: binding.map(|b| b.bridge_operator_keys.len()).unwrap_or(0),
             bridge_observer_count: binding.map(|b| b.bridge_observer_keys.len()).unwrap_or(0),
+            witness_key_count: binding.map(|b| b.witness_keys.len()).unwrap_or(0),
             bonded_operator_count: active_bonds("operator"),
             bonded_observer_count: active_bonds("observer"),
             sequencer_key_scheme: nebula_crypto::scheme_tag_for_public(
@@ -10397,6 +10447,7 @@ mod tests {
                 },
             ],
             validator_cosigner_keys: Vec::new(),
+            witness_keys: Vec::new(),
             quorum_policy: None,
         }
     }
@@ -10423,6 +10474,50 @@ mod tests {
         let mut config = RuntimeConfig::public_testnet_default();
         config.launch_binding = Some(test_launch_binding());
         config
+    }
+
+    #[test]
+    fn launch_binding_accepts_role_separated_witness_keys_and_rejects_reuse() {
+        // Witness keys are an independent, role-separated key material: a distinct set is
+        // accepted, and reusing another role's key (here a bridge operator key) is rejected.
+        let mut binding = test_launch_binding();
+        binding.witness_keys = vec![
+            RuntimeWitnessKey {
+                witness_id: "witness-a".to_string(),
+                public_key: test_public_key_hex(0xc1),
+            },
+            RuntimeWitnessKey {
+                witness_id: "witness-b".to_string(),
+                public_key: test_public_key_hex(0xc2),
+            },
+        ];
+        binding
+            .validate_against_config(&RuntimeConfig::public_testnet_default())
+            .expect("distinct witness keys are accepted");
+
+        // Reusing a bridge operator key (0xa1) as a witness key must be rejected.
+        binding.witness_keys[0].public_key = test_public_key_hex(0xa1);
+        let error = binding
+            .validate_against_config(&RuntimeConfig::public_testnet_default())
+            .unwrap_err();
+        assert!(error.contains("must not reuse"), "{error}");
+
+        // Duplicate witness ids are rejected.
+        let mut dup = test_launch_binding();
+        dup.witness_keys = vec![
+            RuntimeWitnessKey {
+                witness_id: "witness-a".to_string(),
+                public_key: test_public_key_hex(0xc1),
+            },
+            RuntimeWitnessKey {
+                witness_id: "witness-a".to_string(),
+                public_key: test_public_key_hex(0xc2),
+            },
+        ];
+        assert!(dup
+            .validate_against_config(&RuntimeConfig::public_testnet_default())
+            .unwrap_err()
+            .contains("witness_id is duplicated"));
     }
 
     #[test]

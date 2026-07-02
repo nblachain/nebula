@@ -5703,6 +5703,7 @@ pub fn build_runtime_launch_binding_from_jsons(
         bridge_operator_keys,
         bridge_observer_keys,
         validator_cosigner_keys: Vec::new(),
+        witness_keys: Vec::new(),
         quorum_policy: None,
     };
     let mut validation_config = runtime::RuntimeConfig::public_testnet_default();

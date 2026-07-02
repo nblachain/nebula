@@ -17,6 +17,7 @@ with the mitigations Nebula implements and the residual gaps. Read alongside
 | **Sequencer signing key** | Operator infrastructure | Out-of-band key management (HSM = ops); equivocation accountability fail-closed |
 | **Bridge quorum keys** | Operator/observer infrastructure | Identity-attested launch roster; **slashable bonds**; signer diversity = ops |
 | **Validator co-signer keys** | Validator infrastructure | Launch-attested roster; N-of-M block co-signatures |
+| **Witness keys** | Witness infrastructure | Launch-attested `witness_keys` roster; role-separated (validated distinct from validator co-signer, bridge operator, and bridge observer keys) |
 
 ## Adversaries and outcomes
 
