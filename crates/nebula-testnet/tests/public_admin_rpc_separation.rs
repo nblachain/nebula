@@ -181,6 +181,12 @@ fn shielded_lifecycle_round_trips_over_rpc() {
 
     let (c1, p1) = prove_amount(70, &b1);
     let (c2, p2) = prove_amount(30, &b2);
+    let transfer_root = nebula_testnet::runtime::shielded_transfer_authorization_root(
+        CHAIN_ID,
+        &account,
+        std::slice::from_ref(&note),
+        &[c1.to_hex(), c2.to_hex()],
+    );
     let transfer = rpc_call(
         &rpc_addr,
         "nebula_shieldedTransfer",
@@ -190,10 +196,18 @@ fn shielded_lifecycle_round_trips_over_rpc() {
                 { "commitment": c1.to_hex(), "range_proof_hex": hex::encode(&p1) },
                 { "commitment": c2.to_hex(), "range_proof_hex": hex::encode(&p2) },
             ],
+            "signature": sign_root(seed, &transfer_root),
         }),
     );
     assert_eq!(rpc_result(&transfer)["shielded"], true);
 
+    let unshield_root = nebula_testnet::runtime::unshield_authorization_root(
+        CHAIN_ID,
+        &account,
+        &c1.to_hex(),
+        70,
+        &account,
+    );
     let unshield = rpc_call(
         &rpc_addr,
         "nebula_unshield",
@@ -202,6 +216,7 @@ fn shielded_lifecycle_round_trips_over_rpc() {
             "amount": 70,
             "blinding_hex": hex::encode(b1.to_bytes()),
             "account": account.clone(),
+            "signature": sign_root(seed, &unshield_root),
         }),
     );
     assert_eq!(rpc_result(&unshield)["unshielded"], true);
@@ -1604,7 +1619,7 @@ fn signed_transaction_with_fee_asset(
         signature: String::new(),
         memo: None,
     };
-    tx.signature = sign_root(seed, &tx.signing_root());
+    tx.signature = sign_root(seed, &tx.chain_signing_message(CHAIN_ID));
     tx
 }
 
@@ -1616,7 +1631,13 @@ fn withdrawal_signature(
 ) -> String {
     sign_root(
         seed,
-        &withdrawal_authorization_root(&account_id(seed), monero_address, amount_nxmr_units, nonce),
+        &withdrawal_authorization_root(
+            CHAIN_ID,
+            &account_id(seed),
+            monero_address,
+            amount_nxmr_units,
+            nonce,
+        ),
     )
 }
 
@@ -1712,6 +1733,7 @@ fn operator_approval(
     seed: u8,
 ) -> RuntimeWithdrawalOperatorApproval {
     let payload_root = withdrawal_operator_finalization_payload_root(
+        CHAIN_ID,
         withdrawal,
         finalized_monero_tx_id,
         finalization_proof_root,

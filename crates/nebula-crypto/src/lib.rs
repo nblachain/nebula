@@ -1,4 +1,4 @@
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 
 pub mod scheme;
 pub use scheme::{
@@ -24,8 +24,14 @@ pub fn verifying_key_from_hex(public_key_hex: &str, name: &str) -> Result<Verify
         .as_slice()
         .try_into()
         .map_err(|_| format!("{name} must decode to 32 bytes"))?;
-    VerifyingKey::from_bytes(&bytes)
-        .map_err(|error| format!("{name} is not an Ed25519 key: {error}"))
+    let verifying_key = VerifyingKey::from_bytes(&bytes)
+        .map_err(|error| format!("{name} is not an Ed25519 key: {error}"))?;
+    if verifying_key.is_weak() {
+        return Err(format!(
+            "{name} is a small-order (weak) Ed25519 key and is rejected"
+        ));
+    }
+    Ok(verifying_key)
 }
 
 pub fn signing_key_from_hex(secret_key_hex: &str, name: &str) -> Result<SigningKey, String> {
@@ -69,7 +75,7 @@ pub fn verify_ed25519_signature(
     require_hex_len(signing_root, "signing_root", 64)?;
     let signature = signature_from_hex(signature_hex, signature_name)?;
     verifying_key
-        .verify(signing_root.as_bytes(), &signature)
+        .verify_strict(signing_root.as_bytes(), &signature)
         .map_err(|error| format!("{signature_name} Ed25519 verification failed: {error}"))
 }
 

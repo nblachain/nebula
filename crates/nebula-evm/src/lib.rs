@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use revm::db::{CacheDB, EmptyDB};
@@ -100,6 +101,12 @@ pub fn validate_calldata_hex(value: &str, name: &str) -> Result<(), String> {
 #[derive(Debug, Clone)]
 pub struct EvmExecutor {
     db: CacheDB<EmptyDB>,
+    // Memoized full-state export, invalidated on every state mutation. Without it, every
+    // state_root() call re-serialized and hashed the entire live EVM state — an O(total-state) cost
+    // that grew without bound and was paid on every block (and several times per block) even when
+    // the block never touched EVM state. With the cache, blocks that do not mutate EVM state (the
+    // common case: native transfers, shields, bridge ops) reuse the prior export in O(1).
+    export_cache: RefCell<Option<EvmStateExport>>,
 }
 
 impl Default for EvmExecutor {
@@ -112,7 +119,14 @@ impl EvmExecutor {
     pub fn new() -> Self {
         EvmExecutor {
             db: CacheDB::new(EmptyDB::default()),
+            export_cache: RefCell::new(None),
         }
+    }
+
+    /// Drop the memoized state export. Must be called by every operation that mutates `self.db`, so
+    /// the next export_state() recomputes from the current state rather than serving a stale copy.
+    fn invalidate_export_cache(&mut self) {
+        *self.export_cache.get_mut() = None;
     }
 
     pub fn balance_of(&self, address_hex: &str) -> Result<u128, String> {
@@ -134,6 +148,7 @@ impl EvmExecutor {
             .balance
             .checked_add(U256::from(amount))
             .ok_or_else(|| "EVM balance credit overflowed".to_string())?;
+        self.invalidate_export_cache();
         Ok(())
     }
 
@@ -152,6 +167,7 @@ impl EvmExecutor {
             ));
         }
         account.info.balance -= debit;
+        self.invalidate_export_cache();
         Ok(())
     }
 
@@ -327,10 +343,22 @@ impl EvmExecutor {
                 .result
         };
         drop(evm);
+        if commit {
+            self.invalidate_export_cache();
+        }
         Ok(outcome_from_result(result))
     }
 
     pub fn export_state(&self) -> EvmStateExport {
+        if let Some(cached) = self.export_cache.borrow().as_ref() {
+            return cached.clone();
+        }
+        let export = self.compute_export_state();
+        *self.export_cache.borrow_mut() = Some(export.clone());
+        export
+    }
+
+    fn compute_export_state(&self) -> EvmStateExport {
         let mut accounts = BTreeMap::new();
         for (address, account) in &self.db.accounts {
             let code = account
@@ -541,6 +569,31 @@ mod tests {
     }
 
     #[test]
+    fn export_cache_never_serves_stale_state() {
+        let mut executor = EvmExecutor::new();
+        let from = caller();
+        let to = evm_address_for_account("nbla1recipient");
+
+        // The memoized export must always equal a fresh full recompute — i.e. every mutation path
+        // invalidates the cache. If any did not, export_state() would return the pre-mutation copy.
+        assert_eq!(executor.export_state(), executor.compute_export_state());
+        executor.credit_balance(&from, 1_000).unwrap();
+        assert_eq!(executor.export_state(), executor.compute_export_state());
+        executor
+            .call(&from, &to, "", 250, DEFAULT_GAS_LIMIT)
+            .unwrap();
+        assert_eq!(executor.export_state(), executor.compute_export_state());
+        executor.debit_balance(&from, 100).unwrap();
+        assert_eq!(executor.export_state(), executor.compute_export_state());
+
+        // A read-only view neither mutates state nor invalidates the (already-populated) cache.
+        let before_view = executor.export_state();
+        executor.view(&from, &to, "", DEFAULT_GAS_LIMIT).unwrap();
+        assert_eq!(executor.export_state(), before_view);
+        assert_eq!(executor.export_state(), executor.compute_export_state());
+    }
+
+    #[test]
     fn reverted_deploys_report_failure() {
         let mut executor = EvmExecutor::new();
         let outcome = executor
@@ -597,5 +650,73 @@ mod tests {
             .is_err());
         assert!(executor.balance_of("1234").is_err());
         assert!(executor.storage_at(&caller(), "zz").is_err());
+    }
+
+    fn lcg(state: &mut u64) -> u64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *state >> 33
+    }
+
+    #[test]
+    fn parsers_and_executor_entrypoints_never_panic_on_arbitrary_input() {
+        const POOL: &[u8] = b"0123456789abcdefABCDEFxX:g /\x00\xff";
+        let mut state: u64 = 0x1234_5678_9abc_def0;
+        let mut executor = EvmExecutor::new();
+        for _ in 0..20_000 {
+            let len = (lcg(&mut state) % 140) as usize;
+            let candidate: String = (0..len)
+                .map(|_| char::from(POOL[(lcg(&mut state) as usize) % POOL.len()]))
+                .collect();
+            let value = u128::from(lcg(&mut state));
+            let gas = lcg(&mut state) % 40_000_000;
+            let _ = validate_address_hex(&candidate, "fuzz");
+            let _ = validate_code_hex(&candidate, "fuzz");
+            let _ = validate_calldata_hex(&candidate, "fuzz");
+            let _ = executor.balance_of(&candidate);
+            let _ = executor.code_of(&candidate);
+            let _ = executor.storage_at(&candidate, &candidate);
+            let _ = executor.credit_balance(&candidate, value);
+            let _ = executor.debit_balance(&candidate, value);
+            let _ = executor.deploy(&candidate, &candidate, value, gas);
+            let _ = executor.call(&candidate, &candidate, &candidate, value, gas);
+            let _ = executor.view(&candidate, &candidate, &candidate, gas);
+            let _ = executor.view_ref(&candidate, &candidate, &candidate, gas);
+        }
+    }
+
+    #[test]
+    fn import_state_never_panics_on_arbitrary_export() {
+        const POOL: &[u8] = b"0123456789abcdefXY: \x00\xff";
+        let mut state: u64 = 0x0fed_cba9_8765_4321;
+        for _ in 0..4_000 {
+            let mut accounts = BTreeMap::new();
+            let account_count = (lcg(&mut state) % 4) as usize;
+            for _ in 0..account_count {
+                let field = |state: &mut u64| -> String {
+                    let len = (lcg(state) % 70) as usize;
+                    (0..len)
+                        .map(|_| char::from(POOL[(lcg(state) as usize) % POOL.len()]))
+                        .collect()
+                };
+                let mut storage = BTreeMap::new();
+                let slots = (lcg(&mut state) % 3) as usize;
+                for _ in 0..slots {
+                    storage.insert(field(&mut state), field(&mut state));
+                }
+                accounts.insert(
+                    field(&mut state),
+                    EvmAccountState {
+                        balance: field(&mut state),
+                        nonce: lcg(&mut state),
+                        code: field(&mut state),
+                        storage,
+                    },
+                );
+            }
+            let export = EvmStateExport { accounts };
+            let _ = EvmExecutor::import_state(&export);
+        }
     }
 }

@@ -2,6 +2,7 @@ use ml_dsa::{
     EncodedVerifyingKey, Keypair, MlDsa65, Signature, Signer, SigningKey, Verifier, VerifyingKey,
     B32,
 };
+use zeroize::Zeroizing;
 
 use crate::{
     public_key_hex_for_secret, sign_ed25519_root, verify_ed25519_signature, verifying_key_from_hex,
@@ -124,12 +125,15 @@ pub fn scheme_tag_for_public(value: &str, name: &str) -> Result<&'static str, St
 }
 
 pub fn scheme_normalize_public(value: &str, name: &str) -> Result<String, String> {
-    validate_scheme_public(value, name)?;
-    Ok(value.to_ascii_lowercase())
+    let scheme = validate_scheme_public(value, name)?;
+    let (_, bytes) = parse_tagged(value, name)?;
+    Ok(encode_value(scheme, hex::encode(&bytes)))
 }
 
 pub fn scheme_secret_from_seed(scheme: SchemeId, seed_hex: &str) -> Result<String, String> {
-    let bytes = hex::decode(seed_hex).map_err(|error| format!("seed is not valid hex: {error}"))?;
+    let bytes = Zeroizing::new(
+        hex::decode(seed_hex).map_err(|error| format!("seed is not valid hex: {error}"))?,
+    );
     if bytes.len() != scheme.seed_len() {
         return Err(format!(
             "{} secret seed must be {} bytes, got {}",
@@ -138,11 +142,12 @@ pub fn scheme_secret_from_seed(scheme: SchemeId, seed_hex: &str) -> Result<Strin
             bytes.len()
         ));
     }
-    Ok(encode_value(scheme, hex::encode(&bytes)))
+    Ok(encode_value(scheme, hex::encode(bytes.as_slice())))
 }
 
 pub fn scheme_derive_public(secret: &str) -> Result<String, String> {
     let (scheme, seed) = parse_tagged(secret, "secret key")?;
+    let seed = Zeroizing::new(seed);
     if seed.len() != scheme.seed_len() {
         return Err(format!(
             "{} secret seed must be {} bytes, got {}",
@@ -153,11 +158,11 @@ pub fn scheme_derive_public(secret: &str) -> Result<String, String> {
     }
     match scheme {
         SchemeId::Ed25519 => {
-            let public = public_key_hex_for_secret(&hex::encode(&seed), "secret key")?;
+            let public = public_key_hex_for_secret(&hex::encode(seed.as_slice()), "secret key")?;
             Ok(encode_value(scheme, public))
         }
         SchemeId::MlDsa65 => {
-            let public = mldsa_public_from_seed(&seed)?;
+            let public = mldsa_public_from_seed(seed.as_slice())?;
             Ok(encode_value(scheme, hex::encode(public)))
         }
         SchemeId::HybridEd25519MlDsa65 => {
@@ -175,6 +180,7 @@ pub fn scheme_derive_public(secret: &str) -> Result<String, String> {
 pub fn scheme_sign_root(secret: &str, root: &str) -> Result<String, String> {
     require_root(root)?;
     let (scheme, seed) = parse_tagged(secret, "secret key")?;
+    let seed = Zeroizing::new(seed);
     if seed.len() != scheme.seed_len() {
         return Err(format!(
             "{} secret seed must be {} bytes, got {}",
@@ -185,11 +191,11 @@ pub fn scheme_sign_root(secret: &str, root: &str) -> Result<String, String> {
     }
     match scheme {
         SchemeId::Ed25519 => {
-            let signature = sign_ed25519_root(&hex::encode(&seed), "secret key", root)?;
+            let signature = sign_ed25519_root(&hex::encode(seed.as_slice()), "secret key", root)?;
             Ok(encode_value(scheme, signature))
         }
         SchemeId::MlDsa65 => {
-            let signature = mldsa_sign(&seed, root.as_bytes())?;
+            let signature = mldsa_sign(seed.as_slice(), root.as_bytes())?;
             Ok(encode_value(scheme, hex::encode(signature)))
         }
         SchemeId::HybridEd25519MlDsa65 => {
@@ -426,6 +432,45 @@ mod tests {
         let public_hex = public_key_hex_for_secret(ED_SEED, "secret key").unwrap();
         let signature_hex = sign_ed25519_root(ED_SEED, "secret key", ROOT).unwrap();
         scheme_verify_root(&public_hex, ROOT, &signature_hex).unwrap();
+    }
+
+    #[test]
+    fn small_order_ed25519_public_key_is_rejected() {
+        for weak in [
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0100000000000000000000000000000000000000000000000000000000000000",
+            "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+        ] {
+            assert!(
+                validate_scheme_public(weak, "public key").is_err(),
+                "small-order key {weak} must be rejected at validation"
+            );
+            let signature = sign_ed25519_root(ED_SEED, "secret key", ROOT).unwrap();
+            assert!(
+                scheme_verify_root(weak, ROOT, &signature).is_err(),
+                "small-order key {weak} must be rejected at verification"
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_public_produces_one_canonical_form() {
+        let public_hex = public_key_hex_for_secret(ED_SEED, "secret key").unwrap();
+        let bare = scheme_normalize_public(&public_hex, "public key").unwrap();
+        let tagged =
+            scheme_normalize_public(&format!("ed25519:{public_hex}"), "public key").unwrap();
+        let upper =
+            scheme_normalize_public(&public_hex.to_ascii_uppercase(), "public key").unwrap();
+        assert_eq!(bare, public_hex.to_ascii_lowercase());
+        assert!(
+            !bare.contains(':'),
+            "canonical ed25519 form must not carry a tag"
+        );
+        assert_eq!(
+            bare, tagged,
+            "tagged and untagged Ed25519 keys must normalize equal"
+        );
+        assert_eq!(bare, upper, "hex case must not affect the canonical form");
     }
 
     fn flip_hex(hex_string: &mut String, index: usize) {

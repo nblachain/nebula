@@ -277,4 +277,32 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn untrusted_parsers_and_verify_amount_never_panic_on_arbitrary_input() {
+        let mut state: u64 = 0x0bad_c0de_dead_10cc;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            state >> 33
+        };
+        let real_commitment = commit(1234, &Blinding::from_bytes([7u8; 32])).to_hex();
+        const POOL: &[u8] = b"0123456789abcdefABCDEF g\x00\xff";
+        for _ in 0..20_000 {
+            let hex_len = (next() % 140) as usize;
+            let hex_candidate: String = (0..hex_len)
+                .map(|_| char::from(POOL[(next() as usize) % POOL.len()]))
+                .collect();
+            let byte_len = (next() % 800) as usize;
+            let bytes: Vec<u8> = (0..byte_len).map(|_| next() as u8).collect();
+
+            let _ = Commitment::from_hex(&hex_candidate);
+            let _ = nullifier_hex(&hex_candidate, &hex_candidate);
+            let _ = nullifier_hex(&hex_candidate, &real_commitment);
+            if let Ok(commitment) = Commitment::from_hex(&real_commitment) {
+                let _ = verify_amount(&commitment, &bytes);
+            }
+        }
+    }
 }

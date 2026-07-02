@@ -208,4 +208,24 @@ mod tests {
         assert!(parse_address("not-a-real-address").is_err());
         assert!(!is_valid_address("monero-address"));
     }
+
+    #[test]
+    fn address_parser_never_panics_on_arbitrary_input() {
+        let mut state: u64 = 0xa11c_e50f_ba5e_58cc;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+        for _ in 0..30_000 {
+            let len = (next() % 140) as usize;
+            let candidate: String = (0..len)
+                .map(|_| char::from(0x21u8.wrapping_add((next() % 0x5e) as u8)))
+                .collect();
+            let _ = parse_address(&candidate);
+            let _ = validate_address(&candidate);
+            let _ = is_valid_address(&candidate);
+        }
+    }
 }

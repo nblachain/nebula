@@ -8233,7 +8233,7 @@ fn live_signed_transaction_with_fee_asset(
         signature: String::new(),
         memo: None,
     };
-    tx.signature = live_sign_root(seed, &tx.signing_root());
+    tx.signature = live_sign_root(seed, &tx.chain_signing_message(CHAIN_ID));
     tx
 }
 
@@ -8244,6 +8244,7 @@ fn live_withdrawal_signature(
     nonce: u64,
 ) -> String {
     let root = runtime::withdrawal_authorization_root(
+        CHAIN_ID,
         &live_account_id(seed),
         monero_address,
         amount_nxmr_units,
@@ -8344,6 +8345,7 @@ fn live_operator_approval(
     seed: u8,
 ) -> runtime::RuntimeWithdrawalOperatorApproval {
     let payload_root = runtime::withdrawal_operator_finalization_payload_root(
+        CHAIN_ID,
         withdrawal,
         finalized_monero_tx_id,
         finalization_proof_root,

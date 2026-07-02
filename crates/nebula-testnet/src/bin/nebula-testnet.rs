@@ -484,12 +484,28 @@ fn build_unshield(args: &[String], wants_json: bool) {
         process::exit(1);
     }
 
-    let params = serde_json::json!({
+    let mut params = serde_json::json!({
         "commitment": commitment,
         "amount": amount,
         "blinding_hex": blinding_hex,
         "account": account,
     });
+    // The runtime requires the note owner's signature to unshield. When the owner's --secret-key is
+    // supplied, sign the unshield authorization here so the emitted params are ready to submit.
+    let signature = arg_value(args, "--secret-key").map(|secret_key| {
+        let owner = shielded_owner_account(secret_key, wants_json);
+        let root = nebula_testnet::runtime::unshield_authorization_root(
+            nebula_testnet::CHAIN_ID,
+            &owner,
+            &commitment,
+            amount,
+            &account,
+        );
+        sign_shielded_authorization(secret_key, &root, wants_json)
+    });
+    if let Some(signature) = &signature {
+        params["signature"] = serde_json::json!(signature);
+    }
     if wants_json {
         println!(
             "{}",
@@ -500,7 +516,28 @@ fn build_unshield(args: &[String], wants_json: bool) {
         println!("amount: {amount}");
         println!("blinding_hex: {blinding_hex}");
         println!("account: {account}");
+        if let Some(signature) = &signature {
+            println!("signature: {signature}");
+        }
     }
+}
+
+fn shielded_owner_account(secret_key: &str, wants_json: bool) -> String {
+    let public = nebula_crypto::scheme_derive_public(secret_key).unwrap_or_else(|error| {
+        print_secret_input_error(wants_json, &[format!("invalid --secret-key: {error}")]);
+        process::exit(1);
+    });
+    nebula_testnet::runtime::account_id_for_public_key(&public).unwrap_or_else(|error| {
+        print_secret_input_error(wants_json, &[format!("account derivation failed: {error}")]);
+        process::exit(1);
+    })
+}
+
+fn sign_shielded_authorization(secret_key: &str, root: &str, wants_json: bool) -> String {
+    nebula_crypto::scheme_sign_root(secret_key, root).unwrap_or_else(|error| {
+        print_secret_input_error(wants_json, &[format!("shielded signing failed: {error}")]);
+        process::exit(1);
+    })
 }
 
 fn build_shielded_transfer(args: &[String], _wants_json: bool) {
@@ -543,7 +580,29 @@ fn build_shielded_transfer(args: &[String], _wants_json: bool) {
             "range_proof_hex": hex::encode(proof),
         }));
     }
-    let params = serde_json::json!({ "inputs": inputs, "outputs": outputs });
+    let mut params = serde_json::json!({ "inputs": inputs, "outputs": outputs });
+    // The runtime requires the spender (the common owner of every input note) to sign the transfer.
+    // When --secret-key is supplied, produce that signature so the params are ready to submit.
+    if let Some(secret_key) = arg_value(args, "--secret-key") {
+        let spender = shielded_owner_account(secret_key, false);
+        let output_commitments: Vec<String> = outputs
+            .iter()
+            .map(|output| {
+                output["commitment"]
+                    .as_str()
+                    .expect("output commitment is a string")
+                    .to_string()
+            })
+            .collect();
+        let root = nebula_testnet::runtime::shielded_transfer_authorization_root(
+            nebula_testnet::CHAIN_ID,
+            &spender,
+            &inputs,
+            &output_commitments,
+        );
+        params["signature"] =
+            serde_json::json!(sign_shielded_authorization(secret_key, &root, false));
+    }
     println!(
         "{}",
         serde_json::to_string_pretty(&params).expect("shielded transfer params serialize")
@@ -1031,7 +1090,15 @@ fn optional_secret_arg_or_file(
     if let Some(path) = file_values.first() {
         return Some(read_single_secret_file(file_name, path, wants_json));
     }
-    inline_values.first().cloned()
+    if let Some(value) = inline_values.first() {
+        eprintln!(
+            "warning: {inline_name} was passed inline and is exposed to other local users via the \
+             process table (ps / /proc/<pid>/cmdline) and shell history; prefer {file_name} for \
+             the sequencer signing key and admin token."
+        );
+        return Some(value.clone());
+    }
+    None
 }
 
 fn required_secret_arg_or_file(
@@ -2418,6 +2485,7 @@ fn sign_withdrawal_operator_approval(args: &[String], wants_json: bool) {
             }
         };
     let payload_root = nebula_testnet::runtime::withdrawal_operator_finalization_payload_root(
+        nebula_testnet::CHAIN_ID,
         &withdrawal,
         &finalized_monero_tx_id,
         &finalization_proof_root,
@@ -2895,6 +2963,7 @@ fn validate_operator_approval_for_withdrawal(
 ) {
     let expected_payload_root =
         nebula_testnet::runtime::withdrawal_operator_finalization_payload_root(
+            nebula_testnet::CHAIN_ID,
             withdrawal,
             finalized_monero_tx_id,
             finalization_proof_root,
@@ -5114,13 +5183,18 @@ ACCOUNT GENERATION:
     Existing bare public-key-hex accounts remain accepted for legacy fixtures.
 
 RPC USER SPEND SIGNATURES:
-    Public spend calls require Ed25519 account ownership. For
+    Public spend calls require account ownership. Every signed message binds the
+    chain_id so a signature cannot be replayed on another Nebula deployment. For
     nebula_sendTransaction, tx.from is the nbla-prefixed account id or legacy
     32-byte account public key hex and tx.signature signs
-    RuntimeTransaction::signing_root(). For
+    RuntimeTransaction::chain_signing_message(chain_id). For
     nebula_requestWithdrawal, nonce and signature bind
-    withdrawal_authorization_root(account, monero_address, amount_nxmr_units,
-    nonce) before nXMR is burned into operator_pending.
+    withdrawal_authorization_root(chain_id, account, monero_address,
+    amount_nxmr_units, nonce) before nXMR is burned into operator_pending.
+    Shielded spends bind the note owner: nebula_unshield and
+    nebula_shieldedTransfer(V2) require the recorded owner's signature over
+    unshield_authorization_root / shielded_transfer_authorization_root, so
+    knowledge of a note's opening alone cannot move it.
 
 RPC BRIDGE POLICY:
     Policy discovery uses nebula_bridgePolicy. Deposits use

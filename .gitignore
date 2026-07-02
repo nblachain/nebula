@@ -168,3 +168,6 @@ test-results/
 # Agent instruction files (local, not tracked)
 CLAUDE.md
 AGENTS.md
+
+# Obsidian vault (personal notes, not tracked)
+/nebula/

@@ -46,7 +46,7 @@ fn test_transaction_with(
         signature: String::new(),
         memo: Some(format!("{memo}-{nonce}")),
     };
-    tx.signature = sign_root(seed, &tx.signing_root());
+    tx.signature = sign_root(seed, &tx.chain_signing_message(nebula_testnet::CHAIN_ID));
     tx
 }
 
