@@ -103,8 +103,8 @@ jobs:
           assert economics["target_nxmr_per_nbla_denominator"] == 1000
           assert economics["target_nxmr_base_units_per_nxmr"] == 1000000000
           assert economics["target_nxmr_to_nbla_rate_nebulai_per_unit"] == 1
-          assert economics["nxmr_reserve_backing_bps"] == 9000
-          assert economics["nxmr_validator_reward_bps"] == 1000
+          assert economics["nxmr_reserve_backing_bps"] == 0
+          assert economics["nxmr_validator_reward_bps"] == 10000
           assert roots["validator_admission"]
           assert roots["genesis_manifest"]
           assert roots["launch_package"]
